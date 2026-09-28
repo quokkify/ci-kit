@@ -10,7 +10,7 @@ project-toolkit keeps CI implementation in one repository while letting each con
 
 ## What is included?
 
-- **Composite actions** for language setup, Gradle validation, Compose readiness, JUnit summaries, and Allure reports.
+- **Composite actions** for checkout, language setup, Gradle validation, Compose readiness, JUnit summaries, and Allure reports.
 - **Copier templates** that create and later update only the small project-local files.
 - **Renovate presets and rules** that keep workflow references, action pins, validation tools, and this documentation current.
 

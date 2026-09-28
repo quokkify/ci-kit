@@ -1061,6 +1061,7 @@ BOOLEAN_INPUTS = {
     "wait-for-health",
 }
 EXPECTED_ACTIONS = {
+    "checkout",
     "allure-report",
     "compose-up",
     "deploy-gh-pages-subdir",
@@ -1140,7 +1141,7 @@ def validate_action_metadata(data: object, label: str) -> list[str]:
 action_paths = sorted((ROOT / "actions").glob("*/action.yml"))
 check(
     {path.parent.name for path in action_paths} == EXPECTED_ACTIONS,
-    "actions/: expected exactly the eight documented composite actions",
+    "actions/: expected exactly the documented composite actions",
 )
 for action_path in action_paths:
     data = yaml.safe_load(action_path.read_text())
@@ -2843,6 +2844,7 @@ if os.environ.get(NESTED_MARKER) == "1":
     print("nested validation: skipping suites that re-enter scripts/validate.py")
 else:
     suite_env = {**os.environ, NESTED_MARKER: "1"}
+    run([sys.executable, "tests/test_checkout.py"], env=suite_env)
     run([sys.executable, "tests/test_composite_actions.py"], env=suite_env)
     run([sys.executable, "tests/test_release_notes_config.py"], env=suite_env)
     run([sys.executable, "tests/test_update_copier_fleet.py"], env=suite_env)

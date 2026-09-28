@@ -93,6 +93,36 @@ jobs:
             git diff --check "$BASE_SHA..$HEAD_SHA"
           fi
 
+      - name: Smoke test shared checkout
+        id: checkout-smoke
+        uses: ./actions/checkout
+        with:
+          ref: ${{ github.sha }}
+          path: .tmp/checkout-smoke
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: README.md
+          sparse-checkout-cone-mode: false
+      - name: Verify shared checkout outputs and options
+        env:
+          CHECKOUT_COMMIT: ${{ steps.checkout-smoke.outputs.commit }}
+          CHECKOUT_REF: ${{ steps.checkout-smoke.outputs.ref }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd .tmp/checkout-smoke
+          test "$CHECKOUT_COMMIT" = "$EXPECTED_COMMIT"
+          # Upstream clears ref for an explicit SHA and reports it via commit.
+          test -z "$CHECKOUT_REF"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse --is-shallow-repository)" = false
+          test -f README.md
+          test ! -d actions
+          if git config --local --get-regexp 'http\..*\.extraheader|core\.sshCommand|includeIf\..*\.path' >/dev/null; then
+            echo 'Checkout unexpectedly persisted authentication configuration' >&2
+            exit 1
+          fi
+
   gitleaks:
     name: Gitleaks
     needs: detect-runner

@@ -4,6 +4,8 @@ This toolkit now ships reusable composite actions for common setup and runtime p
 
 Examples use the current toolkit release, `v2.6.0`. Renovate updates the references in `examples/`, `README.md`, and `docs/` together with workflow references.
 
+- `actions/checkout/action.yml`
+  - centrally pinned checkout with upstream inputs and `ref`/`commit` outputs; see [checkout migration and delivery](../docs/checkout.md)
 - `actions/setup-python/action.yml`
   - setup-python with dependency cache and install handling
 - `actions/setup-node/action.yml`
@@ -21,7 +23,7 @@ Examples use the current toolkit release, `v2.6.0`. Renovate updates the referen
 - `actions/allure-report/action.yml`
   - compatibility wrapper that forwards the Allure 3 HTML/badge/PR-comment contract once to standalone `allure-report-action` `v0.5.1` (`00a2788fd72dce6727a3232104f770f659aeaccb`), including provenance-aware merging, provenance-scoped module environments, and the compact status summary comment
 
-Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. Run `actions/checkout` before these setup actions; in particular, `setup-java-gradle` must see the checked-out caller repository so its default wrapper validation can scan repository-contained `gradle-wrapper.jar` files. The toolkit reusable workflows keep equivalent setup steps inline because their checkout is the caller repository, not this toolkit repository. Contract tests keep their setup behavior and defaults aligned with these actions.
+Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. Run the shared checkout action before these setup actions; in particular, `setup-java-gradle` must see the checked-out caller repository so its default wrapper validation can scan repository-contained `gradle-wrapper.jar` files. The toolkit reusable workflows keep equivalent setup steps inline because their checkout is the caller repository, not this toolkit repository. Contract tests keep their setup behavior and defaults aligned with these actions.
 
 `allure-report` delegates unchanged inputs to [`quokkify/allure-report-action`](https://github.com/quokkify/allure-report-action). Its default `source-artifacts-directory: auto` uses provenance-aware merge and attribution when complete `ci-env-fragment.properties` sidecars are present, and otherwise preserves compatible already-merged results. By default, a `module` result label creates separate Allure environments and scopes matching variables to those environments; set `module-environment-label` to an empty value to disable this behavior. Tests without an `epic` label remain in overall totals: Playwright is classified as `E2E`, while otherwise unclassified results appear under `No epic assigned`. The wrapper preserves `docs/testing/test-pyramid.md` as the default policy link; callers can provide another path or leave it empty. Pass `github-token: ${{ secrets.GITHUB_TOKEN }}` and grant `pull-requests: write` in both public and private repositories. GitHub Pages is optional and disabled by default; enable it only with `contents: write` and a destination directory. The hidden comment marker is configurable so repositories do not overwrite one another's report comments.
 
