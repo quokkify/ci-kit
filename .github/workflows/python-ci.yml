@@ -22,7 +22,7 @@ on:
       poetry-version:
         description: Exact Poetry version used for dependency installation.
         type: string
-        default: "2.1.4"
+        default: "2.3.4"
       requirements-file:
         description: Requirements file relative to working-directory; auto-detected when empty.
         type: string
