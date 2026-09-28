@@ -18,7 +18,7 @@ on:
       corepack-version:
         description: Exact Corepack version used for pnpm and Yarn.
         type: string
-        default: "0.34.0"
+        default: "0.36.0"
       install-command:
         description: Optional trusted shell command overriding dependency installation.
         type: string
