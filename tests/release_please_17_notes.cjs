@@ -24,6 +24,12 @@ const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const sections = config.packages['.']['changelog-sections'];
 const commits = [
   {
+    type: 'refactor', scope: null,
+    bareMessage: 'delegate PR summaries to upstream Allure CI',
+    message: 'refactor: delegate PR summaries to upstream Allure CI',
+    sha: 'd'.repeat(40), notes: [], references: [],
+  },
+  {
     type: 'chore',
     scope: 'deps',
     bareMessage: 'legacy dependency update',
@@ -60,6 +66,9 @@ const commits = [
     currentTag: 'v1.2.3',
     changelogSections: sections,
   });
+  if (!rendered.includes('♻️ Refactoring') || !rendered.includes('delegate PR summaries')) {
+    throw new Error('refactor must produce a user-facing release note');
+  }
   if (!rendered.includes('📦 Dependencies')) {
     throw new Error('deps(deps) did not render in Dependencies');
   }
