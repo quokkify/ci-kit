@@ -5,7 +5,7 @@ inputs:
   python-version:
     description: Python version accepted by actions/setup-python.
     required: false
-    default: "3.12"
+    default: "3.14"
   working-directory:
     description: Repository subpath where project files are located.
     required: false

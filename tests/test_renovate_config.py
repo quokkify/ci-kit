@@ -60,10 +60,12 @@ class RenovateConfigTests(unittest.TestCase):
             self.assertEqual(pip["datasourceTemplate"], "pypi")
             self.assertEqual(pip["versioningTemplate"], "pep440")
             self.assertEqual(runtime["datasourceTemplate"], "python-version")
-            self.assertEqual(runtime["versioningTemplate"], "pep440")
+            self.assertEqual(runtime["versioningTemplate"], "python")
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
         self.assertIn('"depNameTemplate": "pip"', template)
         self.assertIn('"depNameTemplate": "python"', template)
+        self.assertIn('"datasourceTemplate": "python-version"', template)
+        self.assertIn('"versioningTemplate": "python"', template)
 
 
 if __name__ == "__main__":

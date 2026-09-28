@@ -32,7 +32,7 @@
       "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\""],
       "depNameTemplate": "python",
       "datasourceTemplate": "python-version",
-      "versioningTemplate": "pep440"
+      "versioningTemplate": "python"
     },
     {
       "customType": "regex",
