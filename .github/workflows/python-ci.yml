@@ -10,7 +10,7 @@ on:
       python-version:
         description: Python version accepted by actions/setup-python.
         type: string
-        default: "3.12"
+        default: "3.14"
       package-manager:
         description: One of auto, pip, uv, or poetry.
         type: string
@@ -23,6 +23,10 @@ on:
         description: Exact Poetry version used for dependency installation.
         type: string
         default: "2.5.1"
+      pip-version:
+        description: Exact pip version used for pip-managed installs.
+        type: string
+        default: "26.2.1"
       requirements-file:
         description: Requirements file relative to working-directory; auto-detected when empty.
         type: string
@@ -100,6 +104,7 @@ jobs:
           INSTALL_DEPENDENCIES: "true"
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           POETRY_VERSION: ${{ inputs.poetry-version }}
+          PIP_VERSION: ${{ inputs.pip-version }}
           UV_VERSION: ${{ inputs.uv-version }}
         run: |
           set -euo pipefail
@@ -115,8 +120,8 @@ jobs:
             auto|pip|uv|poetry) ;;
             *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
           esac
-          if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" ]]; then
-            echo "uv-version and poetry-version must be exact non-empty versions" >&2
+          if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" || -z "$PIP_VERSION" ]]; then
+            echo "uv-version, poetry-version, and pip-version must be exact non-empty versions" >&2
             exit 2
           fi
       - name: Set up Python
@@ -133,6 +138,7 @@ jobs:
           PACKAGE_MANAGER: ${{ inputs.package-manager }}
           UV_VERSION: ${{ inputs.uv-version }}
           POETRY_VERSION: ${{ inputs.poetry-version }}
+          PIP_VERSION: ${{ inputs.pip-version }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
         run: |
@@ -150,6 +156,7 @@ jobs:
             fi
           fi
           case "$manager" in
+            pip) python -m pip install "pip==$PIP_VERSION" ;;
             uv) python -m pip install "uv==$UV_VERSION" ;;
             poetry) python -m pip install "poetry==$POETRY_VERSION" ;;
           esac

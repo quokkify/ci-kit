@@ -26,6 +26,10 @@ inputs:
     description: Exact Poetry package version installed when Poetry is selected.
     required: false
     default: "2.5.1"
+  pip-version:
+    description: Exact pip package version installed when pip is selected.
+    required: false
+    default: "26.2.1"
   install-command:
     description: Optional trusted shell command that replaces default dependency installation.
     required: false
@@ -49,6 +53,7 @@ runs:
         INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
         POETRY_VERSION: ${{ inputs.poetry-version }}
+        PIP_VERSION: ${{ inputs.pip-version }}
         UV_VERSION: ${{ inputs.uv-version }}
       run: |
         set -euo pipefail
@@ -64,8 +69,8 @@ runs:
           auto|pip|uv|poetry) ;;
           *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
         esac
-        if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" ]]; then
-          echo "uv-version and poetry-version must be exact non-empty versions" >&2
+        if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" || -z "$PIP_VERSION" ]]; then
+          echo "uv-version, poetry-version, and pip-version must be exact non-empty versions" >&2
           exit 2
         fi
     - name: Set up Python
@@ -82,6 +87,7 @@ runs:
         PACKAGE_MANAGER: ${{ inputs.package-manager }}
         UV_VERSION: ${{ inputs.uv-version }}
         POETRY_VERSION: ${{ inputs.poetry-version }}
+        PIP_VERSION: ${{ inputs.pip-version }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
       run: |
@@ -99,6 +105,7 @@ runs:
           fi
         fi
         case "$manager" in
+          pip) python -m pip install "pip==$PIP_VERSION" ;;
           uv) python -m pip install "uv==$UV_VERSION" ;;
           poetry) python -m pip install "poetry==$POETRY_VERSION" ;;
         esac

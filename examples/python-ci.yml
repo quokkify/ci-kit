@@ -6,7 +6,8 @@ jobs:
   python:
     uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
-      python-version: "3.12"
+      python-version: "3.14"
+      pip-version: "26.2.1"
       install-command: python -m pip install -e .[test]
       lint-command: ruff check .
       test-command: pytest

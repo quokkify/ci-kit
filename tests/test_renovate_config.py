@@ -51,6 +51,20 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertIn("custom.regex", config["enabledManagers"])
         self.assertFalse(any("allure-report-action" in rule.get("matchPackageNames", []) and rule.get("enabled") is False for rule in config["packageRules"]))
 
+    def test_python_pip_and_runtime_custom_managers_are_present(self) -> None:
+        for path in (CHECKED_IN_RENOVATE_PATH,):
+            config = json.loads(path.read_text(encoding="utf-8"))
+            managers = config["customManagers"]
+            pip = next(item for item in managers if item.get("depNameTemplate") == "pip")
+            runtime = next(item for item in managers if item.get("depNameTemplate") == "python")
+            self.assertEqual(pip["datasourceTemplate"], "pypi")
+            self.assertEqual(pip["versioningTemplate"], "pep440")
+            self.assertEqual(runtime["datasourceTemplate"], "python-version")
+            self.assertEqual(runtime["versioningTemplate"], "pep440")
+        template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
+        self.assertIn('"depNameTemplate": "pip"', template)
+        self.assertIn('"depNameTemplate": "python"', template)
+
 
 if __name__ == "__main__":
     unittest.main()
