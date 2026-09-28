@@ -132,6 +132,48 @@
       ],
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the corepack setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-node/action\\.yml$/",
+        "/^\\.github/workflows/node-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "corepack-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "corepack",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the uv setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-python/action\\.yml$/",
+        "/^\\.github/workflows/python-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "uv-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "uv",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the poetry setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-python/action\\.yml$/",
+        "/^\\.github/workflows/python-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "poetry-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "poetry",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
     }
   ]
 }

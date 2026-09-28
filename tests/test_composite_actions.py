@@ -137,30 +137,20 @@ class SetupActionTests(unittest.TestCase):
         install = action("setup-node")["runs"]["steps"][-1]
         with tempfile.TemporaryDirectory(prefix="node-action-test-") as tmp:
             root = Path(tmp)
-            bin_dir = root / "bin"
-            bin_dir.mkdir()
-            (root / "package.json").write_text("{}\n")
-            (root / "yarn.lock").write_text("# yarn lockfile v1\n")
-            log = root / "commands.log"
-            for name in ("corepack", "yarn"):
-                command = bin_dir / name
-                command.write_text("#!/usr/bin/env bash\nprintf '%s %s\\n' \"$(basename \"$0\")\" \"$*\" >> \"$COMMAND_LOG\"\n")
-                command.chmod(command.stat().st_mode | stat.S_IXUSR)
-            env = {
-                **os.environ,
-                "COMMAND_LOG": str(log),
-                "INSTALL_COMMAND": "",
-                "PACKAGE_MANAGER": "yarn",
-                "PATH": f"{bin_dir}:{os.environ['PATH']}",
-                "WORKING_DIRECTORY": str(root),
-            }
-            result = subprocess.run(["bash", "-c", install["run"]], env=env, text=True, capture_output=True, check=False)
+            yarn = root / "yarn"
+            yarn.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\"\n")
+            yarn.chmod(0o755)
+            result = subprocess.run(
+                ["bash", "-c", install["run"]],
+                env={**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                     "INSTALL_COMMAND": "", "PACKAGE_MANAGER": "yarn",
+                     "TOOLKIT_YARN_CLASSIC": "true", "WORKING_DIRECTORY": str(root)},
+                text=True, capture_output=True, check=False,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
-            calls = log.read_text()
-            self.assertIn("corepack prepare yarn@1.22.22 --activate", calls)
-            self.assertIn("yarn install --frozen-lockfile", calls)
+            self.assertEqual(result.stdout.strip(), "install --frozen-lockfile")
 
-    def test_nested_gradle_wrapper_output_is_workspace_relative(self) -> None:
+    def test_nested_gradle_wrapper_command_selects_project(self) -> None:
         resolve = action("setup-java-gradle")["runs"]["steps"][-1]
         with tempfile.TemporaryDirectory(prefix="gradle-action-test-") as tmp:
             root = Path(tmp)
@@ -176,7 +166,167 @@ class SetupActionTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(output.read_text(), "gradle-command=backend/gradlew\n")
+            outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            self.assertEqual(outputs["gradle-command"], "backend/gradlew")
+            command = outputs["gradle-project-command"]
+            self.assertEqual(shlex.split(command), [str(root.resolve() / "backend/gradlew"), "--project-dir", str(root.resolve() / "backend")])
+            # The returned command must select the same project from another cwd.
+            (root / "backend/gradlew").write_text('#!/bin/sh\ntest "$1" = --project-dir && test "$2" = "$(dirname "$0")"\n')
+            invocation = subprocess.run(["bash", "-c", command], cwd="/", capture_output=True, text=True)
+            self.assertEqual(invocation.returncode, 0, invocation.stderr)
+
+
+    def test_workflow_setup_matches_composite_contract(self) -> None:
+        for name in ("node", "python"):
+            with self.subTest(name=name):
+                composite = action(f"setup-{name}")
+                workflow = yaml.safe_load((ROOT / f".github/workflows/{name}-ci.yml").read_text())
+                inputs = workflow[True]["workflow_call"]["inputs"]
+                for key, spec in composite["inputs"].items():
+                    if key != "install-dependencies":
+                        expected = spec["default"]
+                        if key == "cache-dependencies":
+                            expected = expected == "true"
+                        self.assertEqual(inputs[key]["default"], expected, key)
+                steps = workflow["jobs"]["ci"]["steps"]
+                start = next(i for i, step in enumerate(steps) if step["name"] == "Validate inputs")
+                for original, actual in zip(composite["runs"]["steps"], steps[start:]):
+                    expected = json.loads(json.dumps(original)
+                        .replace("inputs.install-dependencies == 'true' || inputs.cache-dependencies == 'true'", "true")
+                        .replace("inputs.install-dependencies == 'true'", "true")
+                        .replace("inputs.cache-dependencies == 'true'", "inputs.cache-dependencies")
+                        .replace("${{ inputs.install-dependencies }}", "true"))
+                    if expected.get("if") == "${{ true }}":
+                        del expected["if"]
+                    if "run" in expected:
+                        expected["working-directory"] = "."
+                    self.assertEqual(actual, expected, original["name"])
+
+    def test_cache_keys_are_runtime_and_manager_scoped(self) -> None:
+        for name in ("node", "python"):
+            steps = action(f"setup-{name}")["runs"]["steps"]
+            cache = next(step for step in steps if step.get("uses", "").startswith("actions/cache@"))
+            self.assertEqual(cache["with"]["path"], "${{ steps.manager.outputs.cache-path }}")
+            for field in ("key", "restore-keys"):
+                for token in ("runner.arch", f"steps.runtime.outputs.{name}-version", "steps.manager.outputs.name", "steps.manager.outputs.version"):
+                    self.assertIn(token, cache["with"][field])
+        runtime = next(step for step in action("setup-node")["runs"]["steps"] if step.get("id") == "runtime")
+        self.assertIs(runtime["with"]["package-manager-cache"], False)
+        java = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
+        retry_steps = [step for step in java["jobs"]["ci"]["steps"] if step.get("uses") == "./.toolkit/actions/gradle-retry"]
+        self.assertEqual(len(retry_steps), 3)
+        self.assertTrue(all(step["with"]["working-directory"] == "${{ inputs.working-directory }}" for step in retry_steps))
+        self.assertEqual(action("gradle-retry")["runs"]["steps"][0]["working-directory"], "${{ inputs.working-directory }}")
+
+    def test_node_preparation_installs_shims_and_discovers_cache(self) -> None:
+        prepare = next(step for step in action("setup-node")["runs"]["steps"] if step.get("id") == "manager")
+        for manager, classic in (("npm", False), ("pnpm", False), ("yarn", False), ("yarn", True)):
+            with self.subTest(manager=manager, classic=classic), tempfile.TemporaryDirectory(prefix="node-prepare-") as tmp:
+                root = Path(tmp)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                (bin_dir / "node").symlink_to(shutil.which("node"))
+                (root / "package.json").write_text(json.dumps({"packageManager": f"{manager}@1.2.3"}))
+                if classic:
+                    (root / "yarn.lock").write_text("# yarn lockfile v1\n")
+                script = root / "mock-manager"
+                script.write_text('''#!/bin/bash
+set -eu
+name=$(basename "$0")
+echo "$name $*" >> "$MOCK_ROOT/calls"
+case "$name:$1" in
+  npm:install)
+    mkdir -p "$3/node_modules/.bin"
+    ln -s "$MOCK_ROOT/corepack" "$3/node_modules/.bin/corepack"
+    ;;
+  corepack:enable)
+    ln -s "$MOCK_ROOT/yarn" "$3/yarn"
+    ln -s "$MOCK_ROOT/pnpm" "$3/pnpm"
+    ;;
+  corepack:prepare) ;;
+  *:--version) echo 1.2.3 ;;
+  npm:config|pnpm:store|yarn:config|yarn:cache) echo "$MOCK_ROOT/custom cache/$name" ;;
+  *) exit 9 ;;
+esac
+''')
+                script.chmod(0o755)
+                for name in ("corepack", "yarn", "pnpm"):
+                    (root / name).symlink_to(script)
+                (bin_dir / "npm").symlink_to(script)
+                env = {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin", "MOCK_ROOT": str(root),
+                       "PACKAGE_MANAGER": manager, "COREPACK_VERSION": "0.34.0", "INSTALL_COMMAND": "",
+                       "WORKING_DIRECTORY": str(root), "RUNNER_TEMP": str(root), "CACHE_DEPENDENCIES": "true",
+                       "GITHUB_OUTPUT": str(root / "output"), "GITHUB_PATH": str(root / "path")}
+                result = subprocess.run(["bash", "-c", prepare["run"]], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                output = (root / "output").read_text()
+                self.assertIn(f"cache-path={root}/custom cache/{manager}\n", output)
+                calls = (root / "calls").read_text()
+                if manager != "npm":
+                    self.assertIn("corepack enable --install-directory", calls)
+                    self.assertTrue((root / "path").read_text().strip().endswith("node_modules/.bin"))
+                if classic:
+                    self.assertIn("corepack prepare yarn@1.22.22 --activate", calls)
+
+    def test_python_venv_is_available_to_following_steps(self) -> None:
+        steps = action("setup-python")["runs"]["steps"]
+        prepare = next(step for step in steps if step.get("id") == "manager")
+        install = steps[-1]
+        for manager in ("uv", "poetry"):
+            with self.subTest(manager=manager), tempfile.TemporaryDirectory(prefix="python-venv-") as tmp:
+                root = Path(tmp)
+                bin_dir = root / "bin"
+                bin_dir.mkdir()
+                environment = root / "custom venv"
+                (environment / "bin").mkdir(parents=True)
+                project_python = environment / "bin/python"
+                project_python.write_text("#!/bin/sh\necho project-interpreter\n")
+                project_python.chmod(0o755)
+                script = '''#!/bin/bash
+set -eu
+name=$(basename "$0")
+echo "$name $*" >> "$MOCK_ROOT/calls"
+case "$name:$*" in
+  "python:-m pip install "*) ;;
+  "uv:cache dir"|"poetry:config cache-dir") echo "$MOCK_ROOT/custom cache" ;;
+  "uv:sync "*|"poetry:env use "*|"poetry:install "*) ;;
+  "uv:run "*|"poetry:env info --path") echo "$MOCK_ROOT/custom venv" ;;
+  *) exit 9 ;;
+esac
+'''
+                for name in ("python", "uv", "poetry"):
+                    tool = bin_dir / name
+                    tool.write_text(script)
+                    tool.chmod(0o755)
+                env = {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin", "MOCK_ROOT": str(root),
+                       "PACKAGE_MANAGER": manager, "INSTALL_COMMAND": "", "UV_VERSION": "0.8.15", "POETRY_VERSION": "2.1.4",
+                       "WORKING_DIRECTORY": str(root), "CACHE_DEPENDENCIES": "true", "REQUIREMENTS_FILE": "",
+                       "PYTHON_PATH": "/selected/python", "GITHUB_OUTPUT": str(root / "output"),
+                       "GITHUB_PATH": str(root / "path"), "GITHUB_ENV": str(root / "env")}
+                for step in (prepare, install):
+                    result = subprocess.run(["bash", "-c", step["run"]], env=env, text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                output = (root / "output").read_text()
+                if manager == "poetry":
+                    self.assertIn(f"{root}/custom cache/cache\n{root}/custom cache/artifacts\n", output)
+                    self.assertNotIn("virtualenvs", output)
+                calls = (root / "calls").read_text()
+                self.assertEqual(calls.count("python -m pip install"), 1)
+                self.assertIn("/selected/python", calls)
+                self.assertEqual((root / "env").read_text(), f"VIRTUAL_ENV={environment}\n")
+                next_env = {**env, "PATH": (root / "path").read_text().strip() + ":" + env["PATH"]}
+                result = subprocess.run(["python"], env=next_env, capture_output=True, text=True)
+                self.assertEqual(result.stdout.strip(), "project-interpreter")
+
+    def test_custom_install_command_bypasses_project_tool_detection(self) -> None:
+        for name in ("node", "python"):
+            install = action(f"setup-{name}")["runs"]["steps"][-1]
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                result = subprocess.run(["bash", "-c", install["run"]],
+                    env={**os.environ, "INSTALL_COMMAND": "printf custom-install", "WORKING_DIRECTORY": tmp},
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "custom-install")
 
 
 class JUnitStepSummaryTests(unittest.TestCase):

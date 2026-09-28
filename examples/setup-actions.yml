@@ -39,11 +39,17 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Java and Gradle cache
+        id: java
         uses: quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0
         with:
           java-version: "17"
           distribution: temurin
           working-directory: .
+      - name: Inspect the selected Gradle project
+        shell: bash
+        env:
+          GRADLE_COMMAND: ${{ steps.java.outputs.gradle-project-command }}
+        run: bash -euo pipefail -c "$GRADLE_COMMAND --version"
 
   compose-up:
     runs-on: ubuntu-latest

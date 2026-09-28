@@ -14,6 +14,10 @@ inputs:
     description: One of auto, npm, pnpm, or yarn.
     required: false
     default: auto
+  corepack-version:
+    description: Exact Corepack version used to prepare pnpm and Yarn (requires a compatible Node.js version).
+    required: false
+    default: "0.34.0"
   install-command:
     description: Optional trusted shell command that replaces default dependency installation.
     required: false
@@ -51,74 +55,116 @@ runs:
           *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
         esac
     - name: Set up Node.js
+      id: runtime
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+    - name: Prepare Node.js package manager
+      id: manager
+      if: ${{ inputs.install-dependencies == 'true' || inputs.cache-dependencies == 'true' }}
+      shell: bash
+      env:
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        COREPACK_VERSION: ${{ inputs.corepack-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+        manager="$PACKAGE_MANAGER"
+        if [[ -n "$INSTALL_COMMAND" ]]; then
+          # Custom installers own their tooling; retain only the runtime package cache.
+          manager=npm
+        fi
+        if [[ "$manager" == auto ]]; then
+          if [[ -f pnpm-lock.yaml ]]; then manager=pnpm
+          elif [[ -f yarn.lock ]]; then manager=yarn
+          else manager=npm
+          fi
+        fi
+        classic=false
+        if [[ "$manager" == yarn ]] && grep -q '^# yarn lockfile v1' yarn.lock 2>/dev/null; then
+          classic=true
+        fi
+        if [[ "$manager" != npm ]]; then
+          if [[ "$classic" != true ]]; then
+            # Parse JSON rather than matching arbitrary nested keys or text.
+            PACKAGE_MANAGER="$manager" node -e '
+              const p = require(process.cwd() + "/package.json");
+              const name = process.env.PACKAGE_MANAGER;
+              if (typeof p.packageManager !== "string" || !p.packageManager.startsWith(name + "@")) {
+                throw new Error(name + " projects must pin packageManager in package.json");
+              }
+            '
+          fi
+          [[ "$COREPACK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "corepack-version must be an exact version" >&2; exit 2;
+          }
+          # Install outside the project and do not depend on bundled Corepack or runner shims.
+          tool_dir="$(mktemp -d "$RUNNER_TEMP/toolkit-corepack.XXXXXX")"
+          npm install --prefix "$tool_dir" --no-package-lock --ignore-scripts --engine-strict "corepack@$COREPACK_VERSION"
+          tool_bin="$tool_dir/node_modules/.bin"
+          export PATH="$tool_bin:$PATH"
+          echo "$tool_bin" >> "$GITHUB_PATH"
+          corepack enable --install-directory "$tool_bin"
+          if [[ "$classic" == true ]]; then
+            corepack prepare yarn@1.22.22 --activate
+          fi
+        fi
+        version="$($manager --version)"
+        {
+          echo "name=$manager"
+          echo "classic=$classic"
+          echo "version=$version"
+        } >> "$GITHUB_OUTPUT"
+        if [[ "$CACHE_DEPENDENCIES" == true ]]; then
+          case "$manager" in
+            npm) cache_path="$(npm config get cache)" ;;
+            pnpm) cache_path="$(pnpm store path --silent)" ;;
+            yarn)
+              if [[ "$classic" == true ]]; then cache_path="$(yarn cache dir)"
+              else cache_path="$(yarn config get cacheFolder)"
+              fi
+              ;;
+          esac
+          [[ -n "$cache_path" && "$cache_path" != *$'\n'* ]] || { echo "Invalid cache path" >&2; exit 2; }
+          echo "cache-path=$cache_path" >> "$GITHUB_OUTPUT"
+        fi
     - name: Cache Node.js dependencies
       if: ${{ inputs.cache-dependencies == 'true' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          ~/.npm
-          ~/.cache/yarn
-          ~/.local/share/pnpm/store
-        key: node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/npm-shrinkwrap.json', inputs.working-directory), format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory)) }}
+        path: ${{ steps.manager.outputs.cache-path }}
+        key: node-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node-version }}-${{ steps.manager.outputs.name }}-${{ steps.manager.outputs.version }}-${{ hashFiles(format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/npm-shrinkwrap.json', inputs.working-directory), format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory)) }}
         restore-keys: |
-          node-${{ runner.os }}-${{ inputs.node-version }}-
+          node-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node-version }}-${{ steps.manager.outputs.name }}-${{ steps.manager.outputs.version }}-
     - name: Install Node.js dependencies
       if: ${{ inputs.install-dependencies == 'true' }}
       shell: bash
       env:
         INSTALL_COMMAND: ${{ inputs.install-command }}
-        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        PACKAGE_MANAGER: ${{ steps.manager.outputs.name }}
+        TOOLKIT_YARN_CLASSIC: ${{ steps.manager.outputs.classic }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
         cd "$WORKING_DIRECTORY"
-
         if [[ -n "$INSTALL_COMMAND" ]]; then
           bash -euo pipefail -c "$INSTALL_COMMAND"
           exit 0
         fi
-
-        manager="$PACKAGE_MANAGER"
-        if [[ "$manager" == "auto" ]]; then
-          if [[ -f pnpm-lock.yaml ]]; then
-            manager=pnpm
-          elif [[ -f yarn.lock ]]; then
-            manager=yarn
-          else
-            manager=npm
-          fi
-        fi
-
-        case "$manager" in
+        case "$PACKAGE_MANAGER" in
           npm)
-            if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
-              npm ci
-            else
-              npm install
+            if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then npm ci
+            else npm install
             fi
             ;;
-          pnpm)
-            if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@' package.json 2>/dev/null; then
-              echo "pnpm projects must pin packageManager in package.json" >&2
-              exit 2
-            fi
-            corepack enable
-            pnpm install --frozen-lockfile
-            ;;
+          pnpm) pnpm install --frozen-lockfile ;;
           yarn)
-            if grep -q '^# yarn lockfile v1' yarn.lock 2>/dev/null; then
-              corepack prepare yarn@1.22.22 --activate
-              yarn install --frozen-lockfile
-            else
-              if ! grep -Eq '"packageManager"[[:space:]]*:[[:space:]]*"yarn@' package.json 2>/dev/null; then
-                echo "Modern Yarn projects must pin packageManager in package.json" >&2
-                exit 2
-              fi
-              corepack enable
-              yarn install --immutable
+            if [[ "$TOOLKIT_YARN_CLASSIC" == true ]]; then yarn install --frozen-lockfile
+            else yarn install --immutable
             fi
             ;;
         esac

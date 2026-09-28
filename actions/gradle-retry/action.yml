@@ -5,6 +5,10 @@ inputs:
   command:
     description: Trusted Gradle command to execute.
     required: true
+  working-directory:
+    description: Project directory relative to the repository root.
+    required: false
+    default: .
   max-attempts:
     description: Maximum attempts for transient repository HTTP 403/429 failures.
     required: false
@@ -19,6 +23,7 @@ runs:
   steps:
     - name: Run Gradle command with bounded recovery
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         GRADLE_RETRY_COMMAND: ${{ inputs.command }}
         GRADLE_RETRY_MAX_ATTEMPTS: ${{ inputs.max-attempts }}

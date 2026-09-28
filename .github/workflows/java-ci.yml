@@ -166,6 +166,7 @@ jobs:
         if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'gradle' }}
         uses: ./.toolkit/actions/gradle-retry
         with:
+          working-directory: ${{ inputs.working-directory }}
           command: ${{ steps.commands.outputs.lint }}
       - name: Maven lint or check
         if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'maven' }}
@@ -176,6 +177,7 @@ jobs:
         if: ${{ inputs.run-tests && steps.cache.outputs.tool == 'gradle' }}
         uses: ./.toolkit/actions/gradle-retry
         with:
+          working-directory: ${{ inputs.working-directory }}
           command: ${{ steps.commands.outputs.test }}
       - name: Maven test
         if: ${{ inputs.run-tests && steps.cache.outputs.tool == 'maven' }}
@@ -186,6 +188,7 @@ jobs:
         if: ${{ inputs.run-build && steps.cache.outputs.tool == 'gradle' }}
         uses: ./.toolkit/actions/gradle-retry
         with:
+          working-directory: ${{ inputs.working-directory }}
           command: ${{ steps.commands.outputs.build }}
       - name: Maven build
         if: ${{ inputs.run-build && steps.cache.outputs.tool == 'maven' }}
