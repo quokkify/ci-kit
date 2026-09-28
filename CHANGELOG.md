@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.23.0](https://github.com/quokkify/project-toolkit/compare/v2.22.0...v2.23.0) (2026-09-28)
+
+
+### ✨ Features
+
+* **ci:** centralize checkout in a shared Copier action ([#293](https://github.com/quokkify/project-toolkit/issues/293)) ([097c920](https://github.com/quokkify/project-toolkit/commit/097c920d8bbf65343fa85f0e8a69687fe0d9c8ff))
+* **python:** pin pip and default runtime to 3.14 ([#302](https://github.com/quokkify/project-toolkit/issues/302)) ([885db26](https://github.com/quokkify/project-toolkit/commit/885db261abb8aa76e9c77085eed3f8b1a2aed565))
+* **security:** add templates and ruleset reconciler ([#280](https://github.com/quokkify/project-toolkit/issues/280)) ([5345d7e](https://github.com/quokkify/project-toolkit/commit/5345d7ed55fa08f4089ae37f40c03e4a9f545a3f))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** align setup actions, caches, and project environments ([#292](https://github.com/quokkify/project-toolkit/issues/292)) ([74fd4b3](https://github.com/quokkify/project-toolkit/commit/74fd4b38573d6f7485b3733333d79ebb56397b81))
+* honor config-backed single release inputs ([#305](https://github.com/quokkify/project-toolkit/issues/305)) ([c70c14a](https://github.com/quokkify/project-toolkit/commit/c70c14a8526ba1a24b3e58c9947901ad705283f5))
+* **release:** compact repeated dependency updates ([#303](https://github.com/quokkify/project-toolkit/issues/303)) ([7763124](https://github.com/quokkify/project-toolkit/commit/7763124a70344838bf6c55efbfd9ddb893643b7e))
+
 ## [2.22.0](https://github.com/quokkify/project-toolkit/compare/v2.21.6...v2.22.0) (2026-09-25)
 
 <!-- project-toolkit:rich-block:start -->
