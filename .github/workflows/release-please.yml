@@ -78,8 +78,8 @@ jobs:
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          release-type: ${{ inputs.config-backed-single && '' || inputs.release-type }}
-          path: ${{ inputs.config-backed-single && '' || inputs.path }}
+          release-type: ${{ !inputs.config-backed-single && inputs.release-type || '' }}
+          path: ${{ !inputs.config-backed-single && inputs.path || '' }}
           config-file: ${{ inputs.config-backed-single && inputs.config-file || '' }}
           manifest-file: ${{ inputs.config-backed-single && inputs.manifest-file || '' }}
           target-branch: ${{ inputs.target-branch }}

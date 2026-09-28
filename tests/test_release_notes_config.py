@@ -20,6 +20,20 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         self.assertIsInstance(payload, dict)
         return payload
 
+    def test_config_backed_single_omits_strategy_overrides(self) -> None:
+        workflow = (ROOT / ".github/workflows/release-please.yml").read_text()
+        for name in ("release-type", "path"):
+            self.assertIn(
+                name + ": ${{ !inputs.config-backed-single && inputs." + name + " || '' }}",
+                workflow,
+            )
+            self.assertNotIn("inputs.config-backed-single && '' ||", workflow)
+        for name in ("config-file", "manifest-file"):
+            self.assertIn(
+                name + ": ${{ inputs.config-backed-single && inputs." + name + " || '' }}",
+                workflow,
+            )
+
     def test_dependency_mapping_and_hidden_chore_contract(self) -> None:
         for path in (CONFIG_PATH, TEMPLATE_CONFIG_PATH):
             with self.subTest(path=path):
