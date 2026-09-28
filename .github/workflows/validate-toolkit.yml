@@ -101,7 +101,7 @@ jobs:
           path: .tmp/checkout-smoke
           fetch-depth: 0
           persist-credentials: false
-          sparse-checkout: README.md
+          sparse-checkout: /README.md
           sparse-checkout-cone-mode: false
       - name: Verify shared checkout outputs and options
         env:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,35 @@ from update_copier_fleet import bump_project_owned_toolkit_refs
 
 
 class CheckoutTests(unittest.TestCase):
+    def test_ci_sparse_checkout_smoke_script_with_nested_readmes(self):
+        workflow = yaml.safe_load((ROOT / '.github/workflows/validate-toolkit.yml').read_text())
+        steps = workflow['jobs']['lint']['steps']
+        checkout = next(step for step in steps if step.get('id') == 'checkout-smoke')
+        verify = next(step for step in steps if step.get('name') == 'Verify shared checkout outputs and options')
+        with tempfile.TemporaryDirectory(prefix='checkout-smoke-') as tmp:
+            root = Path(tmp).resolve()
+            repo = root / checkout['with']['path']
+            repo.mkdir(parents=True)
+            (repo / 'README.md').write_text('Root readme\n')
+            (repo / 'actions').mkdir()
+            (repo / 'actions/README.md').write_text('Nested readme\n')
+            (repo / 'actions/action.yml').write_text('name: fixture\n')
+
+            def git(*args):
+                return subprocess.run(['git', *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+
+            git('init', '-q')
+            git('config', 'commit.gpgsign', 'false')
+            git('config', 'core.hooksPath', '/dev/null')
+            git('add', '.')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture')
+            commit = git('rev-parse', 'HEAD')
+            git('sparse-checkout', 'set', '--no-cone', '--', checkout['with']['sparse-checkout'])
+            result = subprocess.run(['bash', '-c', verify['run']], cwd=root,
+                env={**os.environ, 'CHECKOUT_COMMIT': commit, 'CHECKOUT_REF': '', 'EXPECTED_COMMIT': commit},
+                capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_drop_in_contract_and_authentication_defaults(self):
         action = yaml.safe_load((ROOT / 'actions/checkout/action.yml').read_text())
         defaults = {
