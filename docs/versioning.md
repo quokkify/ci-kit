@@ -1,7 +1,7 @@
 # Versioning
 
 - The toolkit publishes SemVer releases; the repository manifest starts at `0.0.0` until Release Please opens the first release PR.
-- Production examples and generated callers use exact immutable tags such as `@v2.23.0`; release tags are never rewritten.
+- Production examples and generated callers use exact immutable tags such as `@v2.23.1`; release tags are never rewritten.
 - Breaking workflow/input/template changes require a new major release.
 - Release flow is a stable two-step process: pushes to `main` or manual dispatch run `.github/workflows/release.yml`, which calls `.github/workflows/release-please.yml` in `manifest` mode with `.github/release-please/config.json` and `.github/release-please/manifest.json`; maintainers then review and merge the Release Please PR. No manual tag or release command is part of the flow.
 - Renovate proposes toolkit upgrades through reviewable PRs.
