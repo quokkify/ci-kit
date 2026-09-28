@@ -34,6 +34,34 @@ class RichNotesTests(TestCase):
         self.assertIn("* feature", normalized)
         self.assertEqual(notes._normalize_dependency_changelog(normalized), normalized)
 
+    def test_bare_chore_deps_commit_subject_is_removed_after_normalized_entry(self):
+        changelog = (
+            "## 2.23.2\n\n"
+            "### 🧹 Chores\n\n"
+            "* **deps:** update gradle/actions action to v6.4.0 (#314)\n\n"
+            "### 📦 Dependencies\n\n"
+            "* update quokkify/project-toolkit to v2.23.1 (#313)\n\n"
+            "chore(deps): update gradle/actions action to v6.4.0\n"
+        )
+        normalized = notes._normalize_dependency_changelog(changelog)
+        self.assertIn("* **deps:** update gradle/actions action to v6.4.0 (#314)", normalized)
+        self.assertEqual(normalized.count("update gradle/actions action to v6.4.0"), 1)
+        self.assertNotIn("chore(deps): update gradle/actions action to v6.4.0", normalized)
+        self.assertIn("* update quokkify/project-toolkit to v2.23.1 (#313)", normalized)
+
+    def test_plain_deps_chore_moves_to_dependencies_and_self_update_is_hidden(self):
+        changelog = (
+            "## 2.23.2\n\n"
+            "### 🧹 Chores\n\n"
+            "* deps: update gradle/actions action to v6.4.0 (#314) (af58859)\n"
+            "* deps: update quokkify/project-toolkit to v2.23.1 (#313) (1094327)\n"
+        )
+        normalized = notes.enrich_changelog(changelog, [], repository="quokkify/project-toolkit")
+        self.assertIn("### 📦 Dependencies", normalized)
+        self.assertIn("* deps: update gradle/actions action to v6.4.0 (#314) (af58859)", normalized)
+        self.assertNotIn("quokkify/project-toolkit", normalized)
+        self.assertNotIn("### 🧹 Chores", normalized)
+
     def test_generated_helper_template_renders_without_changing_python_syntax(self):
         template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         rendered = Environment(undefined=StrictUndefined).from_string(template).render()
