@@ -18,17 +18,19 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
-    def test_dependency_chores_are_kept_and_other_chores_hidden(self):
+    def test_dependency_chores_move_to_dependencies_and_other_chores_remain(self):
         changelog = (
             "## 2.1.0\n\n"
-            "### 📦 Dependencies\n\n"
+            "### 🧹 Chores\n\n"
             "* **deps:** update alpha (#1)\n"
-            "* internal cleanup (#2)\n\n"
+            "* **maintenance:** reorganize scripts (#2)\n"
+            "* internal cleanup (#3)\n\n"
             "### ✨ Features\n\n* feature\n"
         )
         normalized = notes._normalize_dependency_changelog(changelog)
-        self.assertIn("update alpha", normalized)
-        self.assertNotIn("internal cleanup", normalized)
+        self.assertIn("### 📦 Dependencies\n\n* **deps:** update alpha", normalized)
+        self.assertIn("### 🧹 Chores\n\n* **maintenance:** reorganize scripts", normalized)
+        self.assertIn("* internal cleanup", normalized)
         self.assertIn("* feature", normalized)
         self.assertEqual(notes._normalize_dependency_changelog(normalized), normalized)
 

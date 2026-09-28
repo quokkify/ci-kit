@@ -45,7 +45,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 )
                 chore = next(section for section in sections if section["type"] == "chore")
                 docs = next(section for section in sections if section["type"] == "docs")
-                self.assertEqual(chore["section"], "📦 Dependencies")
+                self.assertEqual(chore["section"], "🧹 Chores")
                 self.assertNotIn("hidden", chore)
                 self.assertTrue(docs["hidden"])
                 self.assertEqual(package["changelog-path"], "CHANGELOG.md")
@@ -109,7 +109,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         # Alert when release behavior in project-toolkit drifts from generated projects.
         for section in root_package["changelog-sections"]:
             if section["type"] == "chore":
-                self.assertEqual(section["section"], "📦 Dependencies")
+                self.assertEqual(section["section"], "🧹 Chores")
                 self.assertNotIn("hidden", section)
             if section["type"] == "docs":
                 self.assertTrue(section["hidden"])
@@ -174,7 +174,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 section for section in rendered["changelog-sections"]
                 if section["type"] == "docs"
             )
-            self.assertEqual(chore["section"], "📦 Dependencies")
+            self.assertEqual(chore["section"], "🧹 Chores")
             self.assertNotIn("hidden", chore)
             self.assertTrue(docs["hidden"])
 

@@ -260,43 +260,63 @@ def _remove_legacy_block(top: str) -> str:
 
 
 def _normalize_dependency_changelog(top: str) -> str:
-    """Keep chore(deps) entries and hide other chore entries.
-
-    Release Please groups commits by type, not scope, so its configuration
-    cannot distinguish chore(deps) from chore. The configured chore section
-    is therefore a staging area normalized before the release PR is updated.
-    """
+    """Move chore(deps) notes into Dependencies and retain other chores."""
     lines = top.splitlines(keepends=True)
     output: list[str] = []
     dependency_entries: list[str] = []
-    in_dependencies = False
-    dependency_heading = re.compile(r"^###\s+📦 Dependencies\s*$")
+    in_chores = False
+    chore_heading = re.compile(r"^###\s+🧹 Chores\s*$")
     next_heading = re.compile(r"^###\s+")
     for line in lines:
-        if dependency_heading.match(line.rstrip("\r\n")):
-            in_dependencies = True
+        if chore_heading.match(line.rstrip("\r\n")):
+            in_chores = True
             output.append(line)
             continue
-        if in_dependencies and next_heading.match(line):
-            in_dependencies = False
-        if in_dependencies and re.match(r"^\s*[-*]\s+", line):
+        if in_chores and next_heading.match(line):
+            in_chores = False
+        if in_chores and re.match(r"^\s*[-*]\s+", line):
             if re.search(r"\*\*deps:\*\*", line):
                 dependency_entries.append(line)
-            continue
+                continue
         output.append(line)
     if not dependency_entries:
         return "".join(output)
-    result = "".join(output)
-    marker = "### 📦 Dependencies"
-    position = result.find(marker)
-    if position < 0:
-        return result
-    end = result.find("\n### ", position + len(marker))
-    if end < 0:
-        end = len(result)
-    before = result[:end].rstrip("\n")
-    after = result[end:].lstrip("\n")
-    return before + "\n\n" + "".join(dependency_entries).rstrip("\n") + ("\n\n" + after if after else "\n")
+
+    result_lines = output[:]
+    # Drop the Chores heading only if its dependency entries were its entire content.
+    index = 0
+    while index < len(result_lines):
+        if not chore_heading.match(result_lines[index].rstrip("\r\n")):
+            index += 1
+            continue
+        end = index + 1
+        while end < len(result_lines) and not next_heading.match(result_lines[end]):
+            end += 1
+        if not any(line.strip() for line in result_lines[index + 1:end]):
+            del result_lines[index:end]
+            continue
+        index = end
+
+    result = "".join(result_lines)
+    dependency_marker = "### 📦 Dependencies"
+    position = result.find(dependency_marker)
+    if position >= 0:
+        end = result.find("\n### ", position + len(dependency_marker))
+        if end < 0:
+            end = len(result)
+        before = result[:end].rstrip("\n")
+        after = result[end:].lstrip("\n")
+        return before + "\n\n" + "".join(dependency_entries).rstrip("\n") + ("\n\n" + after if after else "\n")
+
+    # The Dependencies section may not exist when every dependency arrived as chore(deps).
+    chore_position = result.find("### 🧹 Chores")
+    if chore_position < 0:
+        heading_end = result.find("\n")
+        chore_position = len(result) if heading_end < 0 else heading_end + 1
+    before = result[:chore_position].rstrip("\n")
+    after = result[chore_position:].lstrip("\n")
+    section = "### 📦 Dependencies\n\n" + "".join(dependency_entries).rstrip("\n")
+    return before + "\n\n" + section + ("\n\n" + after if after else "\n")
 
 
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
