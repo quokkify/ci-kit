@@ -164,7 +164,7 @@ jobs:
       contents: read
     steps:
       - name: Check out trusted report configuration
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}
         with:
           ref: {% raw %}${{ github.sha }}{% endraw %}
           persist-credentials: false
@@ -349,7 +349,7 @@ jobs:
             core.setOutput("fresh", "true");
       - name: Check out trusted extractor
         if: {% raw %}${{ steps.freshness.outputs.fresh == 'true' }}{% endraw %}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}
         with:
           ref: {% raw %}${{ github.sha }}{% endraw %}
           persist-credentials: false

@@ -1,0 +1,122 @@
+name: Checkout
+description: Centrally versioned checkout for caller-owned jobs.
+inputs:
+  repository:
+    description: "Repository owner/name to check out."
+    required: false
+    default: "${{ github.repository }}"
+  ref:
+    description: "Branch, tag, or commit; empty selects the event ref."
+    required: false
+    default: ""
+  token:
+    description: "Token used to fetch and optionally authenticate later Git commands."
+    required: false
+    default: "${{ github.token }}"
+  ssh-key:
+    description: "SSH private key used instead of token authentication."
+    required: false
+    default: ""
+  ssh-known-hosts:
+    description: "Additional SSH known hosts."
+    required: false
+    default: ""
+  ssh-strict:
+    description: "Enable strict SSH host key checking."
+    required: false
+    default: "true"
+  ssh-user:
+    description: "SSH user."
+    required: false
+    default: "git"
+  persist-credentials:
+    description: "Persist credentials for later Git commands until post-job cleanup."
+    required: false
+    default: "true"
+  path:
+    description: "Destination relative to the workspace."
+    required: false
+    default: ""
+  clean:
+    description: "Clean and reset an existing checkout before fetching."
+    required: false
+    default: "true"
+  filter:
+    description: "Git partial clone filter; overrides sparse checkout."
+    required: false
+    default: ""
+  sparse-checkout:
+    description: "Newline-separated sparse checkout patterns."
+    required: false
+    default: ""
+  sparse-checkout-cone-mode:
+    description: "Use cone mode for sparse checkout."
+    required: false
+    default: "true"
+  fetch-depth:
+    description: "History depth; zero fetches all history and tags."
+    required: false
+    default: "1"
+  fetch-tags:
+    description: "Fetch tags even with a limited history depth."
+    required: false
+    default: "false"
+  show-progress:
+    description: "Show Git fetch progress."
+    required: false
+    default: "true"
+  lfs:
+    description: "Download Git LFS files."
+    required: false
+    default: "false"
+  submodules:
+    description: "Fetch submodules: false, true, or recursive."
+    required: false
+    default: "false"
+  set-safe-directory:
+    description: "Register the checkout as a Git safe directory."
+    required: false
+    default: "true"
+  github-server-url:
+    description: "GitHub server URL; empty uses the current server."
+    required: false
+    default: ""
+  allow-unsafe-pr-checkout:
+    description: "Explicitly allow fork PR checkout in a privileged event context."
+    required: false
+    default: "false"
+outputs:
+  ref:
+    description: Checked-out ref.
+    value: ${{ steps.checkout.outputs.ref }}
+  commit:
+    description: Checked-out commit SHA.
+    value: ${{ steps.checkout.outputs.commit }}
+runs:
+  using: composite
+  steps:
+    - name: Check out repository
+      id: checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
+        token: ${{ inputs.token }}
+        ssh-key: ${{ inputs.ssh-key }}
+        ssh-known-hosts: ${{ inputs.ssh-known-hosts }}
+        ssh-strict: ${{ inputs.ssh-strict }}
+        ssh-user: ${{ inputs.ssh-user }}
+        persist-credentials: ${{ inputs.persist-credentials }}
+        path: ${{ inputs.path }}
+        clean: ${{ inputs.clean }}
+        filter: ${{ inputs.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        fetch-tags: ${{ inputs.fetch-tags }}
+        show-progress: ${{ inputs.show-progress }}
+        lfs: ${{ inputs.lfs }}
+        submodules: ${{ inputs.submodules }}
+        set-safe-directory: ${{ inputs.set-safe-directory }}
+        github-server-url: ${{ inputs.github-server-url }}
+        allow-unsafe-pr-checkout: ${{ inputs.allow-unsafe-pr-checkout }}
