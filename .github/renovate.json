@@ -5,7 +5,7 @@
     "github>quokkify/renovate-presets//presets/github-actions/default"
   ],
   "semanticCommits": "enabled",
-  "semanticCommitType": "chore",
+  "semanticCommitType": "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
   "semanticCommitScope": "deps",
   "github-actions": {
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]

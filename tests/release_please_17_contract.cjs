@@ -56,9 +56,15 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
 
   const toolkitConfig = JSON.parse(fs.readFileSync(toolkitConfigPath, 'utf8'));
   const sections = toolkitConfig.packages['.']['changelog-sections'];
+  const choreSection = sections.find(section => section.type === 'chore');
+  if (!choreSection || choreSection.section !== '🧹 Chores' || choreSection.hidden) {
+    throw new Error('chore commits must remain visible in the Chores section');
+  }
   const commits = [
     {type: 'deps', scope: 'deps', bareMessage: 'update dependency alpha', message: 'deps(deps): update dependency alpha', sha: 'a'.repeat(40), notes: [], references: []},
-    {type: 'chore', scope: null, bareMessage: 'internal cleanup', message: 'chore: internal cleanup', sha: 'b'.repeat(40), notes: [], references: []},
+    {type: 'chore', scope: 'deps', bareMessage: 'legacy dependency update', message: 'chore(deps): legacy dependency update', sha: 'b'.repeat(40), notes: [], references: []},
+    {type: 'chore', scope: 'maintenance', bareMessage: 'reorganize scripts', message: 'chore(maintenance): reorganize scripts', sha: 'c'.repeat(40), notes: [], references: []},
+    {type: 'chore', scope: null, bareMessage: 'internal cleanup', message: 'chore: internal cleanup', sha: 'd'.repeat(40), notes: [], references: []},
   ];
   const rendered = await new DefaultChangelogNotes().buildNotes(commits, {
     owner: 'acme', repository: 'widget', version: '1.2.3',
@@ -67,8 +73,10 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
   if (!rendered.includes('📦 Dependencies') || !rendered.includes('update dependency alpha')) {
     throw new Error('deps commit did not render in Dependencies');
   }
-  if (rendered.includes('internal cleanup')) {
-    throw new Error('unrelated chore must stay hidden');
+  for (const message of ['legacy dependency update', 'reorganize scripts', 'internal cleanup']) {
+    if (!rendered.includes(message)) {
+      throw new Error(`${message} did not enter the staging section`);
+    }
   }
 
   process.stdout.write(JSON.stringify({

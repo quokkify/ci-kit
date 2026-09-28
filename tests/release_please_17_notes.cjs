@@ -48,6 +48,15 @@ const commits = [
     references: [],
   },
   {
+    type: 'chore',
+    scope: 'maintenance',
+    bareMessage: 'reorganize scripts',
+    message: 'chore(maintenance): reorganize scripts',
+    sha: 'd'.repeat(40),
+    notes: [],
+    references: [],
+  },
+  {
     type: 'deps',
     scope: 'deps',
     bareMessage: 'native dependency update',
@@ -69,16 +78,20 @@ const commits = [
   if (!rendered.includes('♻️ Refactoring') || !rendered.includes('delegate PR summaries')) {
     throw new Error('refactor must produce a user-facing release note');
   }
+  if (!rendered.includes('🧹 Chores')) {
+    throw new Error('chore commits must remain visible in Chores');
+  }
   if (!rendered.includes('📦 Dependencies')) {
     throw new Error('deps(deps) did not render in Dependencies');
   }
   if (!rendered.includes('native dependency update')) {
     throw new Error('deps(deps) message did not render');
   }
-  for (const message of ['legacy dependency update', 'internal cleanup']) {
-    if (rendered.includes(message)) {
-      throw new Error(`${message} must remain hidden`);
-    }
+  if (!rendered.includes('legacy dependency update')) {
+    throw new Error('chore(deps) must remain visible for release enrichment');
+  }
+  if (!rendered.includes('internal cleanup') || !rendered.includes('reorganize scripts')) {
+    throw new Error('all chore scopes must remain visible in the release notes');
   }
   process.stdout.write(JSON.stringify({releasePlease: packageJson.version, dependencies: true}) + '\n');
 })().catch(error => {

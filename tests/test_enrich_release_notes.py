@@ -18,6 +18,27 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
+    def test_dependency_chores_move_to_dependencies_and_other_chores_remain(self):
+        changelog = (
+            "## 2.1.0\n\n"
+            "### 🧹 Chores\n\n"
+            "* **deps:** update alpha (#1)\n"
+            "* **maintenance:** reorganize scripts (#2)\n"
+            "* internal cleanup (#3)\n\n"
+            "### ✨ Features\n\n* feature\n"
+        )
+        normalized = notes._normalize_dependency_changelog(changelog)
+        self.assertIn("### 📦 Dependencies\n\n* **deps:** update alpha", normalized)
+        self.assertIn("### 🧹 Chores\n\n* **maintenance:** reorganize scripts", normalized)
+        self.assertIn("* internal cleanup", normalized)
+        self.assertIn("* feature", normalized)
+        self.assertEqual(notes._normalize_dependency_changelog(normalized), normalized)
+
+    def test_generated_helper_template_renders_without_changing_python_syntax(self):
+        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
+        rendered = Environment(undefined=StrictUndefined).from_string(template).render()
+        self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
+
     def test_workflow_delegates_source_discovery_to_the_helper(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
         self.assertIn("--prepare", workflow)
