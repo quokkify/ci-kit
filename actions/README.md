@@ -2,7 +2,7 @@
 
 This toolkit now ships reusable composite actions for common setup and runtime patterns.
 
-Examples use the current toolkit release, `v2.6.0`. Renovate updates the references in `examples/`, `README.md`, and `docs/` together with workflow references.
+Executable examples use full commit SHA pins with release comments (`@<40-character SHA> # vX.Y.Z`). Renovate manages these through its native GitHub Actions manager, including `examples/`. Documentation and Copier version answers continue to use release tags. Examples demonstrate the API available in their pinned release; tests exercise new outputs against the current source before release.
 
 - `actions/setup-python/action.yml`
   - setup-python with dependency cache and install handling

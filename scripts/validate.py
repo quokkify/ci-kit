@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from validate_helpers import load_yaml_or_error
+from validate_helpers import action_reference_errors, load_yaml_or_error
 
 from validate_python_fixture import validate_python_fixture
 
@@ -1279,32 +1279,15 @@ for path in sorted(ROOT.rglob("*.json5")):
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         ERRORS.append(f"{path.relative_to(ROOT)}: JSON5 subset: {exc}")
 
-uses_re = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
-sha_re = re.compile(r"^[0-9a-f]{40}$")
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
     try:
         text = path.read_text()
     except (OSError, UnicodeDecodeError) as exc:
         ERRORS.append(f"{path.relative_to(ROOT)}: action scan failed: {exc}")
         continue
-    for use in uses_re.findall(text):
-        if use.startswith("./"):
-            continue
-        target, sep, ref = use.rpartition("@")
-        check(bool(sep), f"{path.relative_to(ROOT)}: action without ref: {use}")
-        is_toolkit_reference = target.startswith(
-            "quokkify/project-toolkit/.github/workflows/"
-        ) or target.startswith("quokkify/project-toolkit/actions/")
-        if is_toolkit_reference:
-            check(
-                bool(re.fullmatch(r"v\d+\.\d+\.\d+", ref)),
-                f"{path.relative_to(ROOT)}: toolkit action/workflow must use exact SemVer: {use}",
-            )
-        else:
-            check(
-                bool(sha_re.fullmatch(ref)),
-                f"{path.relative_to(ROOT)}: external action is not SHA-pinned: {use}",
-            )
+    ERRORS.extend(action_reference_errors(
+        text, str(path.relative_to(ROOT)), require_toolkit_pin=path.is_relative_to(ROOT / "examples")
+    ))
 
 link_re = re.compile(r"(?<!!)\[[^]]+\]\(([^)]+)\)")
 for path in sorted(ROOT.rglob("*.md")):
