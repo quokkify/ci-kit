@@ -10,10 +10,7 @@
 {%- for renovate_preset in renovate_presets -%}
 {%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset]) -%}
 {%- endfor -%}
-{#- Emit arrays the way Prettier's default profile would: inline while the whole
-    line fits in 80 columns, otherwise one entry per line. Consumers run
-    formatters over generated files, and a config that never matches their
-    formatter fails their checks. -#}
+{#- Render arrays using Prettier's default 80-column wrapping. -#}
 {%- macro json_array(items, key, indent) -%}
 {%- set inline = items | to_json -%}
 {%- if indent + (key | length) + 4 + (inline | length) <= 80 -%}
@@ -29,5 +26,25 @@
   "extends": {{ json_array(renovate_extends, 'extends', 2) }},
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
-  "semanticCommitScope": "deps"
+  "semanticCommitScope": "deps",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update Python runtime versions in workflows.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\""],
+      "depNameTemplate": "python",
+      "datasourceTemplate": "python-version",
+      "versioningTemplate": "python"
+    },
+    {
+      "customType": "regex",
+      "description": "Update the pip version installed by the Python CI workflow.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": {{ json_array(["pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""], 'matchStrings', 6) }},
+      "depNameTemplate": "pip",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    }
+  ]
 }
