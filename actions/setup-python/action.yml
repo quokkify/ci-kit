@@ -69,30 +69,78 @@ runs:
           exit 2
         fi
     - name: Set up Python
+      id: runtime
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
+    - name: Prepare Python package manager
+      id: manager
+      if: ${{ inputs.install-dependencies == 'true' || inputs.cache-dependencies == 'true' }}
+      shell: bash
+      env:
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        UV_VERSION: ${{ inputs.uv-version }}
+        POETRY_VERSION: ${{ inputs.poetry-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        CACHE_DEPENDENCIES: ${{ inputs.cache-dependencies }}
+      run: |
+        set -euo pipefail
+        cd "$WORKING_DIRECTORY"
+        manager="$PACKAGE_MANAGER"
+        if [[ -n "$INSTALL_COMMAND" ]]; then
+          # Custom installers own their tooling; retain only the runtime package cache.
+          manager=pip
+        fi
+        if [[ "$manager" == auto ]]; then
+          if [[ -f uv.lock ]]; then manager=uv
+          elif [[ -f poetry.lock ]]; then manager=poetry
+          else manager=pip
+          fi
+        fi
+        case "$manager" in
+          uv) python -m pip install "uv==$UV_VERSION" ;;
+          poetry) python -m pip install "poetry==$POETRY_VERSION" ;;
+        esac
+        echo "name=$manager" >> "$GITHUB_OUTPUT"
+        # pip reports its version plus the interpreter path; retain just the version.
+        case "$manager" in
+          pip) version="$(python -m pip --version | awk '{print $2}')" ;;
+          uv) version="$UV_VERSION" ;;
+          poetry) version="$POETRY_VERSION" ;;
+        esac
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        if [[ "$CACHE_DEPENDENCIES" == true ]]; then
+          case "$manager" in
+            pip) cache_path="$(python -m pip cache dir)" ;;
+            uv) cache_path="$(uv cache dir)" ;;
+            poetry) cache_path="$(poetry config cache-dir)" ;;
+          esac
+          [[ -n "$cache_path" && "$cache_path" != *$'\n'* ]] || { echo "Invalid cache path" >&2; exit 2; }
+          if [[ "$manager" == poetry ]]; then
+            # Cache downloaded artifacts and metadata, never Poetry virtualenvs.
+            printf 'cache-path<<TOOLKIT_CACHE\n%s/cache\n%s/artifacts\nTOOLKIT_CACHE\n' "$cache_path" "$cache_path" >> "$GITHUB_OUTPUT"
+          else
+            echo "cache-path=$cache_path" >> "$GITHUB_OUTPUT"
+          fi
+        fi
     - name: Cache Python dependencies
       if: ${{ inputs.cache-dependencies == 'true' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: |
-          ~/.cache/pip
-          ~/.cache/uv
-          ~/.cache/pypoetry
-        key: python-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(format('{0}/**/uv.lock', inputs.working-directory), format('{0}/**/poetry.lock', inputs.working-directory), format('{0}/**/requirements*.txt', inputs.working-directory), format('{0}/**/pyproject.toml', inputs.working-directory)) }}
+        path: ${{ steps.manager.outputs.cache-path }}
+        key: python-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.python-version }}-${{ steps.manager.outputs.name }}-${{ steps.manager.outputs.version }}-${{ hashFiles(format('{0}/**/uv.lock', inputs.working-directory), format('{0}/**/poetry.lock', inputs.working-directory), format('{0}/**/requirements*.txt', inputs.working-directory), format('{0}/**/pyproject.toml', inputs.working-directory), format('{0}/{1}', inputs.working-directory, inputs.requirements-file || 'requirements.txt')) }}
         restore-keys: |
-          python-${{ runner.os }}-${{ inputs.python-version }}-
+          python-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.python-version }}-${{ steps.manager.outputs.name }}-${{ steps.manager.outputs.version }}-
     - name: Install Python dependencies
       if: ${{ inputs.install-dependencies == 'true' }}
       shell: bash
       env:
         INSTALL_COMMAND: ${{ inputs.install-command }}
-        PACKAGE_MANAGER: ${{ inputs.package-manager }}
-        POETRY_VERSION: ${{ inputs.poetry-version }}
+        PACKAGE_MANAGER: ${{ steps.manager.outputs.name }}
         REQUIREMENTS_FILE: ${{ inputs.requirements-file }}
-        UV_VERSION: ${{ inputs.uv-version }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PYTHON_PATH: ${{ steps.runtime.outputs.python-path }}
       run: |
         set -euo pipefail
         cd "$WORKING_DIRECTORY"
@@ -102,25 +150,16 @@ runs:
           exit 0
         fi
 
-        manager="$PACKAGE_MANAGER"
-        if [[ "$manager" == "auto" ]]; then
-          if [[ -f uv.lock ]]; then
-            manager=uv
-          elif [[ -f poetry.lock ]]; then
-            manager=poetry
-          else
-            manager=pip
-          fi
-        fi
-
-        case "$manager" in
+        project_environment=""
+        case "$PACKAGE_MANAGER" in
           uv)
-            python -m pip install "uv==$UV_VERSION"
-            uv sync --frozen
+            uv sync --frozen --python "$PYTHON_PATH" --no-python-downloads
+            project_environment="$(uv run --no-sync --python "$PYTHON_PATH" --no-python-downloads python -c 'import sys; print(sys.prefix)')"
             ;;
           poetry)
-            python -m pip install "poetry==$POETRY_VERSION"
+            poetry env use "$PYTHON_PATH"
             poetry install --no-interaction
+            project_environment="$(poetry env info --path)"
             ;;
           pip)
             requirements="$REQUIREMENTS_FILE"
@@ -150,3 +189,12 @@ runs:
             fi
             ;;
         esac
+
+        # Make the installed project available to ordinary python/pytest commands in later steps.
+        if [[ -n "$project_environment" ]]; then
+          if [[ -d "$project_environment/Scripts" ]]; then environment_bin="$project_environment/Scripts"
+          else environment_bin="$project_environment/bin"
+          fi
+          echo "$environment_bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$project_environment" >> "$GITHUB_ENV"
+        fi

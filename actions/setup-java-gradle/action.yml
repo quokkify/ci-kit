@@ -29,8 +29,11 @@ inputs:
 
 outputs:
   gradle-command:
-    description: Workspace-relative Gradle command to use in downstream steps.
+    description: Workspace-relative wrapper path or gradle; retained for compatibility. Prefer gradle-project-command for nested projects.
     value: ${{ steps.resolve.outputs.gradle-command }}
+  gradle-project-command:
+    description: Shell-escaped Gradle command with an absolute project directory; run through Bash from any directory.
+    value: ${{ steps.resolve.outputs.gradle-project-command }}
 
 runs:
   using: composite
@@ -77,10 +80,15 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
-        wrapper="$WORKING_DIRECTORY/gradlew"
+        project_directory="$(cd "$WORKING_DIRECTORY" && pwd -P)"
+        wrapper="$project_directory/gradlew"
         if [[ -f "$wrapper" ]]; then
           chmod +x "$wrapper"
-          echo "gradle-command=$wrapper" >> "$GITHUB_OUTPUT"
+          runner="$wrapper"
+          echo "gradle-command=$WORKING_DIRECTORY/gradlew" >> "$GITHUB_OUTPUT"
         else
+          runner=gradle
           echo "gradle-command=gradle" >> "$GITHUB_OUTPUT"
         fi
+        printf -v command '%q --project-dir %q' "$runner" "$project_directory"
+        echo "gradle-project-command=$command" >> "$GITHUB_OUTPUT"

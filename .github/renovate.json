@@ -7,6 +7,23 @@
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
+  "github-actions": {
+    "managerFilePatterns": [
+      "/^examples/[^/]+\\.ya?ml$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "description": "Keep executable examples on immutable GitHub Actions release commits.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchFileNames": [
+        "examples/**"
+      ],
+      "pinDigests": true
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -56,8 +73,8 @@
     },
     {
       "customType": "regex",
-      "description": "Keep documentation and examples on the latest project-toolkit release.",
-      "managerFilePatterns": ["/(^|/)(README\\.md|docs/[^/]+\\.md|examples/[^/]+\\.ya?ml)$/", "/^copier\\.yml$/"],
+      "description": "Keep documentation on the latest project-toolkit release; examples use the native GitHub Actions manager.",
+      "managerFilePatterns": ["/(^|/)(README\\.md|docs/[^/]+\\.md)$/", "/^copier\\.yml$/"],
       "matchStrings": [
         "(?:quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|][^@\\s]*quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
         "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
@@ -132,6 +149,48 @@
       ],
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the corepack setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-node/action\\.yml$/",
+        "/^\\.github/workflows/node-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "corepack-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "corepack",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the uv setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-python/action\\.yml$/",
+        "/^\\.github/workflows/python-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "uv-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "uv",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "description": "Keep the poetry setup pin aligned in the composite action and reusable workflow.",
+      "managerFilePatterns": [
+        "/^actions/setup-python/action\\.yml$/",
+        "/^\\.github/workflows/python-ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "poetry-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "poetry",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
     }
   ]
 }
