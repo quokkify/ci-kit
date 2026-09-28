@@ -1113,6 +1113,34 @@ def restore_answers_format_if_semantically_equal(
         )
 
 
+def verify_release_helper(repository_path: Path, template_source: str, template_ref: str, *, env: dict[str, str]) -> None:
+    """Fail closed when Copier preserved a stale or customized executable helper."""
+    helper = repository_path / ".github/scripts/enrich_release_notes.py"
+    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
+    if not helper.exists():
+        if answers.get("release_please") is True:
+            raise FleetUpdateError(
+                f"{helper.relative_to(repository_path)} is missing although release_please is enabled; "
+                "restore the template helper before retrying"
+            )
+        return
+    with tempfile.TemporaryDirectory(prefix="copier-helper-") as temporary:
+        fetched = Path(temporary) / "expected.py"
+        source = canonical_template_source(template_source)
+        run(["git", "fetch", "--quiet", "--depth=1", source, template_ref], cwd=repository_path, env=env)
+        result = run(
+            ["git", "show", f"FETCH_HEAD:templates/project/template/.github/scripts/enrich_release_notes.py.jinja"],
+            cwd=repository_path,
+            env=env,
+        )
+        fetched.write_text(result.stdout, encoding="utf-8")
+        if fetched.read_bytes() != helper.read_bytes():
+            raise FleetUpdateError(
+                ".github/scripts/enrich_release_notes.py differs from the selected project-toolkit ref; "
+                "reconcile project-owned/customized changes with the template before retrying"
+            )
+
+
 def seed_single_release_manifest(
     repository_path: Path,
     repository: Repository,
@@ -1278,6 +1306,8 @@ def update_template(
             command.extend(["--data", f"toolkit_version={template_ref}"])
     command.append(".")
     run(command, cwd=repository_path, env=env)
+    if template_ref:
+        verify_release_helper(repository_path, template_source, template_ref, env=env)
     if repository is not None:
         # Copier requires a pristine checkout. Seed a missing single-project
         # Release Please manifest only after the update has completed.

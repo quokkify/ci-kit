@@ -2243,5 +2243,36 @@ class CommandLineTests(TestCase):
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 
 
+class ReleaseHelperDriftTests(TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.repository = Path(self.temporary.name)
+        (self.repository / fleet.ANSWERS_FILE).write_text(
+            "release_please: true\n", encoding="utf-8"
+        )
+
+    @mock.patch.object(fleet, "run")
+    def test_matching_template_helper_is_healthy(self, run_mock: mock.Mock) -> None:
+        helper = self.repository / ".github/scripts/enrich_release_notes.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("canonical helper\n", encoding="utf-8")
+        run_mock.return_value = type("Result", (), {"stdout": "canonical helper\n"})()
+        fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+
+    @mock.patch.object(fleet, "run")
+    def test_stale_helper_fails_closed_with_reconciliation_guidance(self, run_mock: mock.Mock) -> None:
+        helper = self.repository / ".github/scripts/enrich_release_notes.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("stale helper\n", encoding="utf-8")
+        run_mock.return_value = type("Result", (), {"stdout": "canonical helper\n"})()
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "customized changes"):
+            fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+
+    def test_missing_release_helper_fails_when_feature_is_enabled(self) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "release_please is enabled"):
+            fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+
+
 if __name__ == "__main__":
     main()
