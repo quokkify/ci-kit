@@ -10,23 +10,9 @@
 {%- for renovate_preset in renovate_presets -%}
 {%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset]) -%}
 {%- endfor -%}
-{#- Emit arrays the way Prettier's default profile would: inline while the whole
-    line fits in 80 columns, otherwise one entry per line. Consumers run
-    formatters over generated files, and a config that never matches their
-    formatter fails their checks. -#}
-{%- macro json_array(items, key, indent) -%}
-{%- set inline = items | to_json -%}
-{%- if indent + (key | length) + 4 + (inline | length) <= 80 -%}
-{{ inline }}
-{%- else -%}
-[
-{% for item in items %}{{ ' ' * (indent + 2) }}{{ item | to_json }}{{ "," if not loop.last }}
-{% endfor %}{{ ' ' * indent }}]
-{%- endif -%}
-{%- endmacro -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": {{ json_array(renovate_extends, 'extends', 2) }},
+  "extends": {{ renovate_extends | to_json }},
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
