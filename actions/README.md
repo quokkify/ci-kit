@@ -21,7 +21,7 @@ Executable examples use full commit SHA pins with release comments (`@<40-charac
 - `actions/junit-step-summary/action.yml`
   - safely aggregates bounded, workspace-contained JUnit XML globs into a GitHub job-summary table and numeric outputs
 - `actions/allure-report/action.yml`
-  - compatibility wrapper that forwards the Allure 3 HTML/badge/PR-comment contract once to standalone `allure-report-action` `v0.5.1` (`00a2788fd72dce6727a3232104f770f659aeaccb`), including provenance-aware merging, provenance-scoped module environments, and the compact status summary comment
+  - compatibility wrapper that forwards the Allure 3 HTML/badge/PR-comment contract once to standalone `allure-report-action` `v0.5.2` (`00a2788fd72dce6727a3232104f770f659aeaccb`), including provenance-aware merging, provenance-scoped module environments, and the compact status summary comment
 
 Consumers call these from their own jobs when they need the setup/runtime sequence without delegating the complete job to a reusable workflow. Run the shared checkout action before these setup actions; in particular, `setup-java-gradle` must see the checked-out caller repository so its default wrapper validation can scan repository-contained `gradle-wrapper.jar` files. The toolkit reusable workflows keep equivalent setup steps inline because their checkout is the caller repository, not this toolkit repository. Contract tests keep their setup behavior and defaults aligned with these actions.
 
