@@ -10,9 +10,20 @@
 {%- for renovate_preset in renovate_presets -%}
 {%- set _ = renovate_extends.append('github>' ~ renovate_config_repository ~ '//' ~ renovate_preset_paths[renovate_preset]) -%}
 {%- endfor -%}
+{#- Render arrays using Prettier's default 80-column wrapping. -#}
+{%- macro json_array(items, key, indent) -%}
+{%- set inline = items | to_json -%}
+{%- if indent + (key | length) + 4 + (inline | length) <= 80 -%}
+{{ inline }}
+{%- else -%}
+[
+{% for item in items %}{{ ' ' * (indent + 2) }}{{ item | to_json }}{{ "," if not loop.last }}
+{% endfor %}{{ ' ' * indent }}]
+{%- endif -%}
+{%- endmacro -%}
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": {{ renovate_extends | to_json }},
+  "extends": {{ json_array(renovate_extends, 'extends', 2) }},
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
@@ -30,7 +41,7 @@
       "customType": "regex",
       "description": "Update the pip version installed by the Python CI workflow.",
       "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
-      "matchStrings": ["pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""],
+      "matchStrings": {{ json_array(["pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""], 'matchStrings', 6) }},
       "depNameTemplate": "pip",
       "datasourceTemplate": "pypi",
       "versioningTemplate": "pep440"
