@@ -589,8 +589,9 @@ def source_pr_numbers(changelog: str, repository: str) -> list[int]:
     attribution = re.compile(
         rf"\(\[#(?P<number>[0-9]+)\]\(https://github\.com/{escaped_repository}/"
         rf"(?:issues|pull)/(?P=number)\)\)\s+"
-        rf"\(\[[0-9a-f]{{7,40}}\]\(https://github\.com/{escaped_repository}/"
-        rf"commit/[0-9a-f]{{40}}\)\)\s*$"
+        rf"\(\[[0-9a-f]" + "{7,40}"
+        + rf"\]\(https://github\.com/{escaped_repository}/"
+        + r"commit/[0-9a-f]{40}\)\)\s*$"
     )
     numbers: set[int] = set()
     fence: tuple[str, int] | None = None

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Callable, cast
 from unittest import TestCase, mock
 
+from jinja2 import Environment, StrictUndefined
+
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("enrich_release_notes", ROOT / "scripts/enrich_release_notes.py")
 assert spec and spec.loader
@@ -260,6 +262,11 @@ class RichNotesTests(TestCase):
     def test_legacy_marker_cleanup_in_generated_helper_matches_root(self):
         template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         self.assertEqual(template, (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
+
+    def test_generated_helper_template_renders_without_changing_python_syntax(self):
+        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
+        rendered = Environment(undefined=StrictUndefined).from_string(template).render()
+        self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
 
     def test_nested_fences_require_matching_outer_length(self):
         body = "## Usage example\n````markdown\n```java\n## Migration\n```\n````\n## Migration\nApply it.\n"
