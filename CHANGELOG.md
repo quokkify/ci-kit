@@ -1,5 +1,66 @@
 # Changelog
 
+## [2.23.0](https://github.com/quokkify/project-toolkit/compare/v2.22.0...v2.23.0) (2026-09-28)
+
+<!-- project-toolkit:rich-block:start -->
+### 📦 Dependencies
+- update quokkify/project-toolkit to v2.22.0 ([#286](https://github.com/quokkify/project-toolkit/pull/286) ([152728a](https://github.com/quokkify/project-toolkit/commit/152728a19f202daf14dea2027b3bb7536bcc7dde))) <!-- project-toolkit:rich-release-notes pr=286 -->
+- update corepack to v0.36.0 ([#294](https://github.com/quokkify/project-toolkit/pull/294) ([7a7d1f6](https://github.com/quokkify/project-toolkit/commit/7a7d1f645b7ed01c1edab6abd8b9ad8dc44f4a49))) <!-- project-toolkit:rich-release-notes pr=294 -->
+- update github/codeql-action/analyze digest to 2892aa5 ([#297](https://github.com/quokkify/project-toolkit/pull/297)) ([fabb7a8](https://github.com/quokkify/project-toolkit/commit/fabb7a8e4493d3a38831696d18fcf034c0940b71)) <!-- project-toolkit:rich-release-notes pr=297 -->
+- update github/codeql-action/init digest to 2892aa5 ([#298](https://github.com/quokkify/project-toolkit/pull/298)) ([5b6ecb5](https://github.com/quokkify/project-toolkit/commit/5b6ecb5d6bdf6b1298df4764d9ae1cd71a7a2f73)) <!-- project-toolkit:rich-release-notes pr=298 -->
+- update renovate to v44.115.13 ([#285](https://github.com/quokkify/project-toolkit/pull/285) ([d97449c](https://github.com/quokkify/project-toolkit/commit/d97449cd05f58fc014e2f4e8328ac1fc8d266d60)), [#287](https://github.com/quokkify/project-toolkit/pull/287) ([10fa8ba](https://github.com/quokkify/project-toolkit/commit/10fa8ba1be9bed7a61cd8dd573965d7c49e6a549)), [#288](https://github.com/quokkify/project-toolkit/pull/288) ([8a8f472](https://github.com/quokkify/project-toolkit/commit/8a8f472808bc51bfa47abbe959346c8c423e8644)), [#290](https://github.com/quokkify/project-toolkit/pull/290) ([ee3c0a5](https://github.com/quokkify/project-toolkit/commit/ee3c0a55ca49237d245bfa0552ab5db12d2ef3f5)), [#291](https://github.com/quokkify/project-toolkit/pull/291) ([64da766](https://github.com/quokkify/project-toolkit/commit/64da766cdf372a1a2ea7c17d3f69eefde05a9bdc)), [#299](https://github.com/quokkify/project-toolkit/pull/299) ([2fa2c32](https://github.com/quokkify/project-toolkit/commit/2fa2c32b911b01928c8a049c7d63c24c475b37ed))) <!-- project-toolkit:rich-release-notes pr=285 --> <!-- project-toolkit:rich-release-notes pr=287 --> <!-- project-toolkit:rich-release-notes pr=288 --> <!-- project-toolkit:rich-release-notes pr=290 --> <!-- project-toolkit:rich-release-notes pr=291 --> <!-- project-toolkit:rich-release-notes pr=299 -->
+- update poetry to v2.5.1 ([#295](https://github.com/quokkify/project-toolkit/pull/295) ([386ea47](https://github.com/quokkify/project-toolkit/commit/386ea4751e1e94f1c24176b4f37bb82cd9fcd18a)), [#300](https://github.com/quokkify/project-toolkit/pull/300) ([10851f7](https://github.com/quokkify/project-toolkit/commit/10851f7fa6fc063dd2a540f02cc37be4a378424a))) [security] <!-- project-toolkit:rich-release-notes pr=295 --> <!-- project-toolkit:rich-release-notes pr=300 -->
+- update uv to v0.12.19 ([#296](https://github.com/quokkify/project-toolkit/pull/296) ([e31d31f](https://github.com/quokkify/project-toolkit/commit/e31d31facee33e6a407af416e21c8b12ea343fba)), [#301](https://github.com/quokkify/project-toolkit/pull/301) ([b8c53e9](https://github.com/quokkify/project-toolkit/commit/b8c53e9088cbcf6b45967345c4f3e455fb327d15))) [security] <!-- project-toolkit:rich-release-notes pr=296 --> <!-- project-toolkit:rich-release-notes pr=301 -->
+- update allure to v3.19.0 ([#304](https://github.com/quokkify/project-toolkit/pull/304) ([9ea7148](https://github.com/quokkify/project-toolkit/commit/9ea7148e51e68d886527cfcc5f2b56b80c7dee02))) <!-- project-toolkit:rich-release-notes pr=304 -->
+<!-- project-toolkit:rich-release-notes pr=293 -->
+#### feat(ci): centralize checkout in a shared Copier action
+### Migration
+Use the first released project-toolkit version containing `actions/checkout` (planned for v2.23.0). Wait until that release is published; v2.22.0 does not contain the wrapper.
+
+1. Run the existing Copier fleet update to the new release. Generated workflows switch to the shared checkout automatically, and `.copier-answers.yml` records the matching `toolkit_version`.
+2. In project-owned workflows such as `.github/workflows/docs.yml`, replace the upstream `uses` reference once. Preserve existing `with`, `id`, `if`, and permissions.
+
+Before:
+
+```yaml
+- name: Checkout
+  id: source
+  uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+  with:
+    fetch-depth: 0
+    persist-credentials: false
+```
+
+After, once v2.23.0 is published and recorded as `toolkit_version`:
+
+```yaml
+- name: Checkout
+  id: source
+  uses: quokkify/project-toolkit/actions/checkout@v2.23.0
+  with:
+    fetch-depth: 0
+    persist-credentials: false
+```
+
+If the release version changes, use the actual published tag recorded in `.copier-answers.yml` instead. Existing `steps.source.outputs.ref` and `steps.source.outputs.commit` remain available. The wrapper preserves upstream defaults, including `persist-credentials: true` when omitted; keep an explicit `false` for read-only checkouts.
+
+3. Run the project's CI and merge its migration PR. Start with `path-of-exile-starter`, then repeat for other projects. Review upstream v7 compatibility when migrating from v6, including runner requirements and privileged-event checkout restrictions.
+4. Subsequent upstream checkout updates are handled by Renovate in project-toolkit, released with the toolkit, and delivered by the fleet updater in template-update PRs. It also updates shared-action references in project-owned workflows. Plain `copier update` only renders template-owned files. No local Renovate override is needed to discover the upstream checkout pin.
+<!-- project-toolkit:rich-block:end -->
+
+### ✨ Features
+
+* **ci:** centralize checkout in a shared Copier action ([#293](https://github.com/quokkify/project-toolkit/issues/293)) ([097c920](https://github.com/quokkify/project-toolkit/commit/097c920d8bbf65343fa85f0e8a69687fe0d9c8ff))
+* **python:** pin pip and default runtime to 3.14 ([#302](https://github.com/quokkify/project-toolkit/issues/302)) ([885db26](https://github.com/quokkify/project-toolkit/commit/885db261abb8aa76e9c77085eed3f8b1a2aed565))
+* **security:** add templates and ruleset reconciler ([#280](https://github.com/quokkify/project-toolkit/issues/280)) ([5345d7e](https://github.com/quokkify/project-toolkit/commit/5345d7ed55fa08f4089ae37f40c03e4a9f545a3f))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** align setup actions, caches, and project environments ([#292](https://github.com/quokkify/project-toolkit/issues/292)) ([74fd4b3](https://github.com/quokkify/project-toolkit/commit/74fd4b38573d6f7485b3733333d79ebb56397b81))
+* honor config-backed single release inputs ([#305](https://github.com/quokkify/project-toolkit/issues/305)) ([c70c14a](https://github.com/quokkify/project-toolkit/commit/c70c14a8526ba1a24b3e58c9947901ad705283f5))
+* **release:** compact repeated dependency updates ([#303](https://github.com/quokkify/project-toolkit/issues/303)) ([7763124](https://github.com/quokkify/project-toolkit/commit/7763124a70344838bf6c55efbfd9ddb893643b7e))
+
 ## [2.22.0](https://github.com/quokkify/project-toolkit/compare/v2.21.6...v2.22.0) (2026-09-25)
 
 <!-- project-toolkit:rich-block:start -->
