@@ -34,7 +34,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 workflow,
             )
 
-    def test_dependency_mapping_and_hidden_chore_contract(self) -> None:
+    def test_dependency_mapping_and_documentation_release_contract(self) -> None:
         for path in (CONFIG_PATH, TEMPLATE_CONFIG_PATH):
             with self.subTest(path=path):
                 package = self.load_config(path)["packages"]["."]
@@ -43,10 +43,11 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                     {"type": "deps", "section": "📦 Dependencies"},
                     sections,
                 )
-                self.assertIn(
-                    {"type": "chore", "section": "🧹 Chores", "hidden": True},
-                    sections,
-                )
+                chore = next(section for section in sections if section["type"] == "chore")
+                docs = next(section for section in sections if section["type"] == "docs")
+                self.assertEqual(chore["section"], "📦 Dependencies")
+                self.assertNotIn("hidden", chore)
+                self.assertTrue(docs["hidden"])
                 self.assertEqual(package["changelog-path"], "CHANGELOG.md")
 
     def test_renovate_produces_chore_dependency_type(self) -> None:
@@ -61,7 +62,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             "chore(deps)",
         )
 
-    def test_release_please_17_renders_native_dependencies_only(self) -> None:
+    def test_release_please_17_stages_chore_dependencies_for_enrichment(self) -> None:
         npm = shutil.which("npm")
         node = shutil.which("node")
         if npm is None or node is None:
@@ -105,6 +106,13 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         self.assertEqual(
             root_package["changelog-sections"], template_package["changelog-sections"]
         )
+        # Alert when release behavior in project-toolkit drifts from generated projects.
+        for section in root_package["changelog-sections"]:
+            if section["type"] == "chore":
+                self.assertEqual(section["section"], "📦 Dependencies")
+                self.assertNotIn("hidden", section)
+            if section["type"] == "docs":
+                self.assertTrue(section["hidden"])
 
     def test_copier_rendered_config_keeps_dependency_mapping(self) -> None:
         copier = shutil.which("copier")
@@ -158,10 +166,17 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 {"type": "deps", "section": "📦 Dependencies"},
                 rendered["changelog-sections"],
             )
-            self.assertIn(
-                {"type": "chore", "section": "🧹 Chores", "hidden": True},
-                rendered["changelog-sections"],
+            chore = next(
+                section for section in rendered["changelog-sections"]
+                if section["type"] == "chore"
             )
+            docs = next(
+                section for section in rendered["changelog-sections"]
+                if section["type"] == "docs"
+            )
+            self.assertEqual(chore["section"], "📦 Dependencies")
+            self.assertNotIn("hidden", chore)
+            self.assertTrue(docs["hidden"])
 
 
 if __name__ == "__main__":

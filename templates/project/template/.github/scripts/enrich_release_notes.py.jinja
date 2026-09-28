@@ -259,6 +259,46 @@ def _remove_legacy_block(top: str) -> str:
     return "".join(output)
 
 
+def _normalize_dependency_changelog(top: str) -> str:
+    """Keep chore(deps) entries and hide other chore entries.
+
+    Release Please groups commits by type, not scope, so its configuration
+    cannot distinguish chore(deps) from chore. The configured chore section
+    is therefore a staging area normalized before the release PR is updated.
+    """
+    lines = top.splitlines(keepends=True)
+    output: list[str] = []
+    dependency_entries: list[str] = []
+    in_dependencies = False
+    dependency_heading = re.compile(r"^###\s+📦 Dependencies\s*$")
+    next_heading = re.compile(r"^###\s+")
+    for line in lines:
+        if dependency_heading.match(line.rstrip("\r\n")):
+            in_dependencies = True
+            output.append(line)
+            continue
+        if in_dependencies and next_heading.match(line):
+            in_dependencies = False
+        if in_dependencies and re.match(r"^\s*[-*]\s+", line):
+            if re.search(r"\*\*deps:\*\*", line):
+                dependency_entries.append(line)
+            continue
+        output.append(line)
+    if not dependency_entries:
+        return "".join(output)
+    result = "".join(output)
+    marker = "### 📦 Dependencies"
+    position = result.find(marker)
+    if position < 0:
+        return result
+    end = result.find("\n### ", position + len(marker))
+    if end < 0:
+        end = len(result)
+    before = result[:end].rstrip("\n")
+    after = result[end:].lstrip("\n")
+    return before + "\n\n" + "".join(dependency_entries).rstrip("\n") + ("\n\n" + after if after else "\n")
+
+
 def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
     entries: list[tuple[int, str, dict[str, str], bool, Mapping[str, object]]] = []
     seen: set[str] = set()
@@ -397,6 +437,7 @@ def enrich_changelog(changelog: str, prs: Iterable[Mapping[str, object]]) -> str
         return changelog
     start, end = ranges[0]
     top = changelog[start:end]
+    top = _normalize_dependency_changelog(top)
     older_numbers = _rich_numbers(changelog[end:])
     had_block = BLOCK_START in top
     top = re.sub(r"\n?<!-- project-toolkit:rich-block:start -->[\s\S]*?<!-- project-toolkit:rich-block:end -->\n?", "", top)

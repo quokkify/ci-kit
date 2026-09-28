@@ -11,13 +11,28 @@ TEMPLATE_RENOVATE_PATH = ROOT / "templates/project/template/.github/renovate.jso
 
 
 class RenovateConfigTests(unittest.TestCase):
+    def test_toolkit_docs_updater_is_excluded_from_release(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            config["semanticCommitType"],
+            "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
+        )
+        self.assertEqual(config["semanticCommitScope"], "deps")
+        # Generated projects retain the shared chore(deps) convention.
+        template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
+        self.assertIn('"semanticCommitType": "chore"', template)
+        self.assertIn('"semanticCommitScope": "deps"', template)
+
     def test_dependency_titles_are_chore_deps_in_local_and_generated_configs(self) -> None:
-        for path in (RENOVATE_PATH, CHECKED_IN_RENOVATE_PATH):
-            with self.subTest(path=path):
-                config = json.loads(path.read_text(encoding="utf-8"))
-                self.assertEqual(config["semanticCommits"], "enabled")
-                self.assertEqual(config["semanticCommitType"], "chore")
-                self.assertEqual(config["semanticCommitScope"], "deps")
+        config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(config["semanticCommits"], "enabled")
+        self.assertEqual(config["semanticCommitType"], "chore")
+        self.assertEqual(config["semanticCommitScope"], "deps")
+
+        toolkit_config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(toolkit_config["semanticCommits"], "enabled")
+        self.assertIn("{{else}}chore{{/if}}", toolkit_config["semanticCommitType"])
+        self.assertEqual(toolkit_config["semanticCommitScope"], "deps")
 
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
         self.assertIn('"semanticCommits": "enabled"', template)
