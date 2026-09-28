@@ -158,6 +158,84 @@ class RichNotesTests(TestCase):
         self.assertNotIn("chore: internal maintenance", output)
         self.assertEqual(output.count("rich-release-notes pr=4"), 1)
 
+    def test_repeated_updates_compact_to_highest_version_with_all_sources(self):
+        prs = [
+            {"number": number, "title": f"chore(deps): update renovate to v{version}{tail}",
+             "body": "", "pr_url": f"https://example.test/pull/{number}"}
+            for number, version, tail in (
+                (299, "44.115.13", ""), (285, "44.107.0", ""),
+                (287, "44.108.2", ""), (288, "44.111.4", ""),
+                (290, "44.112.3", ""), (291, "44.115.2", ""),
+            )
+        ]
+        rendered = notes._render_entries(prs, set())
+        self.assertEqual(rendered.count("update renovate to v44.115.13"), 1)
+        for number in (285, 287, 288, 290, 291, 299):
+            self.assertIn(f"[#{number}](https://example.test/pull/{number})", rendered)
+        self.assertEqual(notes._rich_numbers(rendered), {"285", "287", "288", "290", "291", "299"})
+        self.assertNotIn("v44.107.0", rendered)
+
+    def test_compaction_preserves_rich_sections_and_each_source_marker_once(self):
+        prs = [
+            {"number": 1, "title": "chore(deps): update poetry to v2.3.4", "body": "## Migration\nKeep this note."},
+            {"number": 2, "title": "chore(deps): update poetry to v2.5.1", "body": ""},
+        ]
+        rendered = notes._render_entries(prs, set())
+        self.assertIn("Keep this note.", rendered)
+        self.assertIn("- update poetry to v2.5.1", rendered)
+        changelog = notes.enrich_changelog("## 2.0.0\n", prs)
+        release_body = notes.enrich_release_body("Release notes\n", rendered)
+        for output in (rendered, changelog, release_body):
+            self.assertIn("Keep this note.", output)
+            for number in (1, 2):
+                self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
+
+    def test_dependency_groups_are_exact_name_and_keep_security(self):
+        prs = [
+            {"number": 1, "title": "chore(deps): update poetry to v2.3.4 [security]", "body": ""},
+            {"number": 2, "title": "chore(deps): update poetry to v2.5.1", "body": ""},
+            {"number": 5, "title": "chore(deps): update uv to v0.11.15 [security]", "body": ""},
+            {"number": 6, "title": "chore(deps): update uv to v0.12.19", "body": ""},
+            {"number": 7, "title": "chore(deps): update corepack to v0.36.0", "body": ""},
+            {"number": 3, "title": "chore(deps): update github/codeql-action/init digest to abc1234", "body": ""},
+            {"number": 4, "title": "chore(deps): update github/codeql-action/analyze digest to abc1234", "body": ""},
+        ]
+        rendered = notes._render_entries(prs, set())
+        self.assertIn("update poetry to v2.5.1 (#1, #2) [security]", rendered)
+        self.assertIn("update github/codeql-action/init digest to abc1234", rendered)
+        self.assertIn("update github/codeql-action/analyze digest to abc1234", rendered)
+        self.assertEqual(rendered.count("update poetry to"), 1)
+        self.assertIn("update uv to v0.12.19 (#5, #6) [security]", rendered)
+        self.assertIn("update corepack to v0.36.0 (#7)", rendered)
+        self.assertEqual(rendered.count("update uv to"), 1)
+
+    def test_ambiguous_dependency_titles_are_not_compacted(self):
+        prs = [
+            {"number": 1, "title": "chore(deps): update package to v1.2.3 for compatibility", "body": ""},
+            {"number": 2, "title": "chore(deps): update package to v1.2.4-beta.1", "body": ""},
+        ]
+        rendered = notes._render_entries(prs, set())
+        self.assertIn("update package to v1.2.3 for compatibility", rendered)
+        self.assertIn("update package to v1.2.4-beta.1", rendered)
+
+    def test_compacted_dependency_block_matches_changelog_and_body_on_rerun(self):
+        prs = [
+            {"number": 10, "title": "chore(deps): update poetry to v2.3.4 [security]", "body": "",
+             "pr_url": "https://example.test/pull/10"},
+            {"number": 11, "title": "chore(deps): update poetry to v2.5.1", "body": "",
+             "pr_url": "https://example.test/pull/11"},
+        ]
+        source = "## 2.0.0\n\n### Features\n- keep\n\n## 1.9.0\n\n### Dependencies\n- historical\n"
+        first = notes.enrich_changelog(source, prs)
+        again = notes.enrich_changelog(first, prs)
+        self.assertEqual(first, again)
+        self.assertIn("- update poetry to v2.5.1 ([#10](https://example.test/pull/10), [#11](https://example.test/pull/11)) [security]", first)
+        self.assertEqual(first.count("update poetry to"), 1)
+        self.assertIn("## 1.9.0\n\n### Dependencies\n- historical", first)
+        body = notes.enrich_release_body("## release\n\n---\nfooter\n", notes._render_entries(prs, set()))
+        self.assertEqual(body.count("update poetry to"), 1)
+        self.assertEqual(notes._rich_numbers(notes._render_entries(prs, set())), {"10", "11"})
+
     def test_duplicate_source_records_render_once(self):
         changelog = "## 1.0.0\n"
         prs = [{"number": 7, "body": "## Highlight\nOne"}] * 2
