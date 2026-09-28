@@ -175,6 +175,21 @@ class RichNotesTests(TestCase):
         self.assertEqual(notes._rich_numbers(rendered), {"285", "287", "288", "290", "291", "299"})
         self.assertNotIn("v44.107.0", rendered)
 
+    def test_compaction_preserves_rich_sections_and_each_source_marker_once(self):
+        prs = [
+            {"number": 1, "title": "chore(deps): update poetry to v2.3.4", "body": "## Migration\nKeep this note."},
+            {"number": 2, "title": "chore(deps): update poetry to v2.5.1", "body": ""},
+        ]
+        rendered = notes._render_entries(prs, set())
+        self.assertIn("Keep this note.", rendered)
+        self.assertIn("- update poetry to v2.5.1", rendered)
+        changelog = notes.enrich_changelog("## 2.0.0\n", prs)
+        release_body = notes.enrich_release_body("Release notes\n", rendered)
+        for output in (rendered, changelog, release_body):
+            self.assertIn("Keep this note.", output)
+            for number in (1, 2):
+                self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
+
     def test_dependency_groups_are_exact_name_and_keep_security(self):
         prs = [
             {"number": 1, "title": "chore(deps): update poetry to v2.3.4 [security]", "body": ""},

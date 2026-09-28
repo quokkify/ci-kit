@@ -98,7 +98,7 @@ def _compact_dependency_entries(
     retained = []
     for number, title, sections, legacy, pr in entries:
         identity = _dependency_identity(title)
-        if identity is None or (
+        if identity is None or any(key != "dependencies" for key in sections) or (
             "dependencies" in sections and sections["dependencies"] != title
         ):
             retained.append((number, title, sections, legacy, pr))
@@ -273,8 +273,8 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             if title:
                 sections = {"dependencies": title}
         title = str(pr.get("title", "")).strip()
-        if not sections and _dependency_identity(title) is not None:
-            sections = {"dependencies": title}
+        if _dependency_identity(title) is not None and "dependencies" not in sections:
+            sections = {**sections, "dependencies": title}
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
         reserved = (
@@ -318,13 +318,20 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             blocks.append(DEPENDENCIES_HEADING)
             dependency_heading_written = True
         content = sections["dependencies"]
-        if "<!-- project-toolkit:rich-release-notes pr=" in content:
+        has_source_markers = "<!-- project-toolkit:rich-release-notes pr=" in content
+        if has_source_markers:
+            # A compacted entry already carries markers for every source PR.
+            # Do not append the winner marker a second time.
             pass
         elif legacy_dependency and content == title:
             content = _render_dependency_title(title, number=number, pr=pr)
         else:
             content = _render_dependency_content(content)
-        blocks.append(_add_dependency_marker(content, MARKER.format(number=number)))
+        blocks.append(
+            content
+            if has_source_markers
+            else _add_dependency_marker(content, MARKER.format(number=number))
+        )
     for number_value, title, sections, legacy_dependency, _pr in entries:
         number = str(number_value)
         has_dependency_section = "dependencies" in sections
