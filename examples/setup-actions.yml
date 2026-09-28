@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
       - name: Setup Java and Gradle cache
         id: java
-        uses: quokkify/project-toolkit/actions/setup-java-gradle@v2.6.0
+        uses: quokkify/project-toolkit/actions/setup-java-gradle@4c5bba3a2b28d777fe0676156011a27873221c0f
         with:
           java-version: "17"
           distribution: temurin
