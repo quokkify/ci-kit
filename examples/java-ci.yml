@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   java:
-    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
       java-version: "17"
       build-tool: auto

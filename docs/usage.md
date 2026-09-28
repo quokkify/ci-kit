@@ -192,3 +192,12 @@ The repository also manages versions that are easy to miss with Renovate's built
 - The documented Compose health action release follows the same GitHub tag as the pinned action implementation.
 
 This keeps the version shown to readers consistent with the version executed by CI. Review the generated PR as usual; Renovate never automerges these changes.
+
+
+## Action pins and project updates
+
+Executable examples use `uses: owner/repo/path@<full commit SHA> # vX.Y.Z`. The SHA must be the commit of the release in the comment; a feature-branch commit must not be labeled as an already published version. Renovate's native GitHub Actions manager updates the digest and release comment together, including files in `examples/`. Behavior tests check the action contract and pin format without hard-coding a particular dependency release.
+
+Existing consumers do not need a bulk migration: exact toolkit release tags remain supported, and generated validation already accepts full SHA pins with a matching release comment. A same-release digest pin does not require changing project commands or Copier answers. For a toolkit version upgrade, use the Copier/fleet update so `_commit`, `toolkit_version`, generated workflows, and project-owned workflow references move together. The fleet updater already resolves the release commit and updates both the SHA and its comment. A separate version bump that leaves Copier answers behind is still rejected intentionally; pinning alone cannot repair an incomplete template upgrade.
+
+The new `gradle-project-command` output is optional. Released examples use the existing `gradle-command` output until their pinned release exposes the new API. Existing commands and the legacy output continue to work; adopt the new output when updating a project that needs explicit nested-project selection.

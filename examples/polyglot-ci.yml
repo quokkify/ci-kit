@@ -46,19 +46,19 @@ jobs:
   python:
     needs: changes
     if: ${{ needs.changes.outputs.python == 'true' }}
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
       working-directory: backend
   node:
     needs: changes
     if: ${{ needs.changes.outputs.node == 'true' }}
-    uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
       working-directory: frontend
   java:
     needs: changes
     if: ${{ needs.changes.outputs.java == 'true' }}
-    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
       java-version: "17"
       gradle-console: rich
@@ -66,7 +66,7 @@ jobs:
   integration:
     needs: [changes, python, node, java]
     if: ${{ always() && !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.integration == 'true' && (needs.python.result == 'success' || needs.python.result == 'skipped') && (needs.node.result == 'success' || needs.node.result == 'skipped') && (needs.java.result == 'success' || needs.java.result == 'skipped') }}
-    uses: quokkify/project-toolkit/.github/workflows/docker-build.yml@v2.3.0
+    uses: quokkify/project-toolkit/.github/workflows/docker-build.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
     with:
       context: .
       push: false

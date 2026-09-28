@@ -684,8 +684,7 @@ class ComposeActionTests(unittest.TestCase):
     def test_static_wrapper_is_pinned_and_has_one_standalone_call(self) -> None:
         text = (ROOT / "actions/compose-up/action.yml").read_text()
         self.assertEqual(text.count("uses: quokkify/compose-health-check-action@"), 1)
-        self.assertIn("@1bd4a5793d977cdd8a14cca7bbfe3544b49bb3e0 # v2.4.0", text)
-        self.assertNotIn("compose-health-check-action v2.3.0", text)
+        self.assertRegex(text, r"quokkify/compose-health-check-action@[0-9a-f]{40} # v\d+\.\d+\.\d+")
         self.assertNotIn("docker compose up", text)
         self.assertNotIn("docker inspect", text)
         self.assertEqual(sum(step.get("uses", "").startswith("quokkify/compose-health-check-action@") for step in self.data["runs"]["steps"]), 1)
@@ -1021,10 +1020,6 @@ class AllureReportActionTests(unittest.TestCase):
             text,
             r"uses: quokkify/allure-report-action@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
-        self.assertIn(
-            "uses: quokkify/allure-report-action@00a2788fd72dce6727a3232104f770f659aeaccb # v0.5.1",
-            text,
-        )
         self.assertFalse((action_path.parent / "allure-ci.mjs").exists())
 
     def test_renovate_manages_the_executable_release_pin(self) -> None:
@@ -1050,8 +1045,10 @@ class AllureReportActionTests(unittest.TestCase):
         match = matches[0]
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertEqual(match.group("currentDigest"), "00a2788fd72dce6727a3232104f770f659aeaccb")
-        self.assertEqual(match.group("currentValue"), "v0.5.1")
+        actual = re.search(r"uses: quokkify/allure-report-action@([0-9a-f]{40}) # (v\d+\.\d+\.\d+)", action_text)
+        self.assertIsNotNone(actual)
+        self.assertEqual(match.group("currentDigest"), actual[1])
+        self.assertEqual(match.group("currentValue"), actual[2])
 
     def test_renovate_manages_every_executable_copier_pin(self) -> None:
         """Every file CI or a generated project actually installs Copier from must be
@@ -1158,7 +1155,7 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             )
             workflow = (destination / ".github/workflows/allure-report.yml").read_text()
 
-        self.assertIn("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", workflow)
+        self.assertRegex(workflow, r"actions/download-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+")
         self.assertIn('readFileSync(".allure-generated/allure-pr-comment.md", "utf8")', workflow)
         self.assertIn("body.endsWith(marker)", workflow)
         self.assertIn("allure-pr-comment.md", workflow)
