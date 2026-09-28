@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.23.1](https://github.com/quokkify/project-toolkit/compare/v2.23.0...v2.23.1) (2026-09-28)
+
+
+### 🐛 Bug Fixes
+
+* detect stale release helpers on template updates ([#306](https://github.com/quokkify/project-toolkit/issues/306)) ([4ec80cc](https://github.com/quokkify/project-toolkit/commit/4ec80ccd1a07037fdee5defcfcdd0b090f669a48))
+
 ## [2.23.0](https://github.com/quokkify/project-toolkit/compare/v2.22.0...v2.23.0) (2026-09-28)
 
 <!-- project-toolkit:rich-block:start -->
