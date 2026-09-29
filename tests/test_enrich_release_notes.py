@@ -138,6 +138,23 @@ class RichNotesTests(TestCase):
         self.assertLess(updated.index(notes.BLOCK_START), updated.index("\n---\n"))
         self.assertIn("This PR was generated", updated)
 
+    def test_release_body_highlights_precede_release_please_sections_and_old_block_moves(self):
+        body = (
+            ":robot: release\n---\n\n"
+            "## 0.20.0\n\n### Features\n- feature\n\n### Bug Fixes\n- fix\n\n"
+            + notes.BLOCK_START + "\nold highlights\n" + notes.BLOCK_END + "\n---\nfooter\n"
+        )
+        updated = notes.enrich_release_body(body, "### ✨ Highlights\nNew highlights")
+        self.assertLess(updated.index("New highlights"), updated.index("### Features"))
+        self.assertLess(updated.index("New highlights"), updated.index("### Bug Fixes"))
+        self.assertLess(updated.index("New highlights"), updated.rindex("\n---\n"))
+        self.assertNotIn("old highlights", updated)
+        self.assertEqual(updated.count(notes.BLOCK_START), 1)
+        self.assertEqual(
+            notes.enrich_release_body(updated, "### ✨ Highlights\nNew highlights"),
+            updated,
+        )
+
     def test_release_body_without_rich_content_is_byte_preserving(self):
         body = "## 1.0.0\n\n---\nfooter\n\n"
         self.assertEqual(notes.enrich_release_body(body, ""), body)
