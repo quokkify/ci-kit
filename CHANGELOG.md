@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.23.5](https://github.com/quokkify/project-toolkit/compare/v2.23.4...v2.23.5) (2026-09-29)
+
+
+### 🐛 Bug Fixes
+
+* place enriched highlights before release notes ([#327](https://github.com/quokkify/project-toolkit/issues/327)) ([8ff467e](https://github.com/quokkify/project-toolkit/commit/8ff467ed6d07410cbb3d5566a4e17c963b4a21f3))
+* **renovate:** automerge toolkit docs updates ([#329](https://github.com/quokkify/project-toolkit/issues/329)) ([5c55515](https://github.com/quokkify/project-toolkit/commit/5c555154b3077fa5f17952ed1fc2a286f6a89239))
+
+
+### 🧹 Chores
+
+* **deps:** update renovate to v44.119.0 ([#328](https://github.com/quokkify/project-toolkit/issues/328)) ([0ba5bb7](https://github.com/quokkify/project-toolkit/commit/0ba5bb76827824eab7f8e3b6b5401ca916e3ff5c))
+
 ## [2.23.4](https://github.com/quokkify/project-toolkit/compare/v2.23.3...v2.23.4) (2026-09-29)
 
 
