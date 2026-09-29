@@ -70,8 +70,8 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
     owner: 'acme', repository: 'widget', version: '1.2.3',
     currentTag: 'v1.2.3', changelogSections: sections,
   });
-  if (!rendered.includes('📦 Dependencies') || !rendered.includes('update dependency alpha')) {
-    throw new Error('deps commit did not render in Dependencies');
+  if (!rendered.includes('🧹 Chores') || !rendered.includes('update dependency alpha')) {
+    throw new Error('deps commit did not render in Chores');
   }
   for (const message of ['legacy dependency update', 'reorganize scripts', 'internal cleanup']) {
     if (!rendered.includes(message)) {

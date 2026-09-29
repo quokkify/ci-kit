@@ -1665,7 +1665,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(len(set(workflows)), 2)
             self.assertIn("allure-results-app-java", java_validate)
             pull_request_template = (destination / ".github/pull_request_template.md").read_text()
-            for heading in ("Description", "Release notes", "Highlight", "Usage example", "Migration", "Breaking change"):
+            for heading in ("Description", "Release notes", "Highlight", "Usage example", "Migration"):
                 self.assertIn(f"## {heading}", pull_request_template)
 
             rendered_script = yaml.safe_load(workflow)["jobs"]["resolve"]["steps"][0]["with"]["script"]

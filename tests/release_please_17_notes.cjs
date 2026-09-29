@@ -81,8 +81,8 @@ const commits = [
   if (!rendered.includes('🧹 Chores')) {
     throw new Error('chore commits must remain visible in Chores');
   }
-  if (!rendered.includes('📦 Dependencies')) {
-    throw new Error('deps(deps) did not render in Dependencies');
+  if ((rendered.match(/🧹 Chores/g) || []).length !== 1) {
+    throw new Error('dependency and chore commits must share one Chores section');
   }
   if (!rendered.includes('native dependency update')) {
     throw new Error('deps(deps) message did not render');
