@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.23.4](https://github.com/quokkify/project-toolkit/compare/v2.23.3...v2.23.4) (2026-09-29)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** reduce false Copier update conflicts ([#325](https://github.com/quokkify/project-toolkit/issues/325)) ([d4d16ef](https://github.com/quokkify/project-toolkit/commit/d4d16ef67385f8ee4087ad326a106eee5bcaa791))
+
 ## [2.23.3](https://github.com/quokkify/project-toolkit/compare/v2.23.2...v2.23.3) (2026-09-29)
 
 
