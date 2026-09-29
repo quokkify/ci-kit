@@ -62,6 +62,39 @@ class RichNotesTests(TestCase):
         self.assertNotIn("quokkify/project-toolkit", normalized)
         self.assertNotIn("### 🧹 Chores", normalized)
 
+    def test_release_please_body_moves_dependency_chore_and_hides_self_update(self):
+        repository = "quokkify/project-toolkit"
+        gradle_sha = "a" * 40
+        toolkit_sha = "b" * 40
+        release_notes = (
+            ":robot: I have created a release *beep* *boop*\n---\n\n"
+            "## [2.23.2](https://github.com/quokkify/project-toolkit/compare/v2.23.1...v2.23.2) (2026-09-28)\n\n"
+            "### 🧹 Chores\n\n"
+            "* **deps:** update gradle/actions action to v6.4.0 "
+            f"([#314](https://github.com/{repository}/issues/314)) "
+            f"([{gradle_sha[:7]}](https://github.com/{repository}/commit/{gradle_sha}))\n"
+            "* **deps:** update quokkify/project-toolkit to v2.23.1 "
+            f"([#313](https://github.com/{repository}/issues/313)) "
+            f"([{toolkit_sha[:7]}](https://github.com/{repository}/commit/{toolkit_sha}))\n\n"
+            "chore(deps): update gradle/actions action to v6.4.0\n\n"
+            "---\nThis PR was generated with Release Please.\n"
+        )
+        prs = [
+            {"number": 314, "title": "chore(deps): update gradle/actions action to v6.4.0", "body": ""},
+            {"number": 313, "title": "chore(deps): update quokkify/project-toolkit to v2.23.1", "body": ""},
+        ]
+        changelog = notes.enrich_changelog(release_notes, prs, repository=repository)
+        changelog = notes.enrich_changelog(changelog, prs, repository=repository)
+        body = notes.enrich_release_body(release_notes, "", repository=repository)
+        body = notes.enrich_release_body(body, "", repository=repository)
+        for output in (changelog, body):
+            self.assertIn("### 📦 Dependencies", output)
+            self.assertIn("update gradle/actions action to v6.4.0", output)
+            self.assertEqual(output.count("update gradle/actions action to v6.4.0"), 1)
+            self.assertNotIn("update quokkify/project-toolkit", output)
+            self.assertNotIn("chore(deps):", output)
+            self.assertNotIn("### 🧹 Chores", output)
+
     def test_generated_helper_template_renders_without_changing_python_syntax(self):
         template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         rendered = Environment(undefined=StrictUndefined).from_string(template).render()

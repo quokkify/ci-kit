@@ -300,23 +300,27 @@ def _normalize_dependency_changelog(top: str, repository: str | None = None) -> 
                 dependency_entries.append(line)
                 continue
         output.append(line)
-    if not dependency_entries:
-        return "".join(output)
-
     result_lines = output[:]
-    # Drop the Chores heading only if its dependency entries were its entire content.
+    # Drop an empty Chores heading, including when it is the last section in
+    # a Release Please body before the footer separator.
     index = 0
     while index < len(result_lines):
         if not chore_heading.match(result_lines[index].rstrip("\r\n")):
             index += 1
             continue
         end = index + 1
-        while end < len(result_lines) and not next_heading.match(result_lines[end]):
+        while end < len(result_lines) and not (
+            next_heading.match(result_lines[end])
+            or re.match(r"^(?:---|##[ \t])", result_lines[end])
+        ):
             end += 1
         if not any(line.strip() for line in result_lines[index + 1:end]):
             del result_lines[index:end]
             continue
         index = end
+
+    if not dependency_entries:
+        return "".join(result_lines)
 
     result = "".join(result_lines)
     dependency_marker = "### 📦 Dependencies"
@@ -340,7 +344,14 @@ def _normalize_dependency_changelog(top: str, repository: str | None = None) -> 
     return before + "\n\n" + section + ("\n\n" + after if after else "\n")
 
 
-def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> str:
+def _render_entries(
+    prs: Iterable[Mapping[str, object]],
+    excluded: set[str],
+    *,
+    represented_dependencies: set[str] | None = None,
+    repository: str | None = None,
+) -> str:
+    represented_dependencies = represented_dependencies or set()
     entries: list[tuple[int, str, dict[str, str], bool, Mapping[str, object]]] = []
     seen: set[str] = set()
     for pr in prs:
@@ -354,8 +365,28 @@ def _render_entries(prs: Iterable[Mapping[str, object]], excluded: set[str]) -> 
             if title:
                 sections = {"dependencies": title}
         title = str(pr.get("title", "")).strip()
-        if _dependency_identity(title) is not None and "dependencies" not in sections:
+        self_dependency = False
+        if repository and DEPENDENCY_TITLE_PATTERN.match(title):
+            dependency_name = re.search(r"\bupdate\s+(\S+)", DEPENDENCY_TITLE_PATTERN.sub("", title, count=1), re.IGNORECASE)
+            if dependency_name:
+                package = dependency_name.group(1).rstrip(".,;:)")
+                self_dependency = package.casefold() in {
+                    repository.casefold(), repository.rsplit("/", 1)[-1].casefold()
+                }
+                if self_dependency:
+                    sections.pop("dependencies", None)
+        if self_dependency and not sections:
+            continue
+        if not self_dependency and _dependency_identity(title) is not None and "dependencies" not in sections:
+            if number not in represented_dependencies:
+                sections = {**sections, "dependencies": title}
+        elif not self_dependency and DEPENDENCY_TITLE_PATTERN.match(title) and number not in represented_dependencies and "dependencies" not in sections:
             sections = {**sections, "dependencies": title}
+        if number in represented_dependencies and "dependencies" not in extract_rich_sections(str(pr.get("body", ""))):
+            # Release Please already has a canonical dependency bullet for this
+            # PR. Keep that bullet and avoid synthesizing a duplicate rich note.
+            if DEPENDENCY_TITLE_PATTERN.match(title) and not sections:
+                continue
         # PR bodies are untrusted; reserved delimiters must not be able to
         # terminate or forge the machine-owned block on a later rerun.
         reserved = (
@@ -483,6 +514,11 @@ def enrich_changelog(
         return changelog
     start, end = ranges[0]
     top = changelog[start:end]
+    represented_dependencies = (
+        {str(number) for number in source_pr_numbers(changelog, repository)}
+        if repository
+        else set()
+    )
     top = _normalize_dependency_changelog(top, repository)
     older_numbers = _rich_numbers(changelog[end:])
     had_block = BLOCK_START in top
@@ -490,7 +526,12 @@ def enrich_changelog(
     # Compatibility with the original marker-only implementation.
     if not had_block:
         top = _remove_legacy_block(top)
-    payload = _render_entries(prs, older_numbers)
+    payload = _render_entries(
+        prs,
+        older_numbers,
+        represented_dependencies=represented_dependencies,
+        repository=repository,
+    )
     if payload:
         heading_end = top.find("\n")
         if heading_end < 0:
@@ -501,12 +542,31 @@ def enrich_changelog(
     return changelog[:start] + top + changelog[end:]
 
 
-def enrich_release_body(body: str, rich_markdown: str) -> str:
-    """Replace this tool's body block while preserving all Release Please text."""
+def enrich_release_body(
+    body: str,
+    rich_markdown: str,
+    *,
+    repository: str | None = None,
+) -> str:
+    """Normalize dependency sections, then replace this tool's rich body block."""
     block = f"{BLOCK_START}\n{rich_markdown}\n{BLOCK_END}" if rich_markdown else ""
     pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
-    if re.search(pattern, body):
-        return re.sub(pattern, block, body)
+    existing = re.search(pattern, body)
+    if existing:
+        prefix = body[:existing.start()]
+        if prefix.endswith("\n\n"):
+            prefix = prefix[:-2]
+        body = prefix + body[existing.end():]
+    delimiters = list(re.finditer(r"\n---\n", body))
+    if len(delimiters) >= 2:
+        notes_start = delimiters[0].end()
+        notes_end = delimiters[-1].start()
+        normalized_notes = _normalize_dependency_changelog(
+            body[notes_start:notes_end], repository
+        )
+        body = body[:notes_start] + normalized_notes + body[notes_end:]
+    else:
+        body = _normalize_dependency_changelog(body, repository)
     if not block:
         return body
     delimiters = list(re.finditer(r"\n---\n", body))
@@ -516,7 +576,12 @@ def enrich_release_body(body: str, rich_markdown: str) -> str:
     return body.rstrip() + "\n\n" + block + "\n"
 
 
-def enrich_component_release_body(body: str, rich_by_component: Mapping[str, str]) -> str:
+def enrich_component_release_body(
+    body: str,
+    rich_by_component: Mapping[str, str],
+    *,
+    repository: str | None = None,
+) -> str:
     """Rebuild rich blocks inside Release Please multi-component details."""
     detail_pattern = re.compile(
         r"(?ms)^<details><summary>(?P<component>.+?): (?P<version>[0-9]+\.[0-9]+\.[0-9]+[^<]*)</summary>\n"
@@ -526,7 +591,7 @@ def enrich_component_release_body(body: str, rich_by_component: Mapping[str, str
     if not matches:
         if rich_by_component:
             raise EnrichmentError("multi-component release body has no canonical component details")
-        return enrich_release_body(body, "")
+        return enrich_release_body(body, "", repository=repository)
 
     found: set[str] = set()
     updated = body
@@ -536,6 +601,9 @@ def enrich_component_release_body(body: str, rich_by_component: Mapping[str, str
             raise EnrichmentError(f"release body contains duplicate component {component!r}")
         found.add(component)
         notes = match.group("notes")
+        old_block_pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}\n?$"
+        notes = re.sub(old_block_pattern, "", notes)
+        notes = _normalize_dependency_changelog(notes, repository)
         rich = rich_by_component.get(component, "")
         block = f"{BLOCK_START}\n{rich}\n{BLOCK_END}" if rich else ""
         block_pattern = rf"{re.escape(BLOCK_START)}[\s\S]*?{re.escape(BLOCK_END)}"
@@ -865,17 +933,26 @@ def prepare_release_enrichment(
                     f"generated rich markers reference unknown source PRs: {missing}"
                 )
             rich_by_component[component] = _render_entries(
-                [source_prs[number] for number in path_numbers], set()
+                [source_prs[number] for number in path_numbers],
+                set(),
+                represented_dependencies={str(number) for number in numbers_by_path[path]},
+                repository=repository,
             )
-        updated_body = enrich_component_release_body(release_body, rich_by_component)
+        updated_body = enrich_component_release_body(
+            release_body, rich_by_component, repository=repository
+        )
     else:
         missing = [number for number in rendered_numbers if number not in source_prs]
         if missing:
             raise EnrichmentError(f"generated rich markers reference unknown source PRs: {missing}")
         rich_markdown = _render_entries(
-            [source_prs[number] for number in sorted(rendered_numbers)], set()
+            [source_prs[number] for number in sorted(rendered_numbers)],
+            set(),
+            repository=repository,
         )
-        updated_body = enrich_release_body(release_body, rich_markdown)
+        updated_body = enrich_release_body(
+            release_body, rich_markdown, repository=repository
+        )
     output_directory.mkdir(parents=True, exist_ok=True)
     (output_directory / "changelog-paths.txt").write_text(
         "".join(f"{path.as_posix()}\n" for path in changelog_paths), encoding="utf-8"
