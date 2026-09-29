@@ -12,6 +12,12 @@
   },
   "packageRules": [
     {
+      "description": "Merge project-toolkit documentation updates without a stability wait.",
+      "matchPackageNames": ["/^quokkify\\/project-toolkit$/"],
+      "minimumReleaseAge": null,
+      "automerge": true
+    },
+    {
       "description": "Keep executable examples on immutable GitHub Actions release commits.",
       "matchManagers": ["github-actions"],
       "matchFileNames": ["examples/**"],
