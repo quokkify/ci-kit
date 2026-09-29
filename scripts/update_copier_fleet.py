@@ -1289,6 +1289,11 @@ def update_template(
         "--trust",
         "--defaults",
         "--conflict=rej",
+        # Generated workflows often receive harmless local edits near template
+        # changes. A one-line context keeps Copier's three-line default from
+        # rejecting otherwise clean hunks while still surfacing overlapping edits.
+        "--context-lines",
+        "1",
         "--skip-tasks",
     ]
     if isinstance(components, list) and answers.get("components") != components:
