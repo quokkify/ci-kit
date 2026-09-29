@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.23.3](https://github.com/quokkify/project-toolkit/compare/v2.23.2...v2.23.3) (2026-09-29)
+
+
+### 🐛 Bug Fixes
+
+* **release:** place rich notes before generated sections ([#322](https://github.com/quokkify/project-toolkit/issues/322)) ([fa44e17](https://github.com/quokkify/project-toolkit/commit/fa44e174fd8626d40258361e2571439aa5a80c39))
+
+
+### 🧹 Chores
+
+* **deps:** update renovate to v44.118.2 ([#323](https://github.com/quokkify/project-toolkit/issues/323)) ([6e58443](https://github.com/quokkify/project-toolkit/commit/6e58443badfaad342d90c92b66861cd0da69d036))
+
 ## [2.23.2](https://github.com/quokkify/project-toolkit/compare/v2.23.1...v2.23.2) (2026-09-29)
 
 
