@@ -40,7 +40,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 package = self.load_config(path)["packages"]["."]
                 sections = package["changelog-sections"]
                 self.assertIn(
-                    {"type": "deps", "section": "📦 Dependencies"},
+                    {"type": "deps", "section": "🧹 Chores"},
                     sections,
                 )
                 chore = next(section for section in sections if section["type"] == "chore")
@@ -55,8 +55,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         self.assertEqual(renovate["semanticCommits"], "enabled")
         self.assertEqual(renovate["semanticCommitType"], "chore")
         self.assertEqual(renovate["semanticCommitScope"], "deps")
-        # Release Please sections classify this as a hidden chore while the
-        # explicit deps scope keeps dependency commits recognizable.
+        # Release Please owns chore(deps); Enrich only adds authored rich sections.
         self.assertEqual(
             f"{renovate['semanticCommitType']}({renovate['semanticCommitScope']})",
             "chore(deps)",
@@ -163,7 +162,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             )["packages"]["."]
             self.assertEqual(rendered["changelog-path"], "CHANGELOG.md")
             self.assertIn(
-                {"type": "deps", "section": "📦 Dependencies"},
+                {"type": "deps", "section": "🧹 Chores"},
                 rendered["changelog-sections"],
             )
             chore = next(
@@ -177,6 +176,11 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             self.assertEqual(chore["section"], "🧹 Chores")
             self.assertNotIn("hidden", chore)
             self.assertTrue(docs["hidden"])
+            pull_request_template = (
+                destination / ".github/pull_request_template.md"
+            ).read_text(encoding="utf-8")
+            self.assertNotIn("## Release notes", pull_request_template)
+            self.assertNotIn("## Breaking change", pull_request_template)
 
 
 if __name__ == "__main__":

@@ -18,87 +18,56 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
-    def test_dependency_chores_move_to_dependencies_and_other_chores_remain(self):
+    def test_enrich_handles_only_its_custom_release_sections(self):
+        self.assertEqual(notes.RICH_HEADINGS, {
+            "highlight": "✨ Highlights",
+            "usage example": "💡 Usage Examples",
+            "migration": "🔄 Migration",
+        })
+        sections = notes.extract_rich_sections(
+            "## Release notes\nignore\n## Breaking change\nignore\n## Migration\nUse v2."
+        )
+        self.assertEqual(sections, {"migration": "Use v2."})
+
+    def test_release_please_chore_and_dependency_content_is_untouched(self):
         changelog = (
-            "## 2.1.0\n\n"
-            "### 🧹 Chores\n\n"
-            "* **deps:** update alpha (#1)\n"
-            "* **maintenance:** reorganize scripts (#2)\n"
-            "* internal cleanup (#3)\n\n"
-            "### ✨ Features\n\n* feature\n"
+            "## 2.23.2\n\n### 🧹 Chores\n\n"
+            "- deps: update example package (#314)\n"
         )
-        normalized = notes._normalize_dependency_changelog(changelog)
-        self.assertIn("### 📦 Dependencies\n\n* **deps:** update alpha", normalized)
-        self.assertIn("### 🧹 Chores\n\n* **maintenance:** reorganize scripts", normalized)
-        self.assertIn("* internal cleanup", normalized)
-        self.assertIn("* feature", normalized)
-        self.assertEqual(notes._normalize_dependency_changelog(normalized), normalized)
-
-    def test_bare_chore_deps_commit_subject_is_removed_after_normalized_entry(self):
-        changelog = (
-            "## 2.23.2\n\n"
-            "### 🧹 Chores\n\n"
-            "* **deps:** update gradle/actions action to v6.4.0 (#314)\n\n"
-            "### 📦 Dependencies\n\n"
-            "* update quokkify/project-toolkit to v2.23.1 (#313)\n\n"
-            "chore(deps): update gradle/actions action to v6.4.0\n"
+        prs = [{"number": 314, "title": "chore(deps): update example package", "body": ""}]
+        self.assertEqual(notes.enrich_changelog(changelog, prs), changelog)
+        self.assertEqual(
+            notes.enrich_release_body(changelog, notes._render_entries(prs, set())),
+            changelog,
         )
-        normalized = notes._normalize_dependency_changelog(changelog)
-        self.assertIn("* **deps:** update gradle/actions action to v6.4.0 (#314)", normalized)
-        self.assertEqual(normalized.count("update gradle/actions action to v6.4.0"), 1)
-        self.assertNotIn("chore(deps): update gradle/actions action to v6.4.0", normalized)
-        self.assertIn("* update quokkify/project-toolkit to v2.23.1 (#313)", normalized)
 
-    def test_plain_deps_chore_moves_to_dependencies_and_self_update_is_hidden(self):
-        changelog = (
-            "## 2.23.2\n\n"
-            "### 🧹 Chores\n\n"
-            "* deps: update gradle/actions action to v6.4.0 (#314) (af58859)\n"
-            "* deps: update quokkify/project-toolkit to v2.23.1 (#313) (1094327)\n"
+    def test_release_please_owns_breaking_changes(self):
+        release_body = (
+            "## 3.0.0\n\n### ⚠ BREAKING CHANGES\n\n"
+            "- remove the deprecated API\n\n---\nRelease Please footer\n"
         )
-        normalized = notes.enrich_changelog(changelog, [], repository="quokkify/project-toolkit")
-        self.assertIn("### 📦 Dependencies", normalized)
-        self.assertIn("* deps: update gradle/actions action to v6.4.0 (#314) (af58859)", normalized)
-        self.assertNotIn("quokkify/project-toolkit", normalized)
-        self.assertNotIn("### 🧹 Chores", normalized)
+        prs = [{
+            "number": 8,
+            "title": "feat!: remove the deprecated API",
+            "body": "## Breaking change\nRemove the deprecated API.",
+        }]
+        updated = notes.enrich_release_body(release_body, notes._render_entries(prs, set()))
+        self.assertIn("### ⚠ BREAKING CHANGES", updated)
+        self.assertNotIn("### ⚠️ Breaking Changes", updated)
+        self.assertNotIn("Remove the deprecated API.", updated)
+        self.assertEqual(updated.count("deprecated API"), 1)
 
-    def test_release_please_body_moves_dependency_chore_and_hides_self_update(self):
-        repository = "quokkify/project-toolkit"
-        gradle_sha = "a" * 40
-        toolkit_sha = "b" * 40
-        release_notes = (
-            ":robot: I have created a release *beep* *boop*\n---\n\n"
-            "## [2.23.2](https://github.com/quokkify/project-toolkit/compare/v2.23.1...v2.23.2) (2026-09-28)\n\n"
-            "### 🧹 Chores\n\n"
-            "* **deps:** update gradle/actions action to v6.4.0 "
-            f"([#314](https://github.com/{repository}/issues/314)) "
-            f"([{gradle_sha[:7]}](https://github.com/{repository}/commit/{gradle_sha}))\n"
-            "* **deps:** update quokkify/project-toolkit to v2.23.1 "
-            f"([#313](https://github.com/{repository}/issues/313)) "
-            f"([{toolkit_sha[:7]}](https://github.com/{repository}/commit/{toolkit_sha}))\n\n"
-            "chore(deps): update gradle/actions action to v6.4.0\n\n"
-            "---\nThis PR was generated with Release Please.\n"
-        )
-        prs = [
-            {"number": 314, "title": "chore(deps): update gradle/actions action to v6.4.0", "body": ""},
-            {"number": 313, "title": "chore(deps): update quokkify/project-toolkit to v2.23.1", "body": ""},
-        ]
-        changelog = notes.enrich_changelog(release_notes, prs, repository=repository)
-        changelog = notes.enrich_changelog(changelog, prs, repository=repository)
-        body = notes.enrich_release_body(release_notes, "", repository=repository)
-        body = notes.enrich_release_body(body, "", repository=repository)
-        for output in (changelog, body):
-            self.assertIn("### 📦 Dependencies", output)
-            self.assertIn("update gradle/actions action to v6.4.0", output)
-            self.assertEqual(output.count("update gradle/actions action to v6.4.0"), 1)
-            self.assertNotIn("update quokkify/project-toolkit", output)
-            self.assertNotIn("chore(deps):", output)
-            self.assertNotIn("### 🧹 Chores", output)
-
-    def test_generated_helper_template_renders_without_changing_python_syntax(self):
-        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
-        rendered = Environment(undefined=StrictUndefined).from_string(template).render()
-        self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
+    def test_dependency_pr_can_contribute_only_its_migration_note(self):
+        prs = [{
+            "number": 5,
+            "title": "chore(deps): update one",
+            "body": "## Migration\nChange the import path.\n## Dependencies\nDo not render this.",
+        }]
+        rendered = notes._render_entries(prs, set())
+        self.assertIn("### 🔄 Migration", rendered)
+        self.assertIn("Change the import path.", rendered)
+        self.assertNotIn("Dependencies", rendered)
+        self.assertNotIn("chore(deps)", rendered)
 
     def test_workflow_delegates_source_discovery_to_the_helper(self):
         workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
@@ -126,16 +95,17 @@ class RichNotesTests(TestCase):
             {"number": 99, "title": "Empty", "body": "## Usage example\n<!-- optional -->"},
         ]
         first = notes.enrich_changelog(changelog, prs)
-        self.assertLess(first.index("#### First"), first.index("#### Second"))
+        self.assertLess(first.index("Important."), first.index("Upgrade now."))
         self.assertEqual(notes.enrich_changelog(first, prs), first)
         self.assertEqual(first.count("rich-release-notes"), 2)
 
-    def test_shell_looking_text_is_data(self):
+    def test_release_notes_section_is_ignored(self):
         changelog = "## 1.0.0\n"
         body = "## Release notes\n${{ github.token }}\n$(touch /tmp/pwned)\n"
         output = notes.enrich_changelog(changelog, [{"number": 7, "body": body}])
-        self.assertIn("${{ github.token }}", output)
-        self.assertIn("$(touch /tmp/pwned)", output)
+        self.assertNotIn("${{ github.token }}", output)
+        self.assertNotIn("$(touch /tmp/pwned)", output)
+        self.assertNotIn(notes.BLOCK_START, output)
 
     def test_cli_writes_generated_markdown(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,7 +116,7 @@ class RichNotesTests(TestCase):
             prs.write_text('[{"number": 1, "body": "## Highlight\\nHello"}]', encoding="utf-8")
             output = notes.enrich_changelog(changelog.read_text(), [{"number": 1, "body": "## Highlight\nHello"}])
             changelog.write_text(output, encoding="utf-8")
-            self.assertIn("### Highlights", changelog.read_text())
+            self.assertIn("### ✨ Highlights", changelog.read_text())
 
     def test_headings_inside_fences_are_not_sections_or_versions(self):
         body = "## Usage example\n```java\n## Migration\n```\nAfter\n"
@@ -205,120 +175,6 @@ class RichNotesTests(TestCase):
         self.assertNotIn("stale", updated)
         self.assertNotIn(notes.BLOCK_START, updated)
         self.assertEqual(notes.enrich_release_body(updated, ""), updated)
-
-    def test_dependency_entries_share_one_heading_in_both_outputs(self):
-        prs = [
-            {
-                "number": number,
-                "title": f"chore(deps): update package {number}",
-                "body": "",
-                "legacy_dependency": True,
-            }
-            for number in range(219, 225)
-        ]
-        changelog = notes.enrich_changelog("## 1.0.0\n", prs)
-        body = notes.enrich_release_body("## 1.0.0\n\n---\nfooter\n", notes._render_entries(prs, set()))
-        for output in (changelog, body):
-            self.assertEqual(output.count(notes.DEPENDENCIES_HEADING), 1)
-            for number in range(219, 225):
-                self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
-                self.assertEqual(output.count(f"- update package {number}"), 1)
-                self.assertNotIn("chore(deps)", output)
-
-    def test_dependency_heading_is_deduplicated_and_bare_chore_is_hidden(self):
-        prs = [
-            {"number": 1, "title": "chore(deps): update one", "body": "", "legacy_dependency": True},
-            {"number": 2, "title": "deps(deps): update two", "body": "", "legacy_dependency": True},
-            {"number": 3, "title": "chore: internal maintenance", "body": ""},
-            {
-                "number": 4,
-                "title": "chore(deps): rich update",
-                "body": "## Release notes\n### 📦 Dependencies\nlinked heading\n",
-            },
-        ]
-        output = notes._render_entries(prs, set())
-        self.assertEqual(output.count(notes.DEPENDENCIES_HEADING), 1)
-        self.assertIn("linked heading", output)
-        self.assertNotIn("chore: internal maintenance", output)
-        self.assertEqual(output.count("rich-release-notes pr=4"), 1)
-
-    def test_repeated_updates_compact_to_highest_version_with_all_sources(self):
-        prs = [
-            {"number": number, "title": f"chore(deps): update renovate to v{version}{tail}",
-             "body": "", "pr_url": f"https://example.test/pull/{number}"}
-            for number, version, tail in (
-                (299, "44.115.13", ""), (285, "44.107.0", ""),
-                (287, "44.108.2", ""), (288, "44.111.4", ""),
-                (290, "44.112.3", ""), (291, "44.115.2", ""),
-            )
-        ]
-        rendered = notes._render_entries(prs, set())
-        self.assertEqual(rendered.count("update renovate to v44.115.13"), 1)
-        for number in (285, 287, 288, 290, 291, 299):
-            self.assertIn(f"[#{number}](https://example.test/pull/{number})", rendered)
-        self.assertEqual(notes._rich_numbers(rendered), {"285", "287", "288", "290", "291", "299"})
-        self.assertNotIn("v44.107.0", rendered)
-
-    def test_compaction_preserves_rich_sections_and_each_source_marker_once(self):
-        prs = [
-            {"number": 1, "title": "chore(deps): update poetry to v2.3.4", "body": "## Migration\nKeep this note."},
-            {"number": 2, "title": "chore(deps): update poetry to v2.5.1", "body": ""},
-        ]
-        rendered = notes._render_entries(prs, set())
-        self.assertIn("Keep this note.", rendered)
-        self.assertIn("- update poetry to v2.5.1", rendered)
-        changelog = notes.enrich_changelog("## 2.0.0\n", prs)
-        release_body = notes.enrich_release_body("Release notes\n", rendered)
-        for output in (rendered, changelog, release_body):
-            self.assertIn("Keep this note.", output)
-            for number in (1, 2):
-                self.assertEqual(output.count(f"rich-release-notes pr={number}"), 1)
-
-    def test_dependency_groups_are_exact_name_and_keep_security(self):
-        prs = [
-            {"number": 1, "title": "chore(deps): update poetry to v2.3.4 [security]", "body": ""},
-            {"number": 2, "title": "chore(deps): update poetry to v2.5.1", "body": ""},
-            {"number": 5, "title": "chore(deps): update uv to v0.11.15 [security]", "body": ""},
-            {"number": 6, "title": "chore(deps): update uv to v0.12.19", "body": ""},
-            {"number": 7, "title": "chore(deps): update corepack to v0.36.0", "body": ""},
-            {"number": 3, "title": "chore(deps): update github/codeql-action/init digest to abc1234", "body": ""},
-            {"number": 4, "title": "chore(deps): update github/codeql-action/analyze digest to abc1234", "body": ""},
-        ]
-        rendered = notes._render_entries(prs, set())
-        self.assertIn("update poetry to v2.5.1 (#1, #2) [security]", rendered)
-        self.assertIn("update github/codeql-action/init digest to abc1234", rendered)
-        self.assertIn("update github/codeql-action/analyze digest to abc1234", rendered)
-        self.assertEqual(rendered.count("update poetry to"), 1)
-        self.assertIn("update uv to v0.12.19 (#5, #6) [security]", rendered)
-        self.assertIn("update corepack to v0.36.0 (#7)", rendered)
-        self.assertEqual(rendered.count("update uv to"), 1)
-
-    def test_ambiguous_dependency_titles_are_not_compacted(self):
-        prs = [
-            {"number": 1, "title": "chore(deps): update package to v1.2.3 for compatibility", "body": ""},
-            {"number": 2, "title": "chore(deps): update package to v1.2.4-beta.1", "body": ""},
-        ]
-        rendered = notes._render_entries(prs, set())
-        self.assertIn("update package to v1.2.3 for compatibility", rendered)
-        self.assertIn("update package to v1.2.4-beta.1", rendered)
-
-    def test_compacted_dependency_block_matches_changelog_and_body_on_rerun(self):
-        prs = [
-            {"number": 10, "title": "chore(deps): update poetry to v2.3.4 [security]", "body": "",
-             "pr_url": "https://example.test/pull/10"},
-            {"number": 11, "title": "chore(deps): update poetry to v2.5.1", "body": "",
-             "pr_url": "https://example.test/pull/11"},
-        ]
-        source = "## 2.0.0\n\n### Features\n- keep\n\n## 1.9.0\n\n### Dependencies\n- historical\n"
-        first = notes.enrich_changelog(source, prs)
-        again = notes.enrich_changelog(first, prs)
-        self.assertEqual(first, again)
-        self.assertIn("- update poetry to v2.5.1 ([#10](https://example.test/pull/10), [#11](https://example.test/pull/11)) [security]", first)
-        self.assertEqual(first.count("update poetry to"), 1)
-        self.assertIn("## 1.9.0\n\n### Dependencies\n- historical", first)
-        body = notes.enrich_release_body("## release\n\n---\nfooter\n", notes._render_entries(prs, set()))
-        self.assertEqual(body.count("update poetry to"), 1)
-        self.assertEqual(notes._rich_numbers(notes._render_entries(prs, set())), {"10", "11"})
 
     def test_duplicate_source_records_render_once(self):
         changelog = "## 1.0.0\n"
@@ -430,145 +286,6 @@ class RichNotesTests(TestCase):
         )
         self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [8])
 
-    def test_legacy_dependency_entries_are_rendered_under_dependencies(self):
-        rendered = notes._render_entries(
-            [{
-                "number": 219,
-                "title": "chore(deps): update allure",
-                "body": "",
-                "legacy_dependency": True,
-            }],
-            set(),
-        )
-        self.assertIn("### 📦 Dependencies", rendered)
-        self.assertIn("- update allure", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-
-    def test_dependency_titles_render_as_bullets_without_conventional_prefix(self):
-        rendered = notes._render_entries(
-            [
-                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
-                {"number": 2, "title": "deps(deps): update two (#2)", "legacy_dependency": True},
-            ],
-            set(),
-        )
-        self.assertEqual(rendered.count("### 📦 Dependencies"), 1)
-        self.assertIn("- update one", rendered)
-        self.assertIn("- update two (#2)", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-        self.assertNotIn("deps(deps)", rendered)
-
-    def test_rich_dependency_content_is_preserved_for_legacy_mapping(self):
-        rendered = notes._render_entries(
-            [{
-                "number": 1,
-                "title": "chore(deps): update one",
-                "body": "## Dependencies\n- update one with compatibility note",
-                "legacy_dependency": True,
-            }],
-            set(),
-        )
-        self.assertIn("- update one with compatibility note", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-
-    def test_rich_linked_dependency_entries_are_bulleted_and_prefix_free(self):
-        rendered = notes._render_entries(
-            [{
-                "number": 12,
-                "title": "dependency summary",
-                "body": (
-                    "## Dependencies\n"
-                    "chore(deps): [update one](https://example.test/one)\n"
-                    "deps(deps): [update two](https://example.test/two)\n"
-                ),
-            }],
-            set(),
-        )
-        self.assertIn("- [update one](https://example.test/one)", rendered)
-        self.assertIn("- [update two](https://example.test/two)", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-        self.assertNotIn("deps(deps)", rendered)
-
-    def test_dependency_markers_stay_inside_one_contiguous_markdown_list(self):
-        rendered = notes._render_entries(
-            [
-                {
-                    "number": 1,
-                    "title": "chore(deps): update one",
-                    "body": "",
-                    "legacy_dependency": True,
-                },
-                {
-                    "number": 2,
-                    "title": "deps(deps): [update two](https://example.test/two)",
-                    "body": "",
-                    "legacy_dependency": True,
-                },
-                {"number": 3, "title": "feature", "body": "## Highlight\nUseful note"},
-            ],
-            set(),
-        )
-        self.assertEqual(
-            rendered,
-            "\n".join(
-                [
-                    "### 📦 Dependencies",
-                    "- update one (#1) <!-- project-toolkit:rich-release-notes pr=1 -->",
-                    "- [update two](https://example.test/two) (#2) <!-- project-toolkit:rich-release-notes pr=2 -->",
-                    "<!-- project-toolkit:rich-release-notes pr=3 -->",
-                    "#### feature",
-                    "### Highlights",
-                    "Useful note",
-                ]
-            ),
-        )
-        self.assertEqual(notes._rich_numbers(rendered), {"1", "2", "3"})
-        self.assertNotIn("\n\n-", rendered)
-
-    def test_interleaved_rich_entries_keep_dependency_list_contiguous(self):
-        rendered = notes._render_entries(
-            [
-                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
-                {"number": 2, "title": "Highlight", "body": "## Highlight\nUseful note"},
-                {"number": 3, "title": "chore(deps): update three", "legacy_dependency": True},
-            ],
-            set(),
-        )
-        self.assertEqual(rendered.count(notes.DEPENDENCIES_HEADING), 1)
-        dependency_start = rendered.index(notes.DEPENDENCIES_HEADING)
-        highlight_start = rendered.index("<!-- project-toolkit:rich-release-notes pr=2 -->")
-        dependency_end = rendered.index("<!-- project-toolkit:rich-release-notes pr=3 -->")
-        self.assertLess(dependency_start, highlight_start)
-        self.assertLess(dependency_end, highlight_start)
-        self.assertEqual(
-            rendered[dependency_start:highlight_start].count("\n- "),
-            2,
-        )
-        self.assertNotIn("\n\n", rendered[dependency_start:highlight_start])
-
-    def test_mixed_dependency_and_highlight_stays_before_later_dependency(self):
-        rendered = notes._render_entries(
-            [
-                {"number": 1, "title": "chore(deps): update one", "legacy_dependency": True},
-                {
-                    "number": 2,
-                    "title": "mixed update",
-                    "body": "## Dependencies\n- update two\n## Highlight\nUseful note",
-                },
-                {"number": 3, "title": "chore(deps): update three", "legacy_dependency": True},
-            ],
-            set(),
-        )
-        dependency_start = rendered.index(notes.DEPENDENCIES_HEADING)
-        highlight_start = rendered.index("### Highlights")
-        dependency_text = rendered[dependency_start:highlight_start]
-        self.assertEqual(dependency_text.count("\n- "), 3)
-        self.assertEqual(dependency_text.count("rich-release-notes pr="), 3)
-        self.assertLess(dependency_text.index("update one"), dependency_text.index("update two"))
-        self.assertLess(dependency_text.index("update two"), dependency_text.index("update three"))
-        self.assertEqual(rendered.count("### Highlights"), 1)
-        self.assertEqual(rendered.count("Useful note"), 1)
-
     def test_rich_number_parser_accepts_only_machine_marker_shapes(self):
         marker = "<!-- project-toolkit:rich-release-notes pr=999 -->"
         text = "\n".join(
@@ -604,79 +321,6 @@ class RichNotesTests(TestCase):
         output = notes.enrich_changelog(changelog, prs)
         self.assertIn("Current note", output)
         self.assertIn("rich-release-notes pr=999", output)
-
-    def test_title_only_legacy_dependency_keeps_pr_and_commit_attribution(self):
-        sha = "a" * 40
-        rendered = notes._render_entries(
-            [{
-                "number": 219,
-                "title": "chore(deps): update allure",
-                "body": "",
-                "legacy_dependency": True,
-                "pr_url": "https://github.com/acme/widget/pull/219",
-                "commit_sha": sha,
-                "commit_url": f"https://github.com/acme/widget/commit/{sha}",
-            }],
-            set(),
-        )
-        self.assertIn("- update allure", rendered)
-        self.assertIn("[#219](https://github.com/acme/widget/pull/219)", rendered)
-        self.assertIn(f"[aaaaaaa](https://github.com/acme/widget/commit/{sha})", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-
-    def test_legacy_dependency_entries_render_exactly_once_in_changelog_and_body(self):
-        prs = [
-            {
-                "number": number,
-                "title": f"chore(deps): update package-{number}",
-                "body": "",
-                "legacy_dependency": True,
-            }
-            for number in range(219, 225)
-        ]
-        changelog = notes.enrich_changelog("## 2.21.1\n", prs)
-        top = changelog[: notes._version_ranges(changelog)[0][1]]
-        rich = notes._render_entries(prs, set())
-        release_body = notes.enrich_release_body("## 2.21.1\n\n---\nfooter\n", rich)
-        for number in range(219, 225):
-            title = f"chore(deps): update package-{number}"
-            with self.subTest(number=number):
-                self.assertEqual(top.count(title), 0)
-                self.assertEqual(release_body.count(title), 0)
-                self.assertEqual(top.count(f"- update package-{number}"), 1)
-                self.assertEqual(release_body.count(f"- update package-{number}"), 1)
-
-    def test_legacy_dependency_discovery_uses_previous_release_tag(self):
-        changelog = "## 2.21.1\n\n## 2.21.0\n"
-        completed = subprocess.CompletedProcess(
-            ["git"],
-            0,
-            "chore(deps): update allure (#219)\nchore: cleanup (#999)\n",
-            "",
-        )
-        with mock.patch.object(notes, "_run_git", return_value=completed) as run_git:
-            self.assertEqual(notes.legacy_dependency_pr_numbers(changelog), [219])
-        run_git.assert_called_once_with(["log", "v2.21.0..HEAD", "--format=%s"])
-
-    def test_legacy_dependency_discovery_accepts_linked_release_headings(self):
-        changelog = (
-            "## [2.21.1](https://github.com/acme/widget/releases/tag/v2.21.1)\n\n"
-            "## [2.21.0](https://github.com/acme/widget/releases/tag/v2.21.0)\n"
-        )
-        completed = subprocess.CompletedProcess(
-            ["git"], 0, "chore(deps): update node (#224)\n", ""
-        )
-        with mock.patch.object(notes, "_run_git", return_value=completed) as run_git:
-            self.assertEqual(notes.legacy_dependency_pr_numbers(changelog), [224])
-        run_git.assert_called_once_with(["log", "v2.21.0..HEAD", "--format=%s"])
-
-    def test_legacy_dependency_discovery_fails_closed_when_history_is_missing(self):
-        changelog = "## 2.21.1\n\n## 2.21.0\n"
-        with mock.patch.object(
-            notes, "_run_git", side_effect=notes.EnrichmentError("missing tag")
-        ):
-            with self.assertRaisesRegex(notes.EnrichmentError, "missing tag"):
-                notes.legacy_dependency_pr_numbers(changelog)
 
     def test_manifest_discovers_package_local_and_root_relative_changelogs(self):
         with tempfile.TemporaryDirectory() as temporary:
