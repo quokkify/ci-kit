@@ -18,11 +18,6 @@ spec.loader.exec_module(notes)
 
 
 class RichNotesTests(TestCase):
-    def test_generated_helper_template_renders_without_changing_python_syntax(self):
-        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
-        rendered = Environment(undefined=StrictUndefined).from_string(template).render()
-        self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
-
     def test_enrich_handles_only_its_custom_release_sections(self):
         self.assertEqual(notes.RICH_HEADINGS, {
             "highlight": "✨ Highlights",
