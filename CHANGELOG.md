@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.23.2](https://github.com/quokkify/project-toolkit/compare/v2.23.1...v2.23.2) (2026-09-29)
+
+
+### 🐛 Bug Fixes
+
+* **release:** keep Release Please as section owner ([#321](https://github.com/quokkify/project-toolkit/issues/321)) ([7a26210](https://github.com/quokkify/project-toolkit/commit/7a262107f5c000bb68d256cc5270a8552b288c31))
+* **release:** normalize dependency chore entries ([#317](https://github.com/quokkify/project-toolkit/issues/317)) ([4ac4f3f](https://github.com/quokkify/project-toolkit/commit/4ac4f3f05ecff035b9631c896c4196aeb73fb4f0))
+* **release:** normalize generated release PR body ([#318](https://github.com/quokkify/project-toolkit/issues/318)) ([e59d6ed](https://github.com/quokkify/project-toolkit/commit/e59d6ed69a4bb481285377622fa9254b79856a05))
+* **release:** trigger releases for dependency updates ([#315](https://github.com/quokkify/project-toolkit/issues/315)) ([7b71157](https://github.com/quokkify/project-toolkit/commit/7b7115781d6ead2690db7c11bcce9a19490191b1))
+* **template:** preserve release helper regex during rendering ([#311](https://github.com/quokkify/project-toolkit/issues/311)) ([544bd89](https://github.com/quokkify/project-toolkit/commit/544bd892f2094cc8f60570467f3b7e42fb3b29a3))
+
+
+### 🧹 Chores
+
+* **deps:** update gradle/actions action to v6.4.0 ([#314](https://github.com/quokkify/project-toolkit/issues/314)) ([af58859](https://github.com/quokkify/project-toolkit/commit/af58859259732d70156a6253593e2b763881ff35))
+* **deps:** update quokkify/project-toolkit to v2.23.1 ([#313](https://github.com/quokkify/project-toolkit/issues/313)) ([1094327](https://github.com/quokkify/project-toolkit/commit/1094327cf5dde1c92f814671b7f70c2e24d87189))
+* **deps:** update renovate to v44.117.2 ([#320](https://github.com/quokkify/project-toolkit/issues/320)) ([93cbca6](https://github.com/quokkify/project-toolkit/commit/93cbca66ba3eaa75fb787bfb8271e0e5f73fbb1b))
+* **deps:** update uv to v0.12.20 ([#319](https://github.com/quokkify/project-toolkit/issues/319)) ([d936c9f](https://github.com/quokkify/project-toolkit/commit/d936c9faa2212d7487396272b699790f1b8fb387))
+
 ## [2.23.1](https://github.com/quokkify/project-toolkit/compare/v2.23.0...v2.23.1) (2026-09-28)
 
 
