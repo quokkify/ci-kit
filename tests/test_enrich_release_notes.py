@@ -104,7 +104,7 @@ class RichNotesTests(TestCase):
         self.assertEqual(notes.enrich_changelog(first, prs), first)
         self.assertEqual(first.count("rich-release-notes"), 2)
 
-    def test_shell_looking_text_is_data(self):
+    def test_release_notes_section_is_ignored(self):
         changelog = "## 1.0.0\n"
         body = "## Release notes\n${{ github.token }}\n$(touch /tmp/pwned)\n"
         output = notes.enrich_changelog(changelog, [{"number": 7, "body": body}])

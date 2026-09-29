@@ -179,6 +179,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             pull_request_template = (
                 destination / ".github/pull_request_template.md"
             ).read_text(encoding="utf-8")
+            self.assertNotIn("## Release notes", pull_request_template)
             self.assertNotIn("## Breaking change", pull_request_template)
 
 
