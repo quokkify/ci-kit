@@ -74,7 +74,7 @@ def release_fleet_follow_up_errors(job: object, rel: Path) -> list[str]:
         "must use ./.github/workflows/copier-fleet-auto-update.yml",
     )
     require("steps" not in job and "runs-on" not in job, "must not define steps or runs-on")
-    require(job.get("needs") == "release", "must depend on the release job")
+    require(job.get("needs") == ["release", "verify-tag"], "must depend on release and the actual-tag CI gate")
     require(
         "needs.release.outputs.releases-created == 'true'" in str(job.get("if", "")),
         "must only run when Release Please tagged a release",
@@ -118,8 +118,8 @@ def release_workflow_errors(path: Path) -> list[str]:
 
     require(
         workflow.get("permissions")
-        == {"contents": "write", "pull-requests": "write"},
-        "permissions must be exactly contents:write and pull-requests:write",
+        == {"actions": "read", "contents": "write", "pull-requests": "write"},
+        "permissions must be actions:read, contents:write and pull-requests:write",
     )
     require(
         workflow.get("concurrency")
@@ -135,8 +135,10 @@ def release_workflow_errors(path: Path) -> list[str]:
     require(
         isinstance(jobs, dict)
         and "release" in jobs
-        and set(jobs) <= {"release", "fleet-update"},
-        "must define the release caller job and at most the fleet-update follow-up job",
+        and "verify-release" in jobs
+        and "verify-tag" in jobs
+        and set(jobs) <= {"verify-release", "release", "verify-tag", "fleet-update"},
+        "must define the release caller and its exact-revision CI gate",
     )
     caller_jobs = (
         [
@@ -154,6 +156,24 @@ def release_workflow_errors(path: Path) -> list[str]:
     errors.extend(release_fleet_follow_up_errors(jobs.get("fleet-update"), rel))
 
     job = caller_jobs[0]
+    require(job.get("needs") == "verify-release", "release must depend on its CI gate")
+    gate = jobs.get("verify-release", {})
+    require(gate.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "read"}, "release gate must be read-only")
+    require(gate.get("timeout-minutes") == 35, "release gate must have a bounded job timeout")
+    require("github.ref == 'refs/heads/main'" in str(gate.get("if", "")), "release preflight must be restricted to main")
+    gate_steps = gate.get("steps", [])
+    require(any(isinstance(step, dict) and step.get("with", {}).get("ref") == "${{ github.sha }}" for step in gate_steps), "release gate must check out the exact triggering commit")
+    require(any(isinstance(step, dict) and "scripts/verify_ci_gate.py" in str(step.get("run", ""))
+                and "--preflight" in str(step.get("run", ""))
+                and step.get("env", {}).get("RELEASE_SHA") == "${{ github.sha }}" for step in gate_steps), "release gate must verify CI for the triggering SHA")
+    tag_gate = jobs.get("verify-tag", {})
+    require(tag_gate.get("needs") == "release", "actual-tag gate must depend on release")
+    require(tag_gate.get("permissions") == {"actions": "read", "contents": "read"}, "actual-tag gate must be read-only")
+    require(tag_gate.get("timeout-minutes") == 35, "actual-tag gate must have a bounded timeout")
+    require("needs.release.outputs.releases-created == 'true'" in str(tag_gate.get("if", "")), "actual-tag gate must run only for a new release")
+    require(any(isinstance(step, dict) and "--ref" in str(step.get("run", ""))
+                and step.get("env", {}).get("RELEASE_TAG") == "${{ needs.release.outputs.tag-name }}"
+                for step in tag_gate.get("steps", [])), "actual-tag gate must verify the tag Release Please created")
     require(
         job.get("uses") == "./.github/workflows/release-please.yml",
         "caller job must use ./.github/workflows/release-please.yml",
@@ -318,6 +338,7 @@ def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
     script = str(update_step.get("run", ""))
     require("--public-only" in script, "update step must pass --public-only")
     require("--write" in script, "update step must be able to run in write mode")
+    require("python scripts/rollout_copier_fleet.py" in script, "write front must use the pilot rollout coordinator")
 
     env = update_step.get("env")
     require(isinstance(env, dict), "update step must define env:")

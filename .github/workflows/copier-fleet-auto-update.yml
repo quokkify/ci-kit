@@ -115,7 +115,7 @@ jobs:
           json_report="$RUNNER_TEMP/copier-fleet-update.json"
           args+=(--markdown-report "$markdown_report" --json-report "$json_report")
           set +e
-          python scripts/update_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
+          python scripts/rollout_copier_fleet.py "${args[@]}" 2>&1 | tee "$output"
           status=${PIPESTATUS[0]}
           set -e
           if [[ -f "$markdown_report" ]]; then
