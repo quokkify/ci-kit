@@ -101,8 +101,9 @@ class RenderedWorkflowEvidenceTests(TestCase):
         (self.root / ".github/workflows").mkdir(parents=True)
 
     def test_current_worktree_rendered_without_overwriting_native_workflows(self) -> None:
-        template = self.root / "templates/project/template/.github/workflows/python.yml.jinja"
-        template = next(template.parent.glob("*.yml.jinja"))
+        # The Python scenario always renders Validate; optional workflows may
+        # be excluded, and directory iteration order differs across hosts.
+        template = self.root / "templates/project/template/.github/workflows/validate.yml.jinja"
         template.write_text("# current worktree sentinel\n" + template.read_text())
         native = self.root / ".github/workflows/codeql.yml"
         native.write_text("native workflow sentinel\n")
