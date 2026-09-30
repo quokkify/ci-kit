@@ -913,6 +913,7 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
     matrix = analyze_strategy.get("matrix", {}) if isinstance(analyze_strategy, dict) else {}
     include = matrix.get("include", []) if isinstance(matrix, dict) else []
     expected_languages = {
+        ("actions", "none"),
         ("python", "none"),
         ("javascript-typescript", "none"),
         ("java-kotlin", "none"),
@@ -935,6 +936,26 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
         "${{ matrix.build-mode }}"
     ):
         errors.append(f"{rel}: CodeQL init must receive the explicit matrix build mode")
+    render_steps = [
+        step for step in steps if isinstance(step, dict)
+        and step.get("run") == "python scripts/render_codeql_workflows.py"
+    ]
+    if (
+        len(render_steps) != 1 or len(init_steps) != 1
+        or render_steps[0].get("if") != "matrix.language == 'actions'"
+        or steps.index(render_steps[0]) >= steps.index(init_steps[0])
+    ):
+        errors.append(f"{rel}: Actions template evidence must be rendered before CodeQL init")
+    config_path = ROOT / ".github/codeql/codeql-config.yml"
+    try:
+        config = yaml.safe_load(config_path.read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        errors.append(f"{config_path.relative_to(ROOT)}: YAML parse failed: {exc}")
+    else:
+        if not isinstance(config, dict) or config.get("paths") != [
+            "scripts", "tests", "actions", ".github/workflows"
+        ]:
+            errors.append(f"{rel}: CodeQL must cover scripts, tests, shipped actions and workflows")
     return errors
 
 
@@ -2818,21 +2839,9 @@ if GENERATED_RENOVATE_CONFIGS:
                 + (prettier.stderr or prettier.stdout).strip(),
             )
 
-# tests/test_validate_helpers.py runs this script again inside a temporary copy of the
-# repository, and that copy reaches this block too. Mark the child environment so the nested
-# run skips the suites instead of spawning its own, which would recurse without bound. The
-# marker is set here rather than in the test so the invariant does not depend on the caller.
-NESTED_MARKER = "PROJECT_TOOLKIT_NESTED_VALIDATION"
-if os.environ.get(NESTED_MARKER) == "1":
-    print("nested validation: skipping suites that re-enter scripts/validate.py")
-else:
-    suite_env = {**os.environ, NESTED_MARKER: "1"}
-    run([sys.executable, "tests/test_checkout.py"], env=suite_env)
-    run([sys.executable, "tests/test_composite_actions.py"], env=suite_env)
-    run([sys.executable, "tests/test_release_notes_config.py"], env=suite_env)
-    run([sys.executable, "tests/test_update_copier_fleet.py"], env=suite_env)
-    run([sys.executable, "tests/test_validate_helpers.py"], env=suite_env)
-    run([sys.executable, "tests/test_reconcile_ruleset.py"], env=suite_env)
+# The runner discovers suites and marks their child environment so tests that
+# invoke this validator do not recursively start the suite runner again.
+run([sys.executable, "scripts/run_test_suites.py"])
 run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
 
 if not ARGS.static:
