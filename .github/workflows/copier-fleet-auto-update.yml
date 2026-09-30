@@ -86,6 +86,7 @@ jobs:
           args=(
             --org quokkify
             --public-only
+            --include-health
             --exclude quokkify/.github
             --exclude quokkify/project-toolkit
             --branch automation/copier-template-update

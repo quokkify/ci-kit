@@ -66,6 +66,7 @@ class Result:
     status: str
     detail: str = ""
     inventory: "TemplateInventory | None" = None
+    health: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -969,7 +970,31 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             if inventory and inventory.renovate == "missing":
                 lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['renovate']}`")
             lines.append("")
+    health_results = [result for result in results if result.health is not None]
+    if health_results:
+        lines.extend(["", "### Adoption and branch health", "", "This read-only snapshot is independent of PR creation and template rendering.", "", "| Repository | Applied → target | Default revision / CI | Automation PR / CI | Active required checks | Exception |", "| --- | --- | --- | --- | --- | --- |"])
+        for result in health_results:
+            health = result.health or {}
+            pr = health.get("pull_request")
+            if pr:
+                pr_text = f"{pr.get('url')} · {pr.get('state')} · {pr.get('age_days')}d · {pr.get('head_sha')} · {pr.get('ci', {}).get('status', 'unknown')}"
+            else:
+                pr_text = "none" if health.get("pull_request_observation", {}).get("status") == "observed" else "unknown"
+            policy = health.get("required_checks", {})
+            checks = ", ".join(str(item.get("context")) + (f" (app {item['integration_id']})" if item.get("integration_id") is not None else "") for item in policy.get("checks", []))
+            exception = health.get("exception")
+            exception_text = f"{exception.get('status')}: {exception.get('reason')} · expires {exception.get('expires_on')}" if exception else "none"
+            cells = [result.repository, f"{health.get('applied_template_version')} → {health.get('target_template_version')} ({health.get('adoption')})", f"{health.get('default_sha')} · {health.get('default_ci', {}).get('status', 'unknown')}", pr_text, f"{policy.get('status', 'unknown')}: {checks or 'none observed'}", exception_text]
+            lines.append("| " + " | ".join(health_markdown_escape(str(value)) for value in cells) + " |")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def health_markdown_escape(value: str) -> str:
+    import html
+    value = html.escape(sanitize_text(value)).replace("\\", "\\\\")
+    for character in "|`*_[]()#!":
+        value = value.replace(character, "\\" + character)
+    return value
 
 
 def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
@@ -996,10 +1021,12 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 "release_please": result.inventory.release_please,
                 "renovate": result.inventory.renovate,
             }
+        if result.health is not None:
+            item["health"] = result.health
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "summary": counts,
         "configuration_gaps": gaps,
         "configuration_mismatches": gaps,
@@ -1554,6 +1581,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--template-repository", default=DEFAULT_TEMPLATE_REPOSITORY)
     parser.add_argument("--template-ref", help="Optional Copier VCS ref; scheduled runs normally use the latest release tag.")
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
+    parser.add_argument("--include-health", action="store_true", help="Add read-only adoption, exact-revision CI, branch policy and PR evidence.")
+    parser.add_argument("--health-exceptions", type=Path, help="Maintainer-owned reporting-only exception JSON; defaults to checked-in fleet config.")
     parser.add_argument("--markdown-report", type=Path, help="Write a Markdown fleet report to this path.")
     parser.add_argument("--json-report", type=Path, help="Write a machine-readable JSON fleet report to this path.")
     parser.add_argument("--repo", action="append", default=[], help="Process one owner/repository; repeatable.")
@@ -1586,6 +1615,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
+
+    health_module = None
+    health_exceptions: dict[str, dict[str, str]] = {}
+    if args.include_health:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fleet_health", Path(__file__).with_name("fleet_health.py"))
+        assert spec and spec.loader
+        health_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(health_module)
+        try:
+            health_exceptions = health_module.load_exceptions(args.health_exceptions) if args.health_exceptions else health_module.load_exceptions()
+        except (OSError, ValueError):
+            print("invalid or unreadable maintainer fleet-health exception configuration", file=sys.stderr)
+            return 2
+    elif args.health_exceptions:
+        print("--health-exceptions requires --include-health", file=sys.stderr)
+        return 2
 
     repositories: list[Repository] = []
     results: list[Result] = []
@@ -1678,6 +1724,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             except Exception as exc:  # continue the fleet, then fail the run loudly
                 failures += 1
                 result = Result(repository.name_with_owner, "failed", str(exc))
+            if health_module is not None and result.inventory is not None:
+                result = replace(result, health=health_module.collect_health(
+                    repository.name_with_owner, repository.default_branch, template_ref,
+                    args.branch, lambda endpoint: gh_json(["api", "--method", "GET", endpoint], env=env),
+                    health_exceptions.get(repository.name_with_owner),
+                ))
             results.append(result)
 
     for result in results:
