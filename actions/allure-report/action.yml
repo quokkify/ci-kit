@@ -26,7 +26,7 @@ inputs:
   allure-version:
     description: Exact Allure CLI version
     required: false
-    default: "3.19.0"
+    default: "3.19.1"
   module-environment-label:
     description: Result label used to create module-scoped Allure environments; empty disables module scoping
     required: false
