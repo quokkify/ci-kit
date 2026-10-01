@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.24.0](https://github.com/quokkify/project-toolkit/compare/v2.23.5...v2.24.0) (2026-10-01)
+
+
+### ✨ Features
+
+* **fleet:** report actual adoption and revision-bound health ([#338](https://github.com/quokkify/project-toolkit/issues/338)) ([baaa063](https://github.com/quokkify/project-toolkit/commit/baaa063bb5a3db3615f66154af74d73c4690a18f))
+
+
+### 🐛 Bug Fixes
+
+* **ci:** execute all suites and scan distributed workflows ([#336](https://github.com/quokkify/project-toolkit/issues/336)) ([bdb3f86](https://github.com/quokkify/project-toolkit/commit/bdb3f86521bec7fa2aa5b4d040d2c175e54cda8c))
+* **release:** gate exact revisions and verify fleet pilots ([#337](https://github.com/quokkify/project-toolkit/issues/337)) ([f85a1e8](https://github.com/quokkify/project-toolkit/commit/f85a1e829ee6db254744cc33746590875c51a3e6))
+
+
+### 🧹 Chores
+
+* **deps:** update allure to v3.19.1 ([#333](https://github.com/quokkify/project-toolkit/issues/333)) ([e11983d](https://github.com/quokkify/project-toolkit/commit/e11983dfb024fefcc843825ba8e8e3dbdfc7c05c))
+* **deps:** update quokkify/project-toolkit to v2.23.5 ([#331](https://github.com/quokkify/project-toolkit/issues/331)) ([25e366a](https://github.com/quokkify/project-toolkit/commit/25e366ab58b065fdc5bce4f798f6e93e289a6073))
+* **deps:** update renovate to v44.121.4 ([#335](https://github.com/quokkify/project-toolkit/issues/335)) ([831bcb3](https://github.com/quokkify/project-toolkit/commit/831bcb387641ada1210c9d33fbe93ce4da09e52b))
+* **deps:** update uv to v0.12.21 ([#334](https://github.com/quokkify/project-toolkit/issues/334)) ([3fd7d43](https://github.com/quokkify/project-toolkit/commit/3fd7d43b252112c74d2843be131b41abddfb807a))
+
+
+### ♻️ Refactoring
+
+* **allure:** reuse scoped report and Pages workflows ([#339](https://github.com/quokkify/project-toolkit/issues/339)) ([b08d360](https://github.com/quokkify/project-toolkit/commit/b08d360040ab8a1986d5eacf2ec7424922f2effd))
+
 ## [2.23.5](https://github.com/quokkify/project-toolkit/compare/v2.23.4...v2.23.5) (2026-09-29)
 
 
