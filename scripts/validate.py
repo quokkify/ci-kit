@@ -1439,16 +1439,15 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
     if workflow.get("permissions") != {}:
         errors.append(f"{label}: workflow-level permissions must be empty")
     jobs = workflow.get("jobs", {})
-    expected_jobs = {"resolve", "download", "generate", "comment", "pages"}
+    expected_jobs = {"resolve", "download", "generate", "comment"}
     if not isinstance(jobs, dict) or set(jobs) != expected_jobs:
-        errors.append(f"{label}: must define resolve/download/generate/comment/pages jobs")
+        errors.append(f"{label}: must define resolve/download/generate/comment jobs")
         return errors
     required_permissions = {
         "resolve": {"actions": "read", "contents": "read", "pull-requests": "read"},
         "download": {"actions": "read", "contents": "read"},
         "generate": {"actions": "read", "contents": "read"},
         "comment": {"actions": "read", "pull-requests": "write"},
-        "pages": {"actions": "read", "contents": "write", "pull-requests": "read"},
     }
     valid_jobs: dict[str, dict] = {}
     for name, permissions in required_permissions.items():
@@ -1493,28 +1492,28 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
     # searching for a marker.  This prevents comments, dead branches, and an
     # unrelated github-script step from satisfying the contract.
     resolve_guards = {
-        "No ${process.env.ARTIFACT_PREFIX} artifacts were produced": re.compile(
-            r"if\s*\(\s*names\.length\s*===\s*0\s*&&\s*minimum\s*===\s*0\s*\)\s*\{.*?"
-            r"skip\(\s*`No \${process\.env\.ARTIFACT_PREFIX} artifacts were produced; skipping Allure report\.`\s*\)\s*;"
-            r".*?return\s*;\s*\}",
-            re.DOTALL,
-        ),
-        "Allure artifact contract mismatch": re.compile(
-            r"if\s*\(.*?names\.length\s*<\s*minimum.*?selected\.some\(.*?artifact\.expired.*?\)\s*\)\s*\{.*?"
-            r"core\.setFailed\(\s*`Allure artifact contract mismatch for \${process\.env\.ARTIFACT_PREFIX}.*?`\s*\)\s*;"
-            r".*?return\s*;\s*\}",
-            re.DOTALL,
-        ),
+        "No external Allure artifacts found": re.compile(
+            r'if\s*\(\s*externalRun\s*&&\s*actualNames\.length\s*===\s*0.*?'
+            r'minimumArtifacts\s*===\s*0.*?process\.env\.SKIP_EMPTY_ARTIFACTS.*?\)\s*\{.*?'
+            r'skip\(\s*"No external Allure artifacts found; report generation skipped\."\s*\)\s*;.*?return\s*;', re.DOTALL),
+        "External Allure artifact contract mismatch": re.compile(
+            r'if\s*\(\s*externalRun\s*&&.*?actualNames\.length\s*<\s*minimumArtifacts.*?'
+            r'actualNames\.length\s*>\s*maximumArtifacts.*?new Set\(actualNames\).*?\)\s*\{.*?'
+            r'core\.setFailed\(\s*`External Allure artifact contract mismatch.*?`\s*\)\s*;.*?return\s*;', re.DOTALL),
         'pull.user?.login === "dependabot[bot]"': re.compile(
-            r"core\.setOutput\(\s*['\"]fork-pr['\"]\s*,[^\n]*pull\.user\?\.login\s*===\s*['\"]dependabot\[bot\]['\"]",
-            re.DOTALL,
-        ),
+            r'const pagesUnsafe =.*?pull\.head\.repo\.full_name !== pull\.base\.repo\.full_name.*?'
+            r'pull\.user\?\.login === "dependabot\[bot\]";\s*'
+            r'core\.setOutput\("fork-pr", String\(pagesUnsafe\)\)', re.DOTALL),
         "A newer source workflow run exists": re.compile(
-            r"if\s*\(\s*!Number\.isSafeInteger\(newestRunId\).*?Number\(run\.id\)\s*!==\s*newestRunId\s*\)\s*\{.*?"
+            r"if\s*\(\s*!Number\.isSafeInteger\(newestRunId\).*?Number\(run\.id\)\s*!==\s*newestRunId.*?\)\s*\{.*?"
             r"skip\(\s*['\"]A newer source workflow run exists for this PR head; stale report suppressed\.['\"]\s*\)\s*;"
-            r".*?return\s*;\s*\}",
-            re.DOTALL,
-        ),
+            r".*?return\s*;\s*\}", re.DOTALL),
+        "Ignore unexpected source workflow identity": re.compile(
+            r'if \(run\.name !== process\.env\.SOURCE_WORKFLOW \|\| run\.path !== process\.env\.SOURCE_WORKFLOW_PATH\) \{'
+            r'.*?skip\(`Ignore unexpected source workflow identity:.*?return;', re.DOTALL),
+        "Allure artifact contract v": re.compile(
+            r'if \(componentRun &&.*?componentArtifactPattern\.test\(name\).*?new Set\(actualNames\).*?'
+            r'core\.setFailed\(`Allure artifact contract v.*?return;', re.DOTALL),
     }
     resolve_job = valid_jobs.get("resolve")
     resolve_steps = resolve_job.get("steps", []) if resolve_job else []
@@ -1537,7 +1536,99 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
     for marker, guard in resolve_guards.items():
         if not guard.search(str(resolve_script)):
             errors.append(f"{label}: missing trust-boundary assertion {marker}")
+    call = (triggers or {}).get("workflow_call", {})
+    secrets = call.get("secrets", {}) if isinstance(call, dict) else {}
+    if secrets.get("github-token", {}).get("required") is not False:
+        errors.append(f"{label}: legacy token must be optional for scoped per-job tokens")
+    build_step = next((step for step in generate_steps if isinstance(step, dict)
+                       and str(step.get("uses", "")).split("@", 1)[0] == GENERATE_REPORT_ACTION), {})
+    build_inputs = build_step.get("with", {})
+    if build_inputs.get("github-token") != "${{ secrets.github-token || github.token }}":
+        errors.append(f"{label}: builder must default to the scoped job token")
+    if build_inputs.get("comment-marker") != "<!-- project-toolkit-allure-report -->":
+        errors.append(f"{label}: builder and trusted poster markers differ")
+    download_steps = valid_jobs.get("download", {}).get("steps", [])
+    helper = next((step for step in download_steps if isinstance(step, dict)
+                   and step.get("name") == "Check out trusted toolkit extractor"), {})
+    if helper.get("with", {}) != {"repository": "${{ job.workflow_repository }}", "ref": "${{ job.workflow_sha }}",
+                                  "path": ".toolkit", "persist-credentials": False}:
+        errors.append(f"{label}: extractor checkout must follow the called workflow commit")
+    extractor = next((step for step in download_steps if isinstance(step, dict) and "run" in step), {})
+    if (extractor.get("run") != "python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja"
+            or extractor.get("env", {}).get("ARTIFACT_MANIFEST") != "${{ needs.resolve.outputs.artifact_manifest }}"
+            or any("actions/download-artifact@" in str(step.get("uses", "")) for step in download_steps)):
+        errors.append(f"{label}: source artifacts must pass bounded extraction before materialization")
+    env = (resolve_step or {}).get("env", {})
+    for key, value in {"SOURCE_WORKFLOW": "source-workflow", "SOURCE_WORKFLOW_PATH": "source-workflow-path",
+                       "ARTIFACT_MODE": "artifact-mode", "ARTIFACT_PREFIX": "artifact-prefix",
+                       "MINIMUM_ARTIFACTS": "minimum-artifacts", "MAXIMUM_ARTIFACTS": "maximum-artifacts",
+                       "SKIP_EMPTY_ARTIFACTS": "skip-empty-artifacts"}.items():
+        if env.get(key) != "${{ inputs." + value + " }}":
+            errors.append(f"{label}: resolver input binding is missing for {value}")
     return errors
+
+
+def allure_pages_workflow_errors(path: Path) -> list[str]:
+    """Validate separate Pages privileges, source freshness, and bounded report extraction."""
+    workflow = yaml.safe_load(path.read_text())
+    errors: list[str] = []
+    if workflow.get("permissions") != {} or set(workflow.get("jobs", {})) != {"pages"}:
+        return ["Allure Pages must have one explicitly scoped job"]
+    pages = workflow["jobs"]["pages"]
+    if pages.get("permissions") != {"actions": "read", "contents": "write", "pull-requests": "read"}:
+        errors.append("Allure Pages permissions are not narrowly scoped")
+    freshness = next((step for step in pages.get("steps", []) if step.get("id") == "freshness"), {})
+    script = freshness.get("with", {}).get("script", "")
+    for guard in ('run.name !== process.env.SOURCE_WORKFLOW || run.path !== process.env.SOURCE_WORKFLOW_PATH',
+                  'pull.state === "open" && pull.head?.sha === run.head_sha',
+                  'pull.base?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`',
+                  'pull.user?.login === "dependabot[bot]"',
+                  'if (!sameHead || !latest)', 'matches.length !== 1 || matches[0].expired',
+                  'const expectedName = `allure-report-${context.runId}`'):
+        if guard not in script:
+            errors.append(f"Allure Pages executable freshness guard missing: {guard}")
+    for key, value in {"PR_NUMBER": "pr-number", "SOURCE_WORKFLOW": "source-workflow",
+                       "SOURCE_WORKFLOW_PATH": "source-workflow-path"}.items():
+        if freshness.get("env", {}).get(key) != "${{ inputs." + value + " }}":
+            errors.append(f"Allure Pages input binding missing: {value}")
+    steps = pages.get("steps", [])
+    for step in steps[1:]:
+        if step.get("if") not in ("${{ steps.freshness.outputs.fresh == 'true' }}",
+                                  "${{ steps.freshness.outputs.fresh == 'true' && steps.publication.outputs.fresh == 'true' }}"):
+
+            errors.append("Allure Pages must gate every publication step on source freshness")
+        if "actions/download-artifact@" in str(step.get("uses", "")):
+            errors.append("Allure Pages ZIPs must pass bounded extraction")
+    helper = next((step for step in steps if step.get("name") == "Check out trusted toolkit extractor"), {})
+    if helper.get("with", {}).get("repository") != "${{ job.workflow_repository }}" or helper.get("with", {}).get("ref") != "${{ job.workflow_sha }}":
+        errors.append("Allure Pages extractor must follow the called workflow commit")
+    return errors
+
+
+def allure_legacy_wrapper_errors(path: Path) -> list[str]:
+    """Keep the old public API while delegating to the same-commit core and Pages workflows."""
+    workflow = yaml.safe_load(path.read_text())
+    errors: list[str] = []
+    call = workflow.get("on", workflow.get(True))["workflow_call"]
+    inputs = call["inputs"]
+    for name in ("source-workflow", "source-workflow-path", "artifact-prefix", "minimum-artifacts", "maximum-artifacts",
+                 "config-file", "categories-file", "pages-url", "publish-pages", "pages-destination-directory"):
+        if name not in inputs:
+            errors.append(f"Allure legacy wrapper removed input: {name}")
+    if call["secrets"]["github-token"].get("required") is not False:
+        errors.append("Allure legacy override token must be optional")
+    jobs = workflow.get("jobs", {})
+    if set(jobs) != {"report", "pages"}:
+        return errors + ["Allure legacy wrapper must delegate report and optional Pages"]
+    if jobs["report"].get("uses") != "./.github/workflows/allure-publisher-core.yml" or jobs["pages"].get("uses") != "./.github/workflows/allure-pages.yml":
+        errors.append("Allure legacy wrapper must use same-commit reusable workflows")
+    if "inputs.publish-pages" not in jobs["pages"].get("if", ""):
+        errors.append("Allure legacy Pages must be opt-in")
+    for name in jobs["report"].get("with", {}):
+        if jobs["report"]["with"][name] != "${{ inputs." + name + " }}":
+            errors.append(f"Allure legacy input must pass unchanged: {name}")
+    return errors
+
 
 
 def allure_publisher_negative_probes(path: Path) -> list[str]:
@@ -1566,8 +1657,8 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
     required_by_job = {
         "generate": generate_pin,
         "resolve": (
-            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
-            "Allure artifact contract mismatch",
+            "No external Allure artifacts found",
+            "External Allure artifact contract mismatch",
             'pull.user?.login === "dependabot[bot]"',
             "A newer source workflow run exists",
         ),
@@ -1602,8 +1693,8 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
         # every marker, retain it only as a comment, in an unrelated step, or
         # below an unreachable branch; all three mutations must fail.
         resolve_markers = (
-            "No ${process.env.ARTIFACT_PREFIX} artifacts were produced",
-            "Allure artifact contract mismatch",
+            "No external Allure artifacts found",
+            "External Allure artifact contract mismatch",
             'pull.user?.login === "dependabot[bot]"',
             "A newer source workflow run exists",
         )
@@ -1695,8 +1786,11 @@ def allure_publisher_negative_probes(path: Path) -> list[str]:
     return errors
 
 
-ALLURE_WORKFLOW = ROOT / ".github/workflows/allure-publisher.yml"
+ALLURE_WORKFLOW = ROOT / ".github/workflows/allure-publisher-core.yml"
+ALLURE_PAGES_WORKFLOW = ROOT / ".github/workflows/allure-pages.yml"
 ERRORS.extend(allure_publisher_workflow_errors(ALLURE_WORKFLOW))
+ERRORS.extend(allure_pages_workflow_errors(ALLURE_PAGES_WORKFLOW))
+ERRORS.extend(allure_legacy_wrapper_errors(ROOT / ".github/workflows/allure-publisher.yml"))
 ERRORS.extend(allure_publisher_negative_probes(ALLURE_WORKFLOW))
 
 secret_patterns = [
@@ -1798,7 +1892,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
             if allure_config_path.is_file():
                 run(["node", "--check", str(allure_config_path)])
-            resolver_script = yaml.safe_load(allure_workflow_path.read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            resolver_script = yaml.safe_load(ALLURE_WORKFLOW.read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
             resolver_script_path = tmp_path / f"{scenario}-resolver.js"
             resolver_script_path.write_text(f"async function main() {{\n{resolver_script}\n}}\n", encoding="utf-8")
             run(["node", "--check", str(resolver_script_path)])
@@ -1817,7 +1911,19 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 allure_workflow.get("permissions") == {},
                 f"{scenario}: workflow-level permissions must remain empty",
             )
-            jobs = allure_workflow.get("jobs", {})
+            caller_jobs = allure_workflow.get("jobs", {})
+            caller = caller_jobs.get("report", {})
+            check(set(caller_jobs) == ({"report", "pages"} if scenario == "allure-pages" else {"report"})
+                  and caller.get("uses") == "quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@v1.0.0"
+                  and caller.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "write"}
+                  and all("steps" not in job and "secrets" not in job for job in caller_jobs.values()),
+                  f"{scenario}: generated caller must delegate without broad token secrets")
+            jobs = yaml.safe_load(ALLURE_WORKFLOW.read_text())["jobs"]
+            if scenario == "allure-pages":
+                jobs["pages"] = yaml.safe_load(ALLURE_PAGES_WORKFLOW.read_text())["jobs"]["pages"]
+                check(caller_jobs["pages"].get("uses") == "quokkify/project-toolkit/.github/workflows/allure-pages.yml@v1.0.0"
+                      and caller_jobs["pages"].get("permissions") == {"actions": "read", "contents": "write", "pull-requests": "read"},
+                      "allure-pages: only the separate Pages call may grant contents:write")
             check(
                 jobs.get("resolve", {}).get("permissions")
                 == {"actions": "read", "contents": "read", "pull-requests": "read"},
@@ -1851,7 +1957,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 write_content_jobs == (["pages"] if scenario == "allure-pages" else []),
                 f"{scenario}: only the opt-in Pages job may receive contents:write",
             )
-            report_text = allure_workflow_path.read_text()
+            caller_text = allure_workflow_path.read_text()
+            report_text = ALLURE_WORKFLOW.read_text() + (ALLURE_PAGES_WORKFLOW.read_text() if scenario == "allure-pages" else "")
             pr_number_script_steps = []
             for job_name in ("comment", "pages"):
                 for step in jobs.get(job_name, {}).get("steps", []):
@@ -1859,10 +1966,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     if "const prNumber" in script:
                         pr_number_script_steps.append(step)
             check(
-                len(pr_number_script_steps) == (2 if scenario == "allure-pages" else 1)
+                len(pr_number_script_steps) == (3 if scenario == "allure-pages" else 1)
                 and all(
                     step.get("env", {}).get("PR_NUMBER")
-                    == "${{ needs.resolve.outputs.pr-number }}"
+                    in ("${{ needs.resolve.outputs.pr-number }}", "${{ inputs.pr-number }}")
                     and "const prNumber = Number(process.env.PR_NUMBER);"
                     in step.get("with", {}).get("script", "")
                     and "${{ needs.resolve.outputs.pr-number }}"
@@ -1878,7 +1985,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             )
             extractor_text = allure_extractor_path.read_text()
             external_allure = scenario == "allure-external"
-            preflight_jobs = (jobs["generate"], jobs.get("pages", {"steps": []}))
+            preflight_jobs = (jobs["download"], jobs.get("pages", {"steps": []}))
             check(
                 all(
                     "actions/download-artifact@" not in str(step.get("uses", ""))
@@ -1890,7 +1997,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "${{ runner.temp }}/allure-expanded" in report_text
                 and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
                 in report_text
-                and "python .github/allure/safe_extract.py" in report_text,
+                and "python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja" in report_text
+                and "repository: ${{ job.workflow_repository }}" in report_text
+                and "ref: ${{ job.workflow_sha }}" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
             )
             check(
@@ -1923,43 +2032,30 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 ]
             if scenario == "allure-external":
                 artifact_names = ["external-allure-one", "external-allure-two"]
-                check(
-                    'workflows: [Validate, "Run tests"]' in report_text
-                    and 'const externalWorkflowPath = ".github/workflows/test.yml"' in report_text
-                    and "const componentMode = false" in report_text
-                    and "const externalMode = true" in report_text
-                    and 'const artifactPrefix = "external-allure-"' in report_text
-                    and "const minimumArtifacts = 2" in report_text
-                    and "const maximumArtifacts = 7" in report_text
-                    and 'categories-file: ".github/allure/categories.json"' in report_text
-                    and "new Set(actualNames).size" in report_text
-                    and "No external Allure artifacts found; report generation skipped." in report_text
-                    and "allureArtifacts.map((artifact) => ({" in report_text,
-                    "allure-external: rendered source workflow or bounded artifact contract is incomplete",
-                )
-                check(
-                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
-                    and "results-directory: .allure-input/results" in report_text
-                    and 'const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";' in report_text,
-                    "allure-external: stable source directory contract is missing",
-                )
+                configured = caller["with"]
+                check('workflows: [Validate, "Run tests"]' in caller_text
+                      and configured.get("source-workflow") == "Run tests"
+                      and configured.get("source-workflow-path") == ".github/workflows/test.yml"
+                      and configured.get("artifact-mode") == "external"
+                      and configured.get("artifact-prefix") == "external-allure-"
+                      and configured.get("minimum-artifacts") == 2
+                      and configured.get("maximum-artifacts") == 7
+                      and configured.get("skip-empty-artifacts") is True
+                      and configured.get("categories-file") == ".github/allure/categories.json",
+                      "allure-external: rendered source workflow or bounded artifact contract is incomplete")
             else:
                 for artifact_name in artifact_names:
-                    check(
-                        artifact_name in validate_text,
-                        f"{scenario}: missing source workflow artifact for {artifact_name}",
-                    )
-                check(
-                    "const sourceArtifactContractVersion = 1" in report_text
-                    and "const componentArtifactPattern = /^allure-results-[A-Za-z_][A-Za-z0-9_-]*$/" in report_text
-                    and "allureArtifacts.map((artifact) => ({" in report_text,
-                    f"{scenario}: migration-safe source artifact contract is missing",
-                )
-                check(
-                    'source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
-                    and 'materialize-root: ${{ steps.resolve.outputs.materialize-root }}' in report_text,
-                    f"{scenario}: stable Allure source directory contract is missing",
-                )
+                    check(artifact_name in validate_text, f"{scenario}: missing source workflow artifact for {artifact_name}")
+                check(caller["with"].get("artifact-mode") == "component"
+                      and caller["with"].get("source-workflow") == "Validate"
+                      and caller["with"].get("source-workflow-path") == ".github/workflows/validate.yml"
+                      and "const sourceArtifactContractVersion = 1" in report_text
+                      and "const componentArtifactPattern = /^allure-results-[A-Za-z_][A-Za-z0-9_-]*$/" in report_text,
+                      f"{scenario}: migration-safe source artifact contract is missing")
+            check('source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
+                  and 'const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";' in report_text
+                  and "allureArtifacts.map((artifact) => ({" in report_text,
+                  f"{scenario}: stable Allure source materialization contract is missing")
             if scenario == "allure-polyglot":
                 check(
                     'test-artifact-path: "reports/allure-results"' in validate_text
@@ -2109,41 +2205,17 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                     and not materialized_root.exists(),
                     "allure-polyglot: declared ZIP bomb was not rejected before extraction",
                 )
-            check(
-                ("Publish trusted Pages report" in report_text) == (scenario == "allure-pages")
-                and ("${{ runner.temp }}/allure-pages-expanded" in report_text)
-                == (scenario == "allure-pages")
-                and ("https://quokkify.github.io/fixture-allure-pages" in report_text)
-                == (scenario == "allure-pages"),
-                f"{scenario}: Pages publishing does not match the Copier answers",
-            )
+            check(caller["with"].get("publish-pages") == (scenario == "allure-pages")
+                  and caller["with"].get("managed-pages-layout") is True
+                  and ("pages" in caller_jobs) == (scenario == "allure-pages"),
+                  f"{scenario}: Pages publishing does not match the Copier answers")
             if scenario == "allure-pages":
-                report_step = next(
-                    step
-                    for step in jobs["generate"]["steps"]
-                    if str(step.get("uses", "")).startswith(
-                        "quokkify/project-toolkit/actions/allure-report@"
-                    )
-                )
-                deploy_step = next(
-                    step
-                    for step in jobs["pages"]["steps"]
-                    if str(step.get("uses", "")).startswith(
-                        "quokkify/project-toolkit/actions/deploy-gh-pages-subdir@"
-                    )
-                )
-                published_url = "/".join(
-                    (
-                        "https://quokkify.github.io/fixture-allure-pages",
-                        str(deploy_step["with"]["destination-dir"]),
-                        str(report_step["with"]["report-directory"]),
-                        "",
-                    )
-                )
-                check(
-                    str(report_step["with"]["pages-url"]) == published_url,
-                    "allure-pages: commented report URL does not address the published report directory",
-                )
+                check(caller["with"].get("pages-url") == "https://quokkify.github.io/fixture-allure-pages"
+                      and caller_jobs["pages"]["with"].get("pages-destination-directory")
+                      == "${{ format('allure/pr-{0}', needs.report.outputs.pr-number) }}"
+                      and "format('{0}/allure/pr-{1}/allure-report/'" in report_text,
+                      "allure-pages: commented report URL does not address the published report directory")
+
         else:
             check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
             check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")

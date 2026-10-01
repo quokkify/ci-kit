@@ -1155,6 +1155,8 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             )
             workflow = (destination / ".github/workflows/allure-report.yml").read_text()
 
+        self.assertIn("allure-publisher-core.yml@v1.0.0", workflow)
+        workflow = (ROOT / ".github/workflows/allure-publisher-core.yml").read_text()
         self.assertRegex(workflow, r"actions/download-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+")
         self.assertIn('readFileSync(".allure-generated/allure-pr-comment.md", "utf8")', workflow)
         self.assertIn("body.endsWith(marker)", workflow)
@@ -1218,6 +1220,8 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             workflow = yaml.safe_load(
                 (destination / ".github/workflows/allure-report.yml").read_text()
             )
+            self.assertEqual(workflow["jobs"]["report"]["uses"], "quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@v1.0.0")
+            workflow = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())
             poster_step = next(
                 step
                 for step in workflow["jobs"]["comment"]["steps"]
@@ -1540,13 +1544,22 @@ class AllureCopierModeSwitchTests(unittest.TestCase):
 
     def _run_resolver(self, workflow_text: str, source_path: str, artifacts: list[str]) -> dict:
         workflow = yaml.safe_load(workflow_text)
-        script = workflow["jobs"]["resolve"]["steps"][0]["with"]["script"]
+        configured = workflow["jobs"]["report"]["with"]
+        script = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
+        resolver_env = dict(os.environ,
+            SOURCE_WORKFLOW=str(configured["source-workflow"]),
+            SOURCE_WORKFLOW_PATH=str(configured["source-workflow-path"]),
+            ARTIFACT_PREFIX=str(configured["artifact-prefix"]),
+            MINIMUM_ARTIFACTS=str(configured["minimum-artifacts"]),
+            MAXIMUM_ARTIFACTS=str(configured["maximum-artifacts"]),
+            ARTIFACT_MODE=str(configured["artifact-mode"]),
+            SKIP_EMPTY_ARTIFACTS=str(configured["skip-empty-artifacts"]).lower())
         harness = """
 const input = JSON.parse(process.argv[1]);
 const outputs = {};
 const failures = [];
 const warnings = [];
-const run = {path: input.source_path, head_repository: {full_name: "example/fork"}, head_sha: "abc", id: 1, workflow_id: 7};
+const run = {name: process.env.SOURCE_WORKFLOW, path: input.source_path, head_repository: {full_name: "example/fork"}, head_sha: "abc", id: 1, workflow_id: 7};
 const pull = {number: 42, base: {repo: {full_name: "example/project"}}, head: {repo: {full_name: "example/fork"}, sha: "abc"}, user: {login: "author"}};
 const github = {
   rest: {pulls: {list: "pulls"}, actions: {listWorkflowRuns: "runs", listWorkflowRunArtifacts: "artifacts"}},
@@ -1564,6 +1577,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             check=False,
             capture_output=True,
             text=True,
+            env=resolver_env,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
@@ -1668,15 +1682,16 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             for heading in ("Description", "Highlight", "Usage example", "Migration"):
                 self.assertIn(f"## {heading}", pull_request_template)
 
-            rendered_script = yaml.safe_load(workflow)["jobs"]["resolve"]["steps"][0]["with"]["script"]
+            reusable = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())
+            rendered_script = reusable["jobs"]["resolve"]["steps"][0]["with"]["script"]
             script_path = root / "generated-resolver.js"
             script_path.write_text("async function main() {\n" + rendered_script + "\n}\n")
             syntax_check = subprocess.run(["node", "--check", str(script_path)], check=False, capture_output=True, text=True)
             self.assertEqual(syntax_check.returncode, 0, syntax_check.stderr)
-            generate_steps = yaml.safe_load(workflow)["jobs"]["generate"]["steps"]
+            generate_steps = reusable["jobs"]["generate"]["steps"]
             report_step = next(
                 step for step in generate_steps
-                if step.get("uses", "").startswith("quokkify/project-toolkit/actions/allure-report@")
+                if step.get("uses", "").startswith("quokkify/allure-report-action@")
             )
             self.assertEqual(report_step["with"]["results-directory"], ".allure-input/results")
             self.assertEqual(
@@ -1684,8 +1699,8 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 "${{ needs.resolve.outputs.source-artifacts-directory }}",
             )
             external_report_step = next(
-                step for step in yaml.safe_load(external_workflow)["jobs"]["generate"]["steps"]
-                if step.get("uses", "").startswith("quokkify/project-toolkit/actions/allure-report@")
+                step for step in reusable["jobs"]["generate"]["steps"]
+                if step.get("uses", "").startswith("quokkify/allure-report-action@")
             )
             self.assertEqual(
                 external_report_step["with"]["source-artifacts-directory"],

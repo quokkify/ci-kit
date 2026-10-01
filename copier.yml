@@ -3,6 +3,15 @@ _subdirectory: templates/project/template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _exclude:
+  # Rendered before file generation: Copier's --defaults does not validate
+  # retained question defaults and can discard invalid boolean answers. Skip
+  # the inherited guard in Copier's old-template scratch render; the current
+  # template evaluates its own exclusions with no inherited guard marker.
+  - >-
+    {% set selected_release = _copier_answers.get('_commit', '') %}
+    {% if '__allure_pin_mismatch__' not in (_copier_conf.exclude | join(' ')) and allure_report and (selected_release | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) and toolkit_version != selected_release %}
+    {{ _copier_conf['__allure_pin_mismatch__'] | mandatory('Allure reusable workflows require the selected toolkit release. Retry with --data toolkit_version=' ~ selected_release) }}
+    {% endif %}
   - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
   - "{% if not release_please %}.github/release-please/config.json{% endif %}"
@@ -35,7 +44,9 @@ project_name:
 toolkit_version:
   type: str
   help: Immutable project-toolkit SemVer tag used by generated workflows.
-  default: v2.23.5
+  # Fresh copies use the selected immutable template tag, including Copier's
+  # automatic latest-tag selection. Existing answers still take precedence.
+  default: "{{ _copier_answers.get('_commit', '') if (_copier_answers.get('_commit', '') | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) else 'v2.23.5' }}"
   validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.23.5{% endif %}"
 
 components:

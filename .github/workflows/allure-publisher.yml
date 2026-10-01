@@ -49,10 +49,25 @@ on:
         required: false
         default: ""
         type: string
+      artifact-mode:
+        description: external preserves nested per-job provenance; component uses the versioned pre-merged result contract.
+        required: false
+        default: external
+        type: string
+      skip-empty-artifacts:
+        description: Skip an empty external result set even when the minimum is positive; partial sets still fail closed.
+        required: false
+        default: false
+        type: boolean
+      managed-pages-layout:
+        description: Treat pages-url as a site base and publish below allure/pr-N with the Allure report subdirectory.
+        required: false
+        default: false
+        type: boolean
     secrets:
       github-token:
-        description: Repository token with actions:read and pull-requests:write; contents:write is additionally required for Pages.
-        required: true
+        description: Optional legacy token override. Prefer the per-job github.token default; a custom token cannot be attenuated by job permissions.
+        required: false
 
 permissions: {}
 
@@ -61,247 +76,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve:
-    name: Resolve trusted source run
-    if: >-
-      ${{
-        github.event.workflow_run.event == 'pull_request' &&
-        contains(fromJSON('["success","failure","neutral","timed_out"]'), github.event.workflow_run.conclusion)
-      }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  report:
+    uses: ./.github/workflows/allure-publisher-core.yml
     permissions:
       actions: read
       contents: read
-      pull-requests: read
-    outputs:
-      ready: ${{ steps.resolve.outputs.ready }}
-      pr-number: ${{ steps.resolve.outputs.pr-number }}
-      fork-pr: ${{ steps.resolve.outputs.fork-pr }}
-      artifact-ids: ${{ steps.resolve.outputs.artifact-ids }}
-    steps:
-      - name: Validate source identity and artifact contract
-        id: resolve
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
-          SOURCE_WORKFLOW_PATH: ${{ inputs.source-workflow-path }}
-          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
-          MINIMUM_ARTIFACTS: ${{ inputs.minimum-artifacts }}
-          MAXIMUM_ARTIFACTS: ${{ inputs.maximum-artifacts }}
-        with:
-          github-token: ${{ secrets.github-token }}
-          script: |
-            const run = context.payload.workflow_run;
-            const skip = (message) => {
-              core.warning(message);
-              core.setOutput("ready", "false");
-            };
-            if (run.name !== process.env.SOURCE_WORKFLOW || run.path !== process.env.SOURCE_WORKFLOW_PATH) {
-              skip(`Ignore unexpected source workflow identity: ${run.name} (${run.path}).`);
-              return;
-            }
-            const headRepository = run.head_repository?.full_name;
-            if (!headRepository || !run.head_sha) {
-              skip("Source run has no live head repository or SHA.");
-              return;
-            }
-            const pulls = await github.paginate(github.rest.pulls.list, {
-              owner: context.repo.owner, repo: context.repo.repo, state: "open", per_page: 100,
-            });
-            const matches = pulls.filter((pull) =>
-              pull.base?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}` &&
-              pull.head?.repo?.full_name === headRepository && pull.head?.sha === run.head_sha
-            );
-            if (matches.length !== 1) {
-              skip(`Expected exactly one current open PR for source SHA; found ${matches.length}.`);
-              return;
-            }
-            const sourceRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner: context.repo.owner, repo: context.repo.repo, workflow_id: run.workflow_id,
-              event: "pull_request", head_sha: run.head_sha, per_page: 100,
-            });
-            const newestRunId = Math.max(...sourceRuns.map((candidate) => Number(candidate.id)));
-            if (!Number.isSafeInteger(newestRunId) || Number(run.id) !== newestRunId) {
-              skip("A newer source workflow run exists for this PR head; stale report suppressed.");
-              return;
-            }
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100,
-            });
-            const selected = artifacts.filter((artifact) => artifact.name.startsWith(process.env.ARTIFACT_PREFIX));
-            const names = selected.map((artifact) => artifact.name).sort();
-            const minimum = Number(process.env.MINIMUM_ARTIFACTS);
-            const maximum = Number(process.env.MAXIMUM_ARTIFACTS);
-            if (names.length === 0 && minimum === 0) {
-              skip(`No ${process.env.ARTIFACT_PREFIX} artifacts were produced; skipping Allure report.`);
-              return;
-            }
-            if (!Number.isInteger(minimum) || minimum < 0 || !Number.isInteger(maximum) ||
-                maximum < Math.max(1, minimum) || names.length < minimum || names.length > maximum ||
-                new Set(names).size !== names.length || selected.some((artifact) => artifact.expired)) {
-              core.setFailed(`Allure artifact contract mismatch for ${process.env.ARTIFACT_PREFIX}; received ${names.length}.`);
-              return;
-            }
-            const compressedBytes = selected.reduce((total, artifact) => total + Number(artifact.size_in_bytes || 0), 0);
-            if (compressedBytes > 262144000) {
-              core.setFailed(`Allure artifacts exceed the 250 MiB compressed limit: ${compressedBytes} bytes.`);
-              return;
-            }
-            core.setOutput("artifact-ids", selected.map((artifact) => String(artifact.id)).join(","));
-            const pull = matches[0];
-            core.setOutput("ready", "true");
-            core.setOutput("pr-number", String(pull.number));
-            core.setOutput("fork-pr", String(pull.head.repo.full_name !== pull.base.repo.full_name || pull.user?.login === "dependabot[bot]"));
-
-  download:
-    name: Download validated Allure artifacts
-    needs: resolve
-    if: ${{ needs.resolve.outputs.ready == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Download only the validated artifact set
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          artifact-ids: ${{ needs.resolve.outputs.artifact-ids }}
-          path: .allure-input/source-artifacts
-          merge-multiple: true
-          github-token: ${{ secrets.github-token }}
-          run-id: ${{ github.event.workflow_run.id }}
-      - name: Upload validated source bundle for the generator
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: allure-source-${{ github.run_id }}
-          path: .allure-input/source-artifacts
-          if-no-files-found: error
-          retention-days: 1
-
-  generate:
-    name: Generate unprivileged Allure report
-    needs: [resolve, download]
-    if: ${{ needs.resolve.outputs.ready == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Check out trusted report configuration
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Download validated source bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: allure-source-${{ github.run_id }}
-          path: .allure-input/source-artifacts
-          github-token: ${{ secrets.github-token }}
-          run-id: ${{ github.run_id }}
-      - name: Build report without write privileges
-        uses: quokkify/allure-report-action@b2a25adb4d080b2c56f5342ef1f69976163590d7 # v0.5.2
-        with:
-          github-token: ${{ secrets.github-token }}
-          results-directory: .allure-input/results
-          source-artifacts-directory: .allure-input/source-artifacts
-          report-directory: allure-report
-          config-file: ${{ inputs.config-file }}
-          categories-file: ${{ inputs.categories-file }}
-          source-run-id: ${{ github.event.workflow_run.id }}
-          pages-url: ${{ inputs.pages-url }}
-          fork-pr: ${{ needs.resolve.outputs.fork-pr }}
-          comment-file: allure-pr-comment.md
-          pr-number: ""
-      - name: Upload generated report and comment
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: allure-report-${{ github.run_id }}
-          path: |
-            allure-report
-            allure-pr-comment.md
-          if-no-files-found: error
-          retention-days: 14
-
-  comment:
-    name: Publish trusted PR comment
-    needs: [resolve, generate]
-    if: ${{ needs.resolve.outputs.ready == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: read
       pull-requests: write
-    steps:
-      - name: Download generated report comment
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: allure-report-${{ github.run_id }}
-          path: .allure-generated
-          github-token: ${{ secrets.github-token }}
-          run-id: ${{ github.run_id }}
-      - name: Revalidate source freshness and update comment
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          PR_NUMBER: ${{ needs.resolve.outputs.pr-number }}
-        with:
-          github-token: ${{ secrets.github-token }}
-          script: |
-            const run = context.payload.workflow_run;
-            const prNumber = Number(process.env.PR_NUMBER);
-            const { data: pull } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber });
-            if (pull.state !== "open" || pull.head?.sha !== run.head_sha || pull.head?.repo?.full_name !== run.head_repository?.full_name) {
-              core.warning("PR head changed; stale Allure comment suppressed.");
-              return;
-            }
-            const marker = "<!-- project-toolkit-allure-report -->";
-            const body = require("fs").readFileSync(".allure-generated/allure-pr-comment.md", "utf8").trimEnd();
-            if ((body.match(new RegExp(marker, "g")) || []).length !== 1) {
-              core.setFailed("Generated Allure comment must contain exactly one marker.");
-              return;
-            }
-            const comments = await github.paginate(github.rest.issues.listComments, { owner: context.repo.owner, repo: context.repo.repo, issue_number: prNumber, per_page: 100 });
-            const existing = comments.find((comment) => comment.user?.login === "github-actions[bot]" && (comment.body || "").includes(marker));
-            const request = { owner: context.repo.owner, repo: context.repo.repo, body };
-            if (existing) await github.rest.issues.updateComment({ ...request, comment_id: existing.id });
-            else await github.rest.issues.createComment({ ...request, issue_number: prNumber });
-
+    with:
+      source-workflow: ${{ inputs.source-workflow }}
+      source-workflow-path: ${{ inputs.source-workflow-path }}
+      artifact-prefix: ${{ inputs.artifact-prefix }}
+      minimum-artifacts: ${{ inputs.minimum-artifacts }}
+      maximum-artifacts: ${{ inputs.maximum-artifacts }}
+      config-file: ${{ inputs.config-file }}
+      categories-file: ${{ inputs.categories-file }}
+      pages-url: ${{ inputs.pages-url }}
+      publish-pages: ${{ inputs.publish-pages }}
+      artifact-mode: ${{ inputs.artifact-mode }}
+      skip-empty-artifacts: ${{ inputs.skip-empty-artifacts }}
+      managed-pages-layout: ${{ inputs.managed-pages-layout }}
+    secrets:
+      github-token: ${{ secrets.github-token }}
   pages:
-    name: Publish trusted Pages report
-    needs: [resolve, generate]
-    if: ${{ needs.resolve.outputs.ready == 'true' && needs.resolve.outputs.fork-pr == 'false' && inputs.publish-pages }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    needs: report
+    if: ${{ inputs.publish-pages && needs.report.outputs.ready == 'true' && needs.report.outputs.fork-pr == 'false' }}
+    uses: ./.github/workflows/allure-pages.yml
     permissions:
       actions: read
       contents: write
       pull-requests: read
-    steps:
-      - name: Download generated report
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: allure-report-${{ github.run_id }}
-          path: .allure-generated
-          github-token: ${{ secrets.github-token }}
-          run-id: ${{ github.run_id }}
-      - name: Revalidate source freshness
-        env:
-          PR_NUMBER: ${{ needs.resolve.outputs.pr-number }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ secrets.github-token }}
-          script: |
-            const run = context.payload.workflow_run;
-            const { data: pull } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: Number(process.env.PR_NUMBER) });
-            const sourceRuns = await github.paginate(github.rest.actions.listWorkflowRuns, { owner: context.repo.owner, repo: context.repo.repo, workflow_id: run.workflow_id, event: "pull_request", head_sha: run.head_sha, per_page: 100 });
-            const latest = Number(run.id) === Math.max(...sourceRuns.map((candidate) => Number(candidate.id)));
-            if (pull.state !== "open" || pull.head?.sha !== run.head_sha || pull.head?.repo?.full_name !== run.head_repository?.full_name || !latest) core.setFailed("PR head or source run is stale; Pages publication suppressed.");
-      - name: Publish Allure HTML to GitHub Pages
-        uses: quokkify/gh-pages-subdir-action@e936122cbdf5a9676b5587d5a812fadf7ddfde6b # v0.1.1
-        with:
-          token: ${{ secrets.github-token }}
-          publish-dir: .allure-generated/allure-report
-          destination-dir: ${{ inputs.pages-destination-directory }}
+    with:
+      source-workflow: ${{ inputs.source-workflow }}
+      source-workflow-path: ${{ inputs.source-workflow-path }}
+      managed-pages-layout: ${{ inputs.managed-pages-layout }}
+      pr-number: ${{ needs.report.outputs.pr-number }}
+      pages-destination-directory: ${{ inputs.managed-pages-layout && format('allure/pr-{0}', needs.report.outputs.pr-number) || inputs.pages-destination-directory }}
+    secrets:
+      github-token: ${{ secrets.github-token }}

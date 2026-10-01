@@ -77,7 +77,7 @@ class CheckoutTests(unittest.TestCase):
 
     def test_every_generated_checkout_tracks_the_copier_version(self):
         sources = ROOT / 'templates/project/template/.github/workflows'
-        expected = {'validate.yml', 'codeql.yml', 'gitleaks.yml', 'copier-update.yml', 'allure-report.yml'}
+        expected = {'validate.yml', 'codeql.yml', 'gitleaks.yml', 'copier-update.yml'}
         actual = set()
         for source in sources.glob('*.jinja'):
             text = source.read_text()
@@ -88,6 +88,13 @@ class CheckoutTests(unittest.TestCase):
                     rendered = Environment(undefined=StrictUndefined).from_string(line).render(toolkit_version='v9.8.7')
                     self.assertTrue(rendered.endswith('/actions/checkout@v9.8.7'))
         self.assertEqual(actual, expected)
+        # Allure delegates its checkout to the release-bound reusable workflows.
+        allure = (sources / 'allure-report.yml.jinja').read_text()
+        reusable_refs = [line for line in allure.splitlines() if 'uses: quokkify/project-toolkit/.github/workflows/' in line]
+        self.assertEqual(len(reusable_refs), 2)
+        for line in reusable_refs:
+            rendered = Environment(undefined=StrictUndefined).from_string(line).render(toolkit_version='v9.8.7')
+            self.assertTrue(rendered.endswith('.yml@v9.8.7'))
 
     def test_fleet_updates_checkout_without_changing_docs_steps(self):
         # Model a caller-owned docs workflow after its one-time migration. Both
