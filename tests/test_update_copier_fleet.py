@@ -1863,7 +1863,7 @@ class TemplateInventoryTests(TestCase):
         self.assertIn("renovate=missing", console)
         self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
         self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
-        self.assertEqual(report["schema_version"], 3)
+        self.assertEqual(report["schema_version"], 4)
         self.assertEqual(report["configuration_mismatches"], 1)
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
         self.assertEqual(report["repositories"][0]["template"]["allure_report"], "enabled")

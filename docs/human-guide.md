@@ -192,3 +192,7 @@ To update the same fleet later, keep the answers directory and run the script ag
 - **One managed repository:** `copier update` from section 2.
 - **New shared generated behavior:** change the template and release it using section 3.
 - **Many existing repositories:** prepare one answers file per repository and run section 4.
+
+For an optional read-only adoption and exact-revision CI snapshot, use
+`--include-health`; see [fleet health](fleet-health.md). JSON schema version 4
+preserves the version 3 inventory and adds independent health observations.
