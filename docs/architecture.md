@@ -4,6 +4,8 @@
 
 The diagram shows the central boundary: consuming repositories own orchestration, while this toolkit owns reusable implementation. Renovate proposes dependency and documentation updates, Release Please publishes immutable toolkit tags, and the read-only Copier fleet audit detects template drift in supported public consumers.
 
+Release publication is surrounded by exact-commit CI verification. A separate fleet coordinator sequences public pilot PR updates, their exact-head CI checks, freshness checks, and remaining PR creation. The updater remains responsible for Copier and public-repository filtering; the coordinator adds rollout ordering without changing those contracts. It neither merges pilot PRs nor changes repository rules. Audit and explicit single-repository requests pass directly to the existing updater.
+
 ## Researched constraints
 
 - GitHub reusable workflows must live directly under `.github/workflows`, opt in through `workflow_call`, and are invoked at job level. Inputs and secrets are explicitly declared; nested workflows receive only permissions/secrets passed through the chain. A called workflow cannot elevate the caller token permissions. Public workflow repositories are callable by accessible repositories; private reuse additionally depends on repository/organization Actions access policy. See [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows) and [access to private reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/share-across-private-repositories).

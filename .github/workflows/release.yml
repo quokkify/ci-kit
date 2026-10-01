@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
 
@@ -14,7 +15,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release:
+    name: Verify CI for the exact release revision
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Wait for validation and CodeQL on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: python scripts/verify_ci_gate.py --repository "$RELEASE_REPOSITORY" --sha "$RELEASE_SHA" --preflight --timeout 1800
+
   release:
+    needs: verify-release
     uses: ./.github/workflows/release-please.yml
     with:
       mode: manifest
@@ -22,12 +45,33 @@ jobs:
       manifest-file: .github/release-please/manifest.json
       enrich-release-notes: true
 
+  verify-tag:
+    name: Verify CI for the actual release tag
+    needs: release
+    if: ${{ needs.release.outputs.releases-created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify the release tag revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag-name }}
+        run: python scripts/verify_ci_gate.py --repository "$RELEASE_REPOSITORY" --ref "$RELEASE_TAG" --timeout 1800
+
   # Chained in the same run on purpose: Release Please tags with GITHUB_TOKEN,
   # and events raised by GITHUB_TOKEN never start a new workflow run, so a
   # `release` or `push: tags` trigger on the fleet workflow would never fire.
   fleet-update:
     name: Propagate the new template version to consumers
-    needs: release
+    needs: [release, verify-tag]
     if: ${{ needs.release.outputs.releases-created == 'true' }}
     uses: ./.github/workflows/copier-fleet-auto-update.yml
     with:
