@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   schedule:
     - cron: "0 0 * * 6"
 
@@ -36,6 +35,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - language: actions
+            build-mode: none
           - language: python
             build-mode: none
           - language: javascript-typescript
@@ -52,6 +53,17 @@ jobs:
         with:
           fetch-depth: 2
           persist-credentials: false
+      - name: Set up Python for rendered workflow evidence
+        if: matrix.language == 'actions'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install pinned template dependencies
+        if: matrix.language == 'actions'
+        run: python -m pip install PyYAML==6.0.3 copier==9.18.2
+      - name: Render template workflows for CodeQL
+        if: matrix.language == 'actions'
+        run: python scripts/render_codeql_workflows.py
       - name: Initialize CodeQL
         uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
