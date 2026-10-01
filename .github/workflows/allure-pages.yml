@@ -1,0 +1,210 @@
+name: Reusable Allure Pages publication
+on:
+  workflow_call:
+    inputs:
+      source-workflow:
+        description: Exact source workflow name; revalidated against the workflow_run event.
+        required: true
+        type: string
+      source-workflow-path:
+        description: Exact source workflow path; revalidated against the workflow_run event.
+        required: true
+        type: string
+      pr-number:
+        description: Resolved PR number; the current PR and head are independently revalidated.
+        required: true
+        type: string
+      pages-destination-directory:
+        description: Safe relative destination directory on gh-pages.
+        required: true
+        type: string
+      managed-pages-layout:
+        description: Publish outer report bundle for generated layouts; false retains legacy inner HTML root.
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      github-token:
+        description: Optional legacy token override; prefer scoped per-job github.token.
+        required: false
+permissions: {}
+concurrency:
+  group: allure-pages-publication-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+jobs:
+  pages:
+    name: Publish trusted Pages report
+    if: ${{ github.event.workflow_run.event == 'pull_request' && contains(fromJSON('["success","failure","neutral","timed_out"]'), github.event.workflow_run.conclusion) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+    steps:
+    - name: Revalidate source freshness
+      id: freshness
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
+        SOURCE_WORKFLOW_PATH: ${{ inputs.source-workflow-path }}
+      with:
+        script: |
+          const run = context.payload.workflow_run;
+          const prNumber = Number(process.env.PR_NUMBER);
+          if (!Number.isSafeInteger(prNumber) || prNumber <= 0 ||
+              run.name !== process.env.SOURCE_WORKFLOW || run.path !== process.env.SOURCE_WORKFLOW_PATH) {
+            core.setFailed("Pages source workflow or PR identity is invalid.");
+            return;
+          }
+          const { data: pull } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber,
+          });
+          const sameHead = pull.state === "open" && pull.head?.sha === run.head_sha &&
+            pull.head?.repo?.full_name === run.head_repository?.full_name &&
+            pull.base?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
+          if (pull.head?.repo?.full_name !== pull.base?.repo?.full_name || pull.user?.login === "dependabot[bot]") {
+            core.warning("Fork or Dependabot Pages publication suppressed.");
+            core.setOutput("fresh", "false");
+            return;
+          }
+          const sourceRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            workflow_id: run.workflow_id,
+            event: "pull_request",
+            head_sha: run.head_sha,
+            per_page: 100,
+          });
+          const currentRun = sourceRuns.find((candidate) => Number(candidate.id) === Number(run.id));
+          const latest = Number(currentRun?.run_attempt || 1) === Number(run.run_attempt || 1) && Number(run.id) === Math.max(
+            ...sourceRuns.map((candidate) => Number(candidate.id))
+          );
+          if (!sameHead || !latest) {
+            core.warning("PR head or source run is stale; Pages publication suppressed.");
+            core.setOutput("fresh", "false");
+            return;
+          }
+          const expectedName = `allure-report-${context.runId}`;
+          const reportArtifacts = await github.paginate(
+            github.rest.actions.listWorkflowRunArtifacts,
+            {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              per_page: 100,
+            }
+          );
+          const matches = reportArtifacts.filter((artifact) => artifact.name === expectedName);
+          if (matches.length !== 1 || matches[0].expired ||
+              !Number.isSafeInteger(Number(matches[0].id)) || Number(matches[0].id) <= 0 ||
+              !Number.isSafeInteger(Number(matches[0].size_in_bytes)) || Number(matches[0].size_in_bytes) < 0 ||
+              Number(matches[0].size_in_bytes) > 262144000) {
+            core.setFailed("Generated report artifact failed identity, expiry, or compressed-size checks.");
+            return;
+          }
+          core.setOutput("artifact_manifest", JSON.stringify([
+            { name: expectedName, id: Number(matches[0].id) },
+          ]));
+          core.setOutput("fresh", "true");
+        github-token: ${{ secrets.github-token || github.token }}
+    - name: Check out trusted toolkit extractor
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ${{ job.workflow_repository }}
+        ref: ${{ job.workflow_sha }}
+        path: .toolkit
+        persist-credentials: false
+      if: ${{ steps.freshness.outputs.fresh == 'true' }}
+    - name: Safely download generated report
+      if: ${{ steps.freshness.outputs.fresh == 'true' }}
+      shell: bash
+      env:
+        ARTIFACT_MANIFEST: ${{ steps.freshness.outputs.artifact_manifest }}
+        API_URL: ${{ github.api_url }}
+        REPOSITORY: ${{ github.repository }}
+        GH_TOKEN: ${{ secrets.github-token || github.token }}
+        ARCHIVE_ROOT: ${{ runner.temp }}/allure-pages-archives
+        OUTPUT_ROOT: ${{ runner.temp }}/allure-pages-expanded
+        MATERIALIZE_ROOT: ${{ github.workspace }}/allure-report
+      run: python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja
+    - name: Revalidate source immediately before publication
+      id: publication
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
+        SOURCE_WORKFLOW_PATH: ${{ inputs.source-workflow-path }}
+      with:
+        script: |
+          const run = context.payload.workflow_run;
+          const prNumber = Number(process.env.PR_NUMBER);
+          if (!Number.isSafeInteger(prNumber) || prNumber <= 0 ||
+              run.name !== process.env.SOURCE_WORKFLOW || run.path !== process.env.SOURCE_WORKFLOW_PATH) {
+            core.setFailed("Pages source workflow or PR identity is invalid.");
+            return;
+          }
+          const { data: pull } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: prNumber,
+          });
+          const sameHead = pull.state === "open" && pull.head?.sha === run.head_sha &&
+            pull.head?.repo?.full_name === run.head_repository?.full_name &&
+            pull.base?.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
+          if (pull.head?.repo?.full_name !== pull.base?.repo?.full_name || pull.user?.login === "dependabot[bot]") {
+            core.warning("Fork or Dependabot Pages publication suppressed.");
+            core.setOutput("fresh", "false");
+            return;
+          }
+          const sourceRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            workflow_id: run.workflow_id,
+            event: "pull_request",
+            head_sha: run.head_sha,
+            per_page: 100,
+          });
+          const currentRun = sourceRuns.find((candidate) => Number(candidate.id) === Number(run.id));
+          const latest = Number(currentRun?.run_attempt || 1) === Number(run.run_attempt || 1) && Number(run.id) === Math.max(
+            ...sourceRuns.map((candidate) => Number(candidate.id))
+          );
+          if (!sameHead || !latest) {
+            core.warning("PR head or source run is stale; Pages publication suppressed.");
+            core.setOutput("fresh", "false");
+            return;
+          }
+          const expectedName = `allure-report-${context.runId}`;
+          const reportArtifacts = await github.paginate(
+            github.rest.actions.listWorkflowRunArtifacts,
+            {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+              per_page: 100,
+            }
+          );
+          const matches = reportArtifacts.filter((artifact) => artifact.name === expectedName);
+          if (matches.length !== 1 || matches[0].expired ||
+              !Number.isSafeInteger(Number(matches[0].id)) || Number(matches[0].id) <= 0 ||
+              !Number.isSafeInteger(Number(matches[0].size_in_bytes)) || Number(matches[0].size_in_bytes) < 0 ||
+              Number(matches[0].size_in_bytes) > 262144000) {
+            core.setFailed("Generated report artifact failed identity, expiry, or compressed-size checks.");
+            return;
+          }
+          core.setOutput("artifact_manifest", JSON.stringify([
+            { name: expectedName, id: Number(matches[0].id) },
+          ]));
+          core.setOutput("fresh", "true");
+        github-token: ${{ secrets.github-token || github.token }}
+      if: ${{ steps.freshness.outputs.fresh == 'true' }}
+    - name: Publish Allure HTML to GitHub Pages
+      if: ${{ steps.freshness.outputs.fresh == 'true' && steps.publication.outputs.fresh == 'true' }}
+      uses: quokkify/gh-pages-subdir-action@e936122cbdf5a9676b5587d5a812fadf7ddfde6b # v0.1.1
+      with:
+        token: ${{ secrets.github-token || github.token }}
+        publish-dir: ${{ inputs.managed-pages-layout && 'allure-report' || 'allure-report/allure-report' }}
+        destination-dir: ${{ inputs.pages-destination-directory }}

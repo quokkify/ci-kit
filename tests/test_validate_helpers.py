@@ -88,7 +88,7 @@ class ActionReferenceTests(TestCase):
             checkout = Path(temporary) / "checkout"
             shutil.copytree(ROOT, checkout, ignore=shutil.ignore_patterns(".git", "__pycache__"))
             for relative in ("actions/allure-report/action.yml", "actions/compose-up/action.yml",
-                             "templates/project/template/.github/workflows/allure-report.yml.jinja"):
+                             ".github/workflows/allure-publisher-core.yml"):
                 path = checkout / relative
                 text, count = re.subn(r"@[0-9a-f]{40} # v\d+\.\d+\.\d+", "@" + "b" * 40 + " # v99.12.34", path.read_text())
                 self.assertGreater(count, 0, relative)
