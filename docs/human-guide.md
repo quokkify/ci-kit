@@ -40,7 +40,6 @@ Copier asks a few questions:
 
 - project name;
 - Python, Node.js, or Java components and their directories;
-- whether to add a q4j test starter;
 - whether Docker is used;
 - whether to enable CodeQL, Gitleaks, and Allure reports;
 - whether Release Please is needed;

@@ -31,7 +31,3 @@
 {%- endif -%}
 {%- endmacro -%}
 {{ block(_copier_answers, 0) }}
-{% if q4j_tests %}
-# Toolkit-owned metadata protects the installed test directory during updates.
-q4j_installed_path: {{ scalar(q4j_tests_path) }}
-{% endif -%}

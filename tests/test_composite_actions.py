@@ -55,14 +55,6 @@ class SetupActionTests(unittest.TestCase):
         )
         self.assertEqual(setup_java["with"]["java-version"], "17")
 
-    def test_toolkit_validation_uses_java_21_for_q4j_starter(self) -> None:
-        validation_workflow = yaml.safe_load((ROOT / ".github/workflows/validate-toolkit.yml").read_text())
-        validation_setup = next(
-            step for step in validation_workflow["jobs"]["java"]["steps"]
-            if step.get("name") == "Set up Java"
-        )
-        self.assertEqual(validation_setup["with"]["java-version"], "21")
-
     def test_boolean_validation_is_first_and_fails_closed(self) -> None:
         cases = {
             "setup-python": {"CACHE_DEPENDENCIES": "maybe", "INSTALL_DEPENDENCIES": "true", "PACKAGE_MANAGER": "auto", "POETRY_VERSION": "2.1.4", "UV_VERSION": "0.8.15"},

@@ -1,9 +1,0 @@
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    testImplementation libs.q4j.config
-    testImplementation libs.testng
-    checkstyle libs.checkstyle
-}

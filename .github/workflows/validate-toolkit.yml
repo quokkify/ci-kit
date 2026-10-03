@@ -215,8 +215,6 @@ jobs:
         env:
           REQUIRE_MAVEN: "1"
         run: bash scripts/validate_java_fixture.sh
-      - name: Render and compile q4j starter
-        run: python scripts/validate_q4j_fixture.py
 
   validation-complete:
     name: Validation pipeline complete

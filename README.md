@@ -47,7 +47,6 @@ my-project/
 ├── .copier-answers.yml          # commit it; copier update needs it
 ├── README.md                    # written once, then yours
 ├── docs/project-toolkit.md      # onboarding checklist, refreshed on update
-├── test-automation/             # if q4j_tests
 └── .github/
     ├── pull_request_template.md
     ├── renovate.json            # if renovate
@@ -64,6 +63,8 @@ my-project/
 ```
 
 Open `docs/project-toolkit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
+
+Java/q4j test automation is a separate template: see [quokkify/java-test-automation-template](https://github.com/quokkify/java-test-automation-template).
 
 ## Quick start: reusable workflows
 
