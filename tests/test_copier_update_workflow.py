@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / "templates/project/template/.github/workflows/copier-update.yml.jinja"
+WORKFLOW = ROOT / "template/.github/workflows/copier-update.yml.jinja"
 
 
 def production_script() -> str:
@@ -137,7 +137,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 run_git("clone", str(template_bare), str(template_work), cwd=temporary)
                 run_git("config", "user.name", "fixture", cwd=template_work)
                 run_git("config", "user.email", "fixture@example.com", cwd=template_work)
-                template_helper = template_work / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja"
+                template_helper = template_work / "template/.github/scripts/enrich_release_notes.py.jinja"
                 template_helper.parent.mkdir(parents=True)
                 template_helper.write_text(canonical, encoding="utf-8")
                 run_git("add", ".", cwd=template_work)

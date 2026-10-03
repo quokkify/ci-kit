@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / ".github/release-please/config.json"
-TEMPLATE_CONFIG_PATH = ROOT / "templates/project/template/.github/release-please/config.json.jinja"
+TEMPLATE_CONFIG_PATH = ROOT / "template/.github/release-please/config.json.jinja"
 RENOVATE_PATH = ROOT / "renovate/default.json"
 
 

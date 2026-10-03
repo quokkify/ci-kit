@@ -1,1 +1,1 @@
-templates/project/template/**/gradlew.bat text eol=crlf whitespace=cr-at-eol
+template/**/gradlew.bat text eol=crlf whitespace=cr-at-eol

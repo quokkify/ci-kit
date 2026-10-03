@@ -26,7 +26,7 @@ def render_workflows(root: Path = ROOT) -> list[Path]:
         source = temporary_root / "source"
         source.mkdir()
         shutil.copy2(root / "copier.yml", source / "copier.yml")
-        shutil.copytree(root / "templates", source / "templates")
+        shutil.copytree(root / "template", source / "template")
         for scenario in scenarios:
             destination = temporary_root / scenario.stem
             run_copy(

@@ -95,7 +95,7 @@ class RenderedWorkflowEvidenceTests(TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         shutil.copy2(ROOT / "copier.yml", self.root / "copier.yml")
-        shutil.copytree(ROOT / "templates", self.root / "templates")
+        shutil.copytree(ROOT / "template", self.root / "template")
         (self.root / "tests/scenarios").mkdir(parents=True)
         shutil.copy2(ROOT / "tests/scenarios/python.yml", self.root / "tests/scenarios/python.yml")
         (self.root / ".github/workflows").mkdir(parents=True)
@@ -103,7 +103,7 @@ class RenderedWorkflowEvidenceTests(TestCase):
     def test_current_worktree_rendered_without_overwriting_native_workflows(self) -> None:
         # The Python scenario always renders Validate; optional workflows may
         # be excluded, and directory iteration order differs across hosts.
-        template = self.root / "templates/project/template/.github/workflows/validate.yml.jinja"
+        template = self.root / "template/.github/workflows/validate.yml.jinja"
         template.write_text("# current worktree sentinel\n" + template.read_text())
         native = self.root / ".github/workflows/codeql.yml"
         native.write_text("native workflow sentinel\n")

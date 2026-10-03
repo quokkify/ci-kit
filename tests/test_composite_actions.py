@@ -1079,7 +1079,7 @@ class AllureReportActionTests(unittest.TestCase):
         patterns = [as_regex(item) for item in manager["managerFilePatterns"]]
         pinned = sorted(
             path.relative_to(ROOT).as_posix()
-            for directory in (".github/workflows", "templates")
+            for directory in (".github/workflows", "template")
             for path in (ROOT / directory).rglob("*")
             if path.is_file() and "copier==" in path.read_text(encoding="utf-8", errors="ignore")
         )

@@ -244,7 +244,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
         self.assertIn("other/repo/.github/workflows/ci.yml@v2.14.0", foreign)
 
 
-ANSWERS_TEMPLATE = ROOT / "templates/project/template/.copier-answers.yml.jinja"
+ANSWERS_TEMPLATE = ROOT / "template/.copier-answers.yml.jinja"
 ANSWERS_CORPUS = [
     {
         "_commit": "v2.25.0",

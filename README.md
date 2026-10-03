@@ -93,7 +93,7 @@ Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/nod
 - [Security model](docs/security.md)
 - [Contributing](CONTRIBUTING.md)
 
-The root [`copier.yml`](copier.yml) points at `templates/project/template/`. Keeping the Copier entry point at the Git root is required for reliable VCS-aware `copier update` operations.
+The root [`copier.yml`](copier.yml) points at `template/`. Keeping the Copier entry point at the Git root is required for reliable VCS-aware `copier update` operations.
 
 Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; Renovate updates workflow versions in examples and documentation as well as in workflows.
 

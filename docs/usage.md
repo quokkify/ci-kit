@@ -99,7 +99,7 @@ This is the supported in-repository path for private consumers, which the public
 
 ### Ownership of pinned tool versions
 
-Versions inside template-owned workflow files belong to this repository, not to Renovate in the generated project. Renovate here bumps the pinned `uses:` digests and `ACTIONLINT_VERSION` inside `templates/project/template`, and those bumps reach consumers through `copier update`.
+Versions inside template-owned workflow files belong to this repository, not to Renovate in the generated project. Renovate here bumps the pinned `uses:` digests and `ACTIONLINT_VERSION` inside `template`, and those bumps reach consumers through `copier update`.
 
 The rule that stops a consumer's Renovate from editing those same files lives in the shared preset, `quokkify/renovate-presets//presets/base`, and reaches projects through `extends`. It disables Renovate for exactly the workflow paths this template owns. Without it the same pin is proposed twice — once here and once in every consumer — and a later `copier update` lands on top of a locally moved pin, producing a `.rej` conflict in a file the project never edited.
 

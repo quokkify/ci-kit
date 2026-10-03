@@ -99,7 +99,7 @@ There is intentionally one configurable project template rather than many copied
 
 1. Create a branch in `project-toolkit`.
 2. Add the new question or option to [`copier.yml`](../copier.yml).
-3. Add or change a `.jinja` file under [`templates/project/template/`](../templates/project/template/).
+3. Add or change a `.jinja` file under [`template/`](../template/).
 4. Add or update a representative answer file under [`tests/scenarios/`](../tests/scenarios/). If it is a new scenario, register it in `scripts/validate.py` so static validation renders it.
 5. Generate a disposable preview.
 6. Run validation and open a PR.
