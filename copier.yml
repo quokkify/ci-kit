@@ -1,5 +1,5 @@
 _min_copier_version: "9.18.2"
-_subdirectory: templates/project/template
+_subdirectory: template
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _exclude:

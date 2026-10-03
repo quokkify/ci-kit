@@ -363,7 +363,7 @@ class AllureHistoryTransportTests(TestCase):
         self.assertLess(names.index('Build report without write privileges'), names.index('Upload updated Allure history'))
         self.assertEqual(CORE['jobs']['generate']['permissions'], {'actions': 'read', 'contents': 'read'})
         restore = generate_step('Restore previous Allure history')
-        self.assertEqual(restore['run'], 'python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja')
+        self.assertEqual(restore['run'], 'python .toolkit/template/.github/allure/safe_extract.py.jinja')
         self.assertEqual(restore['env']['ARTIFACT_MANIFEST'], '${{ steps.history.outputs.artifact_manifest }}')
         self.assertNotIn('MATERIALIZE_ROOT', restore['env'])
         self.assertEqual(generate_step('Install restored Allure history')['env']['EXPANDED_ROOT'], restore['env']['OUTPUT_ROOT'])
@@ -465,7 +465,7 @@ class AllureHistoryTransportTests(TestCase):
         self.assertEqual(output, '')
 
     def test_template_config_and_caller_share_one_history_path(self) -> None:
-        config = (ROOT / 'templates/project/template/.github/allure/allurerc.mjs.jinja').read_text()
+        config = (ROOT / 'template/.github/allure/allurerc.mjs.jinja').read_text()
         self.assertIn('historyPath: "./allure-history/history.jsonl",', config)
         self.assertIn('historyLimit: 20,', config)
         self.assertNotIn('appendHistory', config)
@@ -488,7 +488,7 @@ class AllureConcurrencyTests(TestCase):
                   'github.event.workflow_run.head_branch': branch,
                   'inputs.source-workflow-path': source_path}
         caller = jinja2.Environment().from_string(
-            (ROOT / 'templates/project/template/.github/workflows/allure-report.yml.jinja').read_text()).render(
+            (ROOT / 'template/.github/workflows/allure-report.yml.jinja').read_text()).render(
             toolkit_version='v99.0.0', components=[], allure_external_workflow_name='Run tests',
             allure_external_workflow_path='.github/workflows/test.yml', allure_external_artifact_prefix='allure-results-',
             allure_external_artifact_min_count=1, allure_external_artifact_max_count=7, allure_categories_file='',
@@ -517,7 +517,7 @@ class AllureConcurrencyTests(TestCase):
 
 class AllureCallerContracts(TestCase):
     def test_forty_generated_variants_delegate_exact_inputs_and_no_broad_token(self) -> None:
-        template = jinja2.Environment().from_string((ROOT / 'templates/project/template/.github/workflows/allure-report.yml.jinja').read_text())
+        template = jinja2.Environment().from_string((ROOT / 'template/.github/workflows/allure-report.yml.jinja').read_text())
         with tempfile.TemporaryDirectory(prefix='allure-callers-') as directory:
             for component in [False, True]:
                 for pages in [False, True]:
@@ -619,6 +619,9 @@ class AllureCallerContracts(TestCase):
                 return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', *args],
                                       cwd=cwd, capture_output=True, text=True, check=True, timeout=30)
             # Actual released questions and inline workflow, with no new endpoints.
+            legacy_template = source / 'templates/project/template'
+            legacy_template.parent.mkdir(parents=True)
+            (source / 'template').rename(legacy_template)
             for path in ['copier.yml', 'templates/project/template/.github/workflows/allure-report.yml.jinja']:
                 original = git(['show', 'v2.23.5:' + path], cwd=ROOT).stdout
                 (source / path).write_text(original)
@@ -632,8 +635,9 @@ class AllureCallerContracts(TestCase):
                                 '--data', 'renovate=false', str(source), str(target)],
                                check=True, capture_output=True, text=True, timeout=30)
                 git(['init', '--quiet'], cwd=target); git(['add', '.'], cwd=target); git(['commit', '-qm', 'consumer'], cwd=target)
+            shutil.rmtree(source / 'templates')
             shutil.copytree(ROOT, source, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.git', '__pycache__'))
-            git(['add', '.']); git(['commit', '-qm', 'shared Allure release']); git(['tag', 'v9.3.0'])
+            git(['add', '-A']); git(['commit', '-qm', 'shared Allure release']); git(['tag', 'v9.3.0'])
             fresh = Path(directory) / 'invalid-fresh'
             fresh.mkdir()
             failed_copy = subprocess.run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'v9.3.0',

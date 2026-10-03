@@ -73,7 +73,7 @@
       "description": "Update pinned Python validation dependencies in every workflow that installs them, including the project template.",
       "managerFilePatterns": [
         "/^\\.github/workflows/[^/]+\\.ya?ml$/",
-        "/^templates/project/template/\\.github/workflows/[^/]+\\.ya?ml\\.jinja$/"
+        "/^template/\\.github/workflows/[^/]+\\.ya?ml\\.jinja$/"
       ],
       "matchStrings": [
         "(?<depName>PyYAML|copier)==(?<currentValue>\\d+\\.\\d+\\.\\d+)"
@@ -155,7 +155,7 @@
       "description": "Update the pinned actionlint release in the toolkit and in the project template.",
       "managerFilePatterns": [
         "/^\\.github/workflows/validate-toolkit\\.ya?ml$/",
-        "/^templates/project/template/\\.github/workflows/validate\\.ya?ml\\.jinja$/"
+        "/^template/\\.github/workflows/validate\\.ya?ml\\.jinja$/"
       ],
       "matchStrings": [
         "ACTIONLINT_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"
@@ -168,7 +168,7 @@
       "customType": "regex",
       "description": "Update pinned GitHub Actions in project template workflow files.",
       "managerFilePatterns": [
-        "/^templates/project/template/\\.github/workflows/[^/]+\\.ya?ml\\.jinja$/"
+        "/^template/\\.github/workflows/[^/]+\\.ya?ml\\.jinja$/"
       ],
       "matchStrings": [
         "uses:\\s*(?<depName>[A-Za-z0-9_/-]+)@(?<currentDigest>[0-9a-f]{40})\\s+#\\s+(?<currentValue>v\\d+(?:\\.\\d+\\.\\d+)?)"

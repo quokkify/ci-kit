@@ -76,7 +76,7 @@ class CheckoutTests(unittest.TestCase):
         self.assertRegex(text, r'uses: actions/checkout@[0-9a-f]{40} # v\d+\.\d+\.\d+')
 
     def test_every_generated_checkout_tracks_the_copier_version(self):
-        sources = ROOT / 'templates/project/template/.github/workflows'
+        sources = ROOT / 'template/.github/workflows'
         expected = {'validate.yml', 'codeql.yml', 'gitleaks.yml', 'copier-update.yml'}
         actual = set()
         for source in sources.glob('*.jinja'):
@@ -138,7 +138,7 @@ jobs:
             source, consumer = root / 'source', root / 'consumer'
             source.mkdir()
             shutil.copy2(ROOT / 'copier.yml', source / 'copier.yml')
-            shutil.copytree(ROOT / 'templates', source / 'templates')
+            shutil.copytree(ROOT / 'template', source / 'template')
             current = {p: p.read_text() for p in source.rglob('*.yml.jinja')}
             upstream = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1'
             shared = 'quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}'

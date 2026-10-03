@@ -49,7 +49,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
         source = temporary / "template"
         source.mkdir()
         shutil.copy2(ROOT / "copier.yml", source / "copier.yml")
-        shutil.copytree(ROOT / "templates/project/template", source / "templates/project/template")
+        shutil.copytree(ROOT / "template", source / "template")
         init_git(source)
         commit(source, "Current working template")
         run(["git", "tag", "v1.0.0"], source)
@@ -96,7 +96,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
         starter = destination / "test-automation"
         assert (starter / "gradlew").stat().st_mode & 0o111, "wrapper must be executable"
         template_starter = (
-            source / "templates/project/template"
+            source / "template"
             / "{% if q4j_tests %}{{ q4j_tests_path }}{% endif %}"
         )
         for name in (
@@ -147,7 +147,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
                 markers[name] = marker
         commit(destination, "Consumer customization")
         template_starter = (
-            source / "templates/project/template"
+            source / "template"
             / "{% if q4j_tests %}{{ q4j_tests_path }}{% endif %}"
         )
         for path in template_starter.rglob("*"):

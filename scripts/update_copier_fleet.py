@@ -1190,7 +1190,7 @@ def verify_release_helper(repository_path: Path, template_source: str, template_
         source = canonical_template_source(template_source)
         run(["git", "fetch", "--quiet", "--depth=1", source, template_ref], cwd=repository_path, env=env)
         result = run(
-            ["git", "show", f"FETCH_HEAD:templates/project/template/.github/scripts/enrich_release_notes.py.jinja"],
+            ["git", "show", "FETCH_HEAD:template/.github/scripts/enrich_release_notes.py.jinja"],
             cwd=repository_path,
             env=env,
         )

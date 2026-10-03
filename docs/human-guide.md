@@ -9,7 +9,7 @@ This is the short, practical guide. You do not need to understand the toolkit in
 Install these tools once:
 
 - [GitHub CLI](https://cli.github.com/) as `gh`;
-- [Copier](https://copier.readthedocs.io/) 9.17.0 or newer;
+- [Copier](https://copier.readthedocs.io/) 9.18.2 or newer;
 - Git.
 
 Check access and capture the latest released toolkit tag:
@@ -40,7 +40,9 @@ Copier asks a few questions:
 
 - project name;
 - Python, Node.js, or Java components and their directories;
+- whether to add a q4j test starter;
 - whether Docker is used;
+- whether to enable CodeQL, Gitleaks, and Allure reports;
 - whether Release Please is needed;
 - whether Renovate is needed.
 
@@ -56,7 +58,7 @@ gh repo create quokkify/my-project --private --source=. --push
 
 Commit `.copier-answers.yml`. It is not a secret. It is the receipt Copier needs for future updates.
 
-Before merging generated CI, open `.github/workflows/ci.yml` and confirm that component directories match the real project.
+Before merging generated CI, open `.github/workflows/validate.yml` and confirm that component directories match the real project. Then work through the checklist in the generated `docs/project-toolkit.md`.
 
 ## 2. Update a project created by Copier
 
@@ -83,7 +85,7 @@ gh pr create --fill
 
 Review the PR before merging it. In particular, check:
 
-- `.github/workflows/ci.yml`;
+- `.github/workflows/validate.yml`;
 - `.github/workflows/release.yml`, if enabled;
 - `.github/renovate.json`;
 - `.copier-answers.yml`;
@@ -97,7 +99,7 @@ There is intentionally one configurable project template rather than many copied
 
 1. Create a branch in `project-toolkit`.
 2. Add the new question or option to [`copier.yml`](../copier.yml).
-3. Add or change a `.jinja` file under [`templates/project/template/`](../templates/project/template/).
+3. Add or change a `.jinja` file under [`template/`](../template/).
 4. Add or update a representative answer file under [`tests/scenarios/`](../tests/scenarios/). If it is a new scenario, register it in `scripts/validate.py` so static validation renders it.
 5. Generate a disposable preview.
 6. Run validation and open a PR.

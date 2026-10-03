@@ -985,7 +985,7 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
-TEMPLATE_WORKFLOW_SOURCES = ROOT / "templates/project/template/.github/workflows"
+TEMPLATE_WORKFLOW_SOURCES = ROOT / "template/.github/workflows"
 # The API endpoint rather than raw.githubusercontent.com: raw is CDN-cached for
 # several minutes, which would fail this check against a preset that was already
 # updated. Authorization is attached when a token is present so CI is not subject
@@ -1085,7 +1085,7 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
 
 
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
-    if ".git" in path.parts or "templates/project/template" in path.as_posix():
+    if ".git" in path.parts or path.is_relative_to(ROOT / "template"):
         continue
     try:
         yaml.safe_load(path.read_text())
@@ -1314,7 +1314,7 @@ check(
 )
 
 for path in sorted(ROOT.rglob("*.json")):
-    if "templates/project/template" in path.as_posix():
+    if path.is_relative_to(ROOT / "template"):
         continue
     try:
         json.loads(path.read_text())
@@ -1558,7 +1558,7 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
                                   "path": ".toolkit", "persist-credentials": False}:
         errors.append(f"{label}: extractor checkout must follow the called workflow commit")
     extractor = next((step for step in download_steps if isinstance(step, dict) and "run" in step), {})
-    if (extractor.get("run") != "python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja"
+    if (extractor.get("run") != "python .toolkit/template/.github/allure/safe_extract.py.jinja"
             or extractor.get("env", {}).get("ARTIFACT_MANIFEST") != "${{ needs.resolve.outputs.artifact_manifest }}"
             or any("actions/download-artifact@" in str(step.get("uses", "")) for step in download_steps)):
         errors.append(f"{label}: source artifacts must pass bounded extraction before materialization")
@@ -1816,6 +1816,10 @@ if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)
 
+check(
+    not any("project-toolkit.md" in str(entry) for entry in skip_if_exists),
+    "docs/project-toolkit.md must stay toolkit-owned so copier update refreshes it",
+)
 copier = shutil.which("copier")
 check(copier is not None, "copier executable is required")
 actionlint = shutil.which("actionlint")
@@ -2001,7 +2005,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "${{ runner.temp }}/allure-expanded" in report_text
                 and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
                 in report_text
-                and "python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja" in report_text
+                and "python .toolkit/template/.github/allure/safe_extract.py.jinja" in report_text
                 and "repository: ${{ job.workflow_repository }}" in report_text
                 and "ref: ${{ job.workflow_sha }}" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
@@ -2234,6 +2238,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
         )
+        onboarding_path = dest / "docs/project-toolkit.md"
+        check(onboarding_path.is_file(), f"{scenario}: missing docs/project-toolkit.md onboarding guide")
+        if onboarding_path.is_file():
+            onboarding = onboarding_path.read_text()
+            check(
+                not onboarding.endswith("\n\n") and "{%" not in onboarding and "{{" not in onboarding,
+                f"{scenario}: onboarding guide has unrendered Jinja or a trailing blank line",
+            )
+            check(
+                ("allure-report.yml" in onboarding) == scenario.startswith("allure-"),
+                f"{scenario}: onboarding guide Allure row does not match the Copier answers",
+            )
         for owned in ("/README.md", ".github/renovate.json"):
             check(
                 owned in skip_if_exists,

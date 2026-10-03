@@ -116,7 +116,7 @@ jobs:
             trap 'rm -f "$template_helper"' EXIT
             git fetch --quiet --depth=1 https://github.com/quokkify/project-toolkit.git \
               "refs/tags/$ref"
-            git show "FETCH_HEAD:templates/project/template/.github/scripts/enrich_release_notes.py.jinja" \
+            git show "FETCH_HEAD:template/.github/scripts/enrich_release_notes.py.jinja" \
               > "$template_helper"
             if ! cmp -s "$template_helper" "$helper"; then
               printf 'Refusing template update: %s differs from project-toolkit %s. Reconcile this project-owned/customized helper with the template, then rerun.\n' "$helper" "$ref" >&2

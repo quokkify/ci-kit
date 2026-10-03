@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RENOVATE_PATH = ROOT / "renovate/default.json"
 CHECKED_IN_RENOVATE_PATH = ROOT / ".github/renovate.json"
-TEMPLATE_RENOVATE_PATH = ROOT / "templates/project/template/.github/renovate.json.jinja"
+TEMPLATE_RENOVATE_PATH = ROOT / "template/.github/renovate.json.jinja"
 
 
 class RenovateConfigTests(unittest.TestCase):

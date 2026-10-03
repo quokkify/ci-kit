@@ -215,11 +215,11 @@ class RichNotesTests(TestCase):
         self.assertIn("### Features", updated)
 
     def test_legacy_marker_cleanup_in_generated_helper_matches_root(self):
-        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
+        template = (ROOT / "template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         self.assertEqual(template, (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
 
     def test_generated_helper_template_renders_without_changing_python_syntax(self):
-        template = (ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
+        template = (ROOT / "template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
         rendered = Environment(undefined=StrictUndefined).from_string(template).render()
         self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
 
@@ -384,13 +384,13 @@ class RichNotesTests(TestCase):
         self.assertEqual(paths, [Path("package/CHANGELOG.md")])
 
     def test_generated_helper_is_the_same_behavioral_contract(self):
-        generated = ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja"
+        generated = ROOT / "template/.github/scripts/enrich_release_notes.py.jinja"
         self.assertEqual(generated.read_bytes(), (ROOT / "scripts/enrich_release_notes.py").read_bytes())
         compile(generated.read_text(encoding="utf-8"), str(generated), "exec")
 
     def test_generated_release_body_placement_and_rerun_match_root(self):
         namespace: dict[str, Any] = {"__name__": "generated_helper"}
-        generated = ROOT / "templates/project/template/.github/scripts/enrich_release_notes.py.jinja"
+        generated = ROOT / "template/.github/scripts/enrich_release_notes.py.jinja"
         exec(compile(generated.read_text(encoding="utf-8"), str(generated), "exec"), namespace)
         body = ":robot: header\n---\nnotes\n---\nThis PR was generated with Release Please.\n"
         enrich_body = cast(Callable[[str, str], str], namespace["enrich_release_body"])
