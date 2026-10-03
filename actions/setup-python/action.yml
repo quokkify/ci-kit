@@ -21,7 +21,7 @@ inputs:
   uv-version:
     description: Exact uv package version installed when uv is selected.
     required: false
-    default: "0.12.21"
+    default: "0.12.22"
   poetry-version:
     description: Exact Poetry package version installed when Poetry is selected.
     required: false
