@@ -46,6 +46,7 @@ _skip_if_exists:
   - "{{ q4j_tests_path }}/gradle/libs.versions.toml"
   - "{{ q4j_tests_path }}/tools/checkstyle/checkstyle.xml"
   - "{{ q4j_tests_path }}/tools/checkstyle/suppressions.xml"
+  - "{{ q4j_tests_path }}/tools/spotbugs/excludeFilter.xml"
   - "{{ q4j_tests_path }}/gradlew"
   - "{{ q4j_tests_path }}/gradlew.bat"
   - "{{ q4j_tests_path }}/gradle/wrapper/gradle-wrapper.jar"
