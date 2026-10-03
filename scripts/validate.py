@@ -318,7 +318,7 @@ def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
         return errors
 
     require(
-        "github.repository == 'quokkify/project-toolkit'" in str(update.get("if", "")),
+        "github.repository == 'quokkify/ci-kit'" in str(update.get("if", "")),
         "update job must be guarded against forks",
     )
 
@@ -992,7 +992,7 @@ SHARED_PRESET_BASE_URL = (
 
 
 def template_owned_workflow_paths() -> list[str]:
-    """Return the workflow paths whose versions project-toolkit owns."""
+    """Return the workflow paths whose versions ci-kit owns."""
     return sorted(
         f".github/workflows/{source.name.removesuffix('.jinja')}"
         for source in TEMPLATE_WORKFLOW_SOURCES.glob("*.yml.jinja")
@@ -1255,7 +1255,7 @@ def validate_gh_pages_subdir_manager_regex() -> list[str]:
         "ownerless-prefix": "myquokkify/gh-pages-subdir-action v2.6.0",
         "ownerful-prefix": "foo/gh-pages-subdir-action v2.6.0",
         "suffix-no-space": "gh-pages-subdir-action-extra v2.6.0",
-        "inline-use": "random quokkify/project-toolkit/actions/deploy-gh-pages-subdir@v2.6.0",
+        "inline-use": "random quokkify/ci-kit/actions/deploy-gh-pages-subdir@v2.6.0",
     }.items():
         if matcher.search(text):
             errors.append(f"gh-pages-subdir regex probe over-matched {label}: {text}")
@@ -1393,8 +1393,8 @@ check(
     release_config.get("release-type") == "simple"
     and release_config.get("include-component-in-tag") is False
     and release_config.get("packages", {}).get(".", {}).get("package-name")
-    == "project-toolkit",
-    "Release Please config must preserve the simple project-toolkit SemVer contract",
+    == "ci-kit",
+    "Release Please config must preserve the simple ci-kit SemVer contract",
 )
 assert_shared_preset_covers_template_workflows()
 ERRORS.extend(release_workflow_errors(ROOT / ".github/workflows/release.yml"))
@@ -1813,8 +1813,8 @@ if ERRORS:
     raise SystemExit(1)
 
 check(
-    not any("project-toolkit.md" in str(entry) for entry in skip_if_exists),
-    "docs/project-toolkit.md must stay toolkit-owned so copier update refreshes it",
+    not any("ci-kit.md" in str(entry) for entry in skip_if_exists),
+    "docs/ci-kit.md must stay toolkit-owned so copier update refreshes it",
 )
 copier = shutil.which("copier")
 check(copier is not None, "copier executable is required")
@@ -1918,14 +1918,14 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             caller_jobs = allure_workflow.get("jobs", {})
             caller = caller_jobs.get("report", {})
             check(set(caller_jobs) == ({"report", "pages"} if scenario == "allure-pages" else {"report"})
-                  and caller.get("uses") == "quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@v1.0.0"
+                  and caller.get("uses") == "quokkify/ci-kit/.github/workflows/allure-publisher-core.yml@v1.0.0"
                   and caller.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "write"}
                   and all("steps" not in job and "secrets" not in job for job in caller_jobs.values()),
                   f"{scenario}: generated caller must delegate without broad token secrets")
             jobs = yaml.safe_load(ALLURE_WORKFLOW.read_text())["jobs"]
             if scenario == "allure-pages":
                 jobs["pages"] = yaml.safe_load(ALLURE_PAGES_WORKFLOW.read_text())["jobs"]["pages"]
-                check(caller_jobs["pages"].get("uses") == "quokkify/project-toolkit/.github/workflows/allure-pages.yml@v1.0.0"
+                check(caller_jobs["pages"].get("uses") == "quokkify/ci-kit/.github/workflows/allure-pages.yml@v1.0.0"
                       and caller_jobs["pages"].get("permissions") == {"actions": "read", "contents": "write", "pull-requests": "read"},
                       "allure-pages: only the separate Pages call may grant contents:write")
             check(
@@ -2234,8 +2234,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
         )
-        onboarding_path = dest / "docs/project-toolkit.md"
-        check(onboarding_path.is_file(), f"{scenario}: missing docs/project-toolkit.md onboarding guide")
+        onboarding_path = dest / "docs/ci-kit.md"
+        check(onboarding_path.is_file(), f"{scenario}: missing docs/ci-kit.md onboarding guide")
         if onboarding_path.is_file():
             onboarding = onboarding_path.read_text()
             check(
@@ -2951,7 +2951,7 @@ if GENERATED_RENOVATE_CONFIGS:
 # The runner discovers suites and marks their child environment so tests that
 # invoke this validator do not recursively start the suite runner again.
 run([sys.executable, "scripts/run_test_suites.py"])
-run(["bash", "-n", "scripts/rollout_project_toolkit.sh"])
+run(["bash", "-n", "scripts/rollout_ci_kit.sh"])
 
 if not ARGS.static:
     fixture_commands = (

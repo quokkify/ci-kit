@@ -1,6 +1,6 @@
 {
   "description": [
-    "Shared dependency policy for repositories consuming project-toolkit.",
+    "Shared dependency policy for repositories consuming ci-kit.",
     "Updates GitHub Actions and versioned reusable workflow references without automerge."
   ],
   "extends": ["config:recommended"],
@@ -17,11 +17,11 @@
       "groupName": "github actions non-major updates"
     },
     {
-      "description": "Group non-breaking project-toolkit workflow updates.",
+      "description": "Group non-breaking ci-kit workflow updates.",
       "matchManagers": ["custom.regex"],
-      "matchPackageNames": ["quokkify/project-toolkit"],
+      "matchPackageNames": ["quokkify/ci-kit"],
       "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "project-toolkit non-major updates"
+      "groupName": "ci-kit non-major updates"
     },
     {
       "description": "Deduplicate Allure action updates across built-in and custom managers.",
@@ -34,12 +34,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Update exact SemVer references to reusable project-toolkit workflows.",
+      "description": "Update exact SemVer references to reusable ci-kit workflows.",
       "managerFilePatterns": ["/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": [
-        "uses:\\s*quokkify/project-toolkit/\\.github/workflows/[^@\\s]+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
+        "uses:\\s*quokkify/ci-kit/\\.github/workflows/[^@\\s]+@(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
       ],
-      "depNameTemplate": "quokkify/project-toolkit",
+      "depNameTemplate": "quokkify/ci-kit",
       "datasourceTemplate": "github-tags",
       "versioningTemplate": "semver"
     }

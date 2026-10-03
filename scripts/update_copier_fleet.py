@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Update every Copier-managed repository in a GitHub organization.
 
-The updater intentionally accepts only project-toolkit template sources. In
+The updater intentionally accepts only ci-kit template sources. In
 write mode it owns one deterministic branch per repository and creates or
 refreshes a pull request. Dry-run mode performs the same Copier rendering
 without pushing anything.
@@ -29,7 +29,8 @@ import yaml
 
 ANSWERS_FILE = ".copier-answers.yml"
 DEFAULT_BRANCH = "automation/copier-template-update"
-DEFAULT_TEMPLATE_REPOSITORY = "quokkify/project-toolkit"
+DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
+RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
 PR_TITLE = "chore(template): update shared project template"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
@@ -310,7 +311,7 @@ def normalize_template_source(source: str) -> str | None:
     if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
         owner, repository = value.split("/", 1)
         if owner not in {".", ".."} and repository not in {".", ".."}:
-            return value.casefold()
+            return RENAMED_TEMPLATE_REPOSITORIES.get(value.casefold(), value.casefold())
     return None
 
 
@@ -1197,7 +1198,7 @@ def verify_release_helper(repository_path: Path, template_source: str, template_
         fetched.write_text(result.stdout, encoding="utf-8")
         if fetched.read_bytes() != helper.read_bytes():
             raise FleetUpdateError(
-                ".github/scripts/enrich_release_notes.py differs from the selected project-toolkit ref; "
+                ".github/scripts/enrich_release_notes.py differs from the selected ci-kit ref; "
                 "reconcile project-owned/customized changes with the template before retrying"
             )
 
@@ -1413,7 +1414,7 @@ def authenticated_git() -> list[str]:
     ]
 
 
-TOOLKIT_REFERENCE_PREFIX = r"quokkify/project-toolkit/(?:\.github/workflows|actions)/[^@\s]+@"
+TOOLKIT_REFERENCE_PREFIX = r"quokkify/ci-kit/(?:\.github/workflows|actions)/[^@\s]+@"
 TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+")
 TOOLKIT_DIGEST_REFERENCE = re.compile(
     rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
@@ -1521,7 +1522,7 @@ def ensure_pull_request(
     body = (
         "## Summary\n\n"
         "Automated `copier update` from the shared "
-        "[`quokkify/project-toolkit`](https://github.com/quokkify/project-toolkit) template.\n\n"
+        "[`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) template.\n\n"
         "This keeps the organization baseline (validation, CodeQL, Gitleaks, "
         "Release Please, and Renovate) synchronized while leaving merge approval to maintainers.\n\n"
         "## Generated changes\n\n"

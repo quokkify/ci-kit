@@ -105,7 +105,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         self.assertEqual(
             root_package["changelog-sections"], template_package["changelog-sections"]
         )
-        # Alert when release behavior in project-toolkit drifts from generated projects.
+        # Alert when release behavior in ci-kit drifts from generated projects.
         for section in root_package["changelog-sections"]:
             if section["type"] == "chore":
                 self.assertEqual(section["section"], "🧹 Chores")

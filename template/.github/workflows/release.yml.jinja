@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   release:
-    uses: quokkify/project-toolkit/.github/workflows/release-please.yml@{{ toolkit_version }}
+    uses: quokkify/ci-kit/.github/workflows/release-please.yml@{{ toolkit_version }}
     with:
       mode: {{ release_mode }}
 {%- if release_mode == 'manifest' or release_mode == 'single' %}

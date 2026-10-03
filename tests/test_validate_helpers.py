@@ -56,18 +56,18 @@ class ActionReferenceTests(TestCase):
         for version, digest in (("v2.6.0", "a" * 40), ("v3.17.42", "b" * 40)):
             for prefix in ("uses:", "- uses:"):
                 with self.subTest(version=version, prefix=prefix):
-                    text = f"  {prefix} quokkify/project-toolkit/actions/setup-java-gradle@{digest} # {version}\n"
+                    text = f"  {prefix} quokkify/ci-kit/actions/setup-java-gradle@{digest} # {version}\n"
                     self.assertEqual(helpers.action_reference_errors(text, "example", require_toolkit_pin=True), [])
 
     def test_examples_reject_mutable_refs_short_digests_and_untracked_pins(self) -> None:
         for reference in ("main", "v2", "v2.6.0", "abc123 # v2.6.0", "a" * 40,
                           "a" * 40 + " # main", "a" * 40 + " # v2.6"):
             with self.subTest(reference=reference):
-                text = f"- uses: quokkify/project-toolkit/actions/setup-node@{reference}\n"
+                text = f"- uses: quokkify/ci-kit/actions/setup-node@{reference}\n"
                 self.assertTrue(helpers.action_reference_errors(text, "example", require_toolkit_pin=True))
 
     def test_legacy_consumers_and_local_actions_remain_supported(self) -> None:
-        text = "uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.6.0\n- uses: ./actions/setup-node\n"
+        text = "uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.6.0\n- uses: ./actions/setup-node\n"
         self.assertEqual(helpers.action_reference_errors(text, "consumer"), [])
         self.assertTrue(helpers.action_reference_errors("- uses: actions/checkout@v7\n", "consumer"))
         self.assertTrue(helpers.action_reference_errors("- uses: actions/checkout\n", "consumer"))

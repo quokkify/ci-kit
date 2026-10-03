@@ -83,14 +83,14 @@ class CheckoutTests(unittest.TestCase):
             text = source.read_text()
             self.assertNotIn('uses: actions/checkout@', text, source.name)
             for line in text.splitlines():
-                if 'uses: quokkify/project-toolkit/actions/checkout@' in line:
+                if 'uses: quokkify/ci-kit/actions/checkout@' in line:
                     actual.add(source.name.removesuffix('.jinja'))
                     rendered = Environment(undefined=StrictUndefined).from_string(line).render(toolkit_version='v9.8.7')
                     self.assertTrue(rendered.endswith('/actions/checkout@v9.8.7'))
         self.assertEqual(actual, expected)
         # Allure delegates its checkout to the release-bound reusable workflows.
         allure = (sources / 'allure-report.yml.jinja').read_text()
-        reusable_refs = [line for line in allure.splitlines() if 'uses: quokkify/project-toolkit/.github/workflows/' in line]
+        reusable_refs = [line for line in allure.splitlines() if 'uses: quokkify/ci-kit/.github/workflows/' in line]
         self.assertEqual(len(reusable_refs), 2)
         for line in reusable_refs:
             rendered = Environment(undefined=StrictUndefined).from_string(line).render(toolkit_version='v9.8.7')
@@ -113,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - id: source
-        uses: quokkify/project-toolkit/actions/checkout@REF
+        uses: quokkify/ci-kit/actions/checkout@REF
         with:
           ref: main
           fetch-depth: 0
@@ -126,7 +126,7 @@ jobs:
                 self.assertEqual(changed, ['.github/workflows/docs.yml'])
                 after = yaml.safe_load(path.read_text())
                 expected_ref = 'b' * 40 if ref.startswith('a' * 40) else 'v9.8.7'
-                before['jobs']['docs']['steps'][0]['uses'] = 'quokkify/project-toolkit/actions/checkout@' + expected_ref
+                before['jobs']['docs']['steps'][0]['uses'] = 'quokkify/ci-kit/actions/checkout@' + expected_ref
                 self.assertEqual(after, before)
                 self.assertIn('v9.8.7', path.read_text())
                 self.assertEqual(bump_project_owned_toolkit_refs(root, 'v9.8.7', resolve_commit=lambda: 'b' * 40), [])
@@ -141,7 +141,7 @@ jobs:
             shutil.copytree(ROOT / 'template', source / 'template')
             current = {p: p.read_text() for p in source.rglob('*.yml.jinja')}
             upstream = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1'
-            shared = 'quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}'
+            shared = 'quokkify/ci-kit/actions/checkout@{{ toolkit_version }}'
             for path, text in current.items():
                 path.write_text(text.replace(shared, upstream))
 
@@ -186,7 +186,7 @@ jobs:
             self.assertEqual(custom.read_text(), custom_text)
             for name in ('validate', 'gitleaks', 'copier-update'):
                 text = (consumer / f'.github/workflows/{name}.yml').read_text()
-                self.assertIn('uses: quokkify/project-toolkit/actions/checkout@v8.1.0', text)
+                self.assertIn('uses: quokkify/ci-kit/actions/checkout@v8.1.0', text)
                 self.assertNotIn('uses: actions/checkout@', text)
 
 

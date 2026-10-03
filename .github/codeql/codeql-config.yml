@@ -1,4 +1,4 @@
-name: Project toolkit CodeQL config
+name: CI kit CodeQL config
 
 paths:
   - scripts

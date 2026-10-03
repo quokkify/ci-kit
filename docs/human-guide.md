@@ -2,7 +2,7 @@
 
 This is the short, practical guide. You do not need to understand the toolkit internals first.
 
-> **Important:** project-toolkit is a Copier template, not a GitHub “template repository.” Copier creates the small project-owned files, remembers the answers in `.copier-answers.yml`, and can update those files later.
+> **Important:** ci-kit is a Copier template, not a GitHub “template repository.” Copier creates the small project-owned files, remembers the answers in `.copier-answers.yml`, and can update those files later.
 
 ## Before you start
 
@@ -17,7 +17,7 @@ Check access and capture the latest released toolkit tag:
 ```bash
 gh auth status
 copier --version
-export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tagName --jq .tagName)"
+export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq .tagName)"
 echo "$TOOLKIT_REF"
 ```
 
@@ -29,7 +29,7 @@ Run:
 
 ```bash
 copier copy \
-  https://github.com/quokkify/project-toolkit.git \
+  https://github.com/quokkify/ci-kit.git \
   my-project \
   --vcs-ref "$TOOLKIT_REF" \
   --data "toolkit_version=$TOOLKIT_REF" \
@@ -57,7 +57,7 @@ gh repo create quokkify/my-project --private --source=. --push
 
 Commit `.copier-answers.yml`. It is not a secret. It is the receipt Copier needs for future updates.
 
-Before merging generated CI, open `.github/workflows/validate.yml` and confirm that component directories match the real project. Then work through the checklist in the generated `docs/project-toolkit.md`.
+Before merging generated CI, open `.github/workflows/validate.yml` and confirm that component directories match the real project. Then work through the checklist in the generated `docs/ci-kit.md`.
 
 ## 2. Update a project created by Copier
 
@@ -67,7 +67,7 @@ The project must contain `.copier-answers.yml` and have a clean Git working tree
 cd my-project
 git switch main
 git pull --ff-only
-git switch -c "chore/update-project-toolkit-${TOOLKIT_REF}"
+git switch -c "chore/update-ci-kit-${TOOLKIT_REF}"
 
 copier update \
   --vcs-ref "$TOOLKIT_REF" \
@@ -77,7 +77,7 @@ copier update \
 git diff
 git diff --check
 git add -A
-git commit -m "chore: update project-toolkit to ${TOOLKIT_REF}"
+git commit -m "chore: update ci-kit to ${TOOLKIT_REF}"
 git push -u origin HEAD
 gh pr create --fill
 ```
@@ -96,7 +96,7 @@ Copier updates generated files. Renovate has a different job: it updates release
 
 There is intentionally one configurable project template rather than many copied templates. Add a new option to it when projects share the same basic structure.
 
-1. Create a branch in `project-toolkit`.
+1. Create a branch in `ci-kit`.
 2. Add the new question or option to [`copier.yml`](../copier.yml).
 3. Add or change a `.jinja` file under [`template/`](../template/).
 4. Add or update a representative answer file under [`tests/scenarios/`](../tests/scenarios/). If it is a new scenario, register it in `scripts/validate.py` so static validation renders it.
@@ -133,10 +133,10 @@ The safe organization-wide rollout is **one command that processes the selected 
 Create a private local directory outside any repository:
 
 ```bash
-mkdir -p "$HOME/project-toolkit-rollout"
+mkdir -p "$HOME/ci-kit-rollout"
 ```
 
-Create, for example, `$HOME/project-toolkit-rollout/example-service.yml`:
+Create, for example, `$HOME/ci-kit-rollout/example-service.yml`:
 
 ```yaml
 project_name: example-service
@@ -161,15 +161,15 @@ Add only repositories you really want to change. Different repositories can have
 
 ### Step 2: run the rollout helper
 
-Clone `project-toolkit` first (skip the first command if it is already cloned), then test with one answers file:
+Clone `ci-kit` first (skip the first command if it is already cloned), then test with one answers file:
 
 ```bash
-gh repo clone quokkify/project-toolkit
-cd project-toolkit
+gh repo clone quokkify/ci-kit
+cd ci-kit
 git switch main
 git pull --ff-only
 export TOOLKIT_REF="v2.6.0" # use the exact tag you reviewed above
-scripts/rollout_project_toolkit.sh "$HOME/project-toolkit-rollout"
+scripts/rollout_ci_kit.sh "$HOME/ci-kit-rollout"
 ```
 
 After the first PR looks correct, add the remaining answer files and run the same command again. Already-open rollout PRs for the current toolkit release are detected and skipped.

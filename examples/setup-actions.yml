@@ -13,7 +13,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Python
-        uses: quokkify/project-toolkit/actions/setup-python@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/setup-python@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           python-version: "3.12"
           working-directory: .
@@ -26,7 +26,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Node.js
-        uses: quokkify/project-toolkit/actions/setup-node@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/setup-node@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           node-version: "22"
           working-directory: .
@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
       - name: Setup Java and Gradle cache
         id: java
-        uses: quokkify/project-toolkit/actions/setup-java-gradle@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/setup-java-gradle@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           java-version: "17"
           distribution: temurin
@@ -61,7 +61,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Start and wait for compose services
-        uses: quokkify/project-toolkit/actions/compose-up@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/compose-up@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           compose-files: |
             docker-compose.yml
@@ -94,7 +94,7 @@ jobs:
         run: your-test-command --junit-output test-results/junit.xml
       - name: Write JUnit job summary
         if: ${{ always() }}
-        uses: quokkify/project-toolkit/actions/junit-step-summary@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/junit-step-summary@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           junit-paths: test-results/**/*.xml
           title: Test results
@@ -112,7 +112,7 @@ jobs:
         run: mkdir -p report && printf '%s\n' '<h1>Report</h1>' > report/index.html
       - name: Publish report under a stable subdirectory
         # Delegates publication to the standalone gh-pages-subdir action.
-        uses: quokkify/project-toolkit/actions/deploy-gh-pages-subdir@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+        uses: quokkify/ci-kit/actions/deploy-gh-pages-subdir@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           publish-dir: report

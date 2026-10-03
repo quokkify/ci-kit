@@ -1,12 +1,12 @@
-# project-toolkit
+# ci-kit
 
 > Reusable GitHub Actions workflows and Copier templates for reliable, versioned CI in Python, Node.js, Java, Docker, and polyglot repositories.
 
-[![Copier fleet](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-auto-update.yml/badge.svg)](https://github.com/quokkify/project-toolkit/actions/workflows/copier-fleet-auto-update.yml)
+[![Copier fleet](https://github.com/quokkify/ci-kit/actions/workflows/copier-fleet-auto-update.yml/badge.svg)](https://github.com/quokkify/ci-kit/actions/workflows/copier-fleet-auto-update.yml)
 
-![project-toolkit architecture](https://raw.githubusercontent.com/quokkify/.github/main/assets/diagrams/project-toolkit-architecture.svg)
+![ci-kit architecture](https://raw.githubusercontent.com/quokkify/.github/main/assets/diagrams/project-toolkit-architecture.svg)
 
-project-toolkit keeps CI implementation in one repository while letting each consuming project own its triggers, paths, permissions, and release policy. It deliberately avoids Git submodules: consumers upgrade through small, reviewable Renovate PRs and template updates.
+ci-kit keeps CI implementation in one repository while letting each consuming project own its triggers, paths, permissions, and release policy. It deliberately avoids Git submodules: consumers upgrade through small, reviewable Renovate PRs and template updates.
 
 ## What is included?
 
@@ -16,7 +16,7 @@ project-toolkit keeps CI implementation in one repository while letting each con
 
 ## Reusable workflows
 
-Call supported workflows from a job with an exact release tag: `uses: quokkify/project-toolkit/.github/workflows/<file>@vX.Y.Z`. The caller still owns triggers, path filters, permissions, and any secrets.
+Call supported workflows from a job with an exact release tag: `uses: quokkify/ci-kit/.github/workflows/<file>@vX.Y.Z`. The caller still owns triggers, path filters, permissions, and any secrets.
 
 | Workflow | File | Connect from another repository? | Purpose |
 | --- | --- | :---: | --- |
@@ -35,8 +35,8 @@ The [`Auto-update Copier-managed repositories`](.github/workflows/copier-fleet-a
 You need `git`, [`gh`](https://cli.github.com/) (authenticated), and [Copier](https://copier.readthedocs.io/) 9.18.2 or newer (`uv tool install copier` or `pipx install copier`).
 
 ```bash
-export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tagName --jq .tagName)"
-copier copy https://github.com/quokkify/project-toolkit.git my-project \
+export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq .tagName)"
+copier copy https://github.com/quokkify/ci-kit.git my-project \
   --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
 ```
 
@@ -46,7 +46,7 @@ Run the same command with `.` instead of `my-project` from the root of an existi
 my-project/
 ├── .copier-answers.yml          # commit it; copier update needs it
 ├── README.md                    # written once, then yours
-├── docs/project-toolkit.md      # onboarding checklist, refreshed on update
+├── docs/ci-kit.md      # onboarding checklist, refreshed on update
 └── .github/
     ├── pull_request_template.md
     ├── renovate.json            # if renovate
@@ -62,7 +62,7 @@ my-project/
         └── release.yml          # if release_please
 ```
 
-Open `docs/project-toolkit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
+Open `docs/ci-kit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
 
 Java/q4j test automation is a separate template: see [quokkify/java-test-automation-template](https://github.com/quokkify/java-test-automation-template).
 
@@ -77,7 +77,7 @@ permissions:
   contents: read
 jobs:
   python:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.25.0
+    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v2.25.0
     with:
       python-version: "3.12"
       test-command: pytest

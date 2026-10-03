@@ -15,7 +15,7 @@ class RenovateConfigTests(unittest.TestCase):
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
             config["semanticCommitType"],
-            "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
+            "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
         )
         self.assertEqual(config["semanticCommitScope"], "deps")
         # Generated projects retain the shared chore(deps) convention.

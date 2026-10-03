@@ -1,20 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "github>quokkify/project-toolkit//renovate/default.json",
+    "github>quokkify/ci-kit//renovate/default.json",
     "github>quokkify/renovate-presets//presets/github-actions/default"
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",
-  "semanticCommitType": "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
+  "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
   "semanticCommitScope": "deps",
   "github-actions": {
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
   },
   "packageRules": [
     {
-      "description": "Merge project-toolkit documentation updates without a stability wait.",
-      "matchPackageNames": ["/^quokkify\\/project-toolkit$/"],
+      "description": "Merge ci-kit documentation updates without a stability wait.",
+      "matchPackageNames": ["/^quokkify\\/ci-kit$/"],
       "minimumReleaseAge": null,
       "automerge": true
     },
@@ -94,17 +94,17 @@
     },
     {
       "customType": "regex",
-      "description": "Keep documentation on the latest project-toolkit release; examples use the native GitHub Actions manager.",
+      "description": "Keep documentation on the latest ci-kit release; examples use the native GitHub Actions manager.",
       "managerFilePatterns": [
         "/(^|/)(README\\.md|docs/[^/]+\\.md)$/",
         "/^copier\\.yml$/"
       ],
       "matchStrings": [
-        "(?:quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|][^@\\s]*quokkify/project-toolkit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
+        "(?:quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|][^@\\s]*quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
         "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
         "such as\\s+`@(?<currentValue>v\\d+\\.\\d+\\.\\d+)`"
       ],
-      "depNameTemplate": "quokkify/project-toolkit",
+      "depNameTemplate": "quokkify/ci-kit",
       "datasourceTemplate": "github-tags",
       "versioningTemplate": "semver"
     },

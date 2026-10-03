@@ -144,7 +144,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 run_git("commit", "-m", "template helper", cwd=template_work)
                 run_git("tag", "v2.21.5", cwd=template_work)
                 run_git("push", "origin", "refs/tags/v2.21.5:refs/tags/v2.21.5", cwd=template_work)
-                run_git("config", "url." + str(template_bare) + ".insteadOf", "https://github.com/quokkify/project-toolkit.git", cwd=checkout)
+                run_git("config", "url." + str(template_bare) + ".insteadOf", "https://github.com/quokkify/ci-kit.git", cwd=checkout)
                 answers = checkout / ".copier-answers.yml"
                 answers.write_text(answers.read_text(encoding="utf-8") + "release_please: true\\n", encoding="utf-8")
                 helper = checkout / ".github/scripts/enrich_release_notes.py"
@@ -161,7 +161,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, expected_status, result.stderr)
                 if expected_status:
-                    self.assertIn("differs from project-toolkit", result.stderr)
+                    self.assertIn("differs from ci-kit", result.stderr)
                     self.assertTrue((temporary / "copier.log").exists())
                 else:
                     self.assertIn("Already up to date", (temporary / "summary.md").read_text(encoding="utf-8"))

@@ -533,7 +533,7 @@ class AllureCallerContracts(TestCase):
                             data = yaml.safe_load(text); jobs = data['jobs']; report = jobs['report']
                             self.assertEqual(set(jobs), {'report', 'pages'} if pages else {'report'})
                             self.assertTrue(all('steps' not in job and 'secrets' not in job for job in jobs.values()))
-                            self.assertEqual(report['uses'], 'quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@v99.0.0')
+                            self.assertEqual(report['uses'], 'quokkify/ci-kit/.github/workflows/allure-publisher-core.yml@v99.0.0')
                             self.assertEqual(report['permissions'], {'actions': 'read', 'contents': 'read', 'pull-requests': 'write'})
                             self.assertEqual(report['with'], {
                                 'source-workflow': 'Validate' if component else name,
