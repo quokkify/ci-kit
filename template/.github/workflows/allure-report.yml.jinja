@@ -20,13 +20,13 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      source-workflow: {% if components %}Validate{% else %}{{ allure_external_workflow_name | tojson }}{% endif %}
-      source-workflow-path: {% if components %}.github/workflows/validate.yml{% else %}{{ allure_external_workflow_path | tojson }}{% endif %}
-      artifact-prefix: {% if components %}allure-results-{% else %}{{ allure_external_artifact_prefix | tojson }}{% endif %}
-      artifact-mode: {% if components %}component{% else %}external{% endif %}
-      minimum-artifacts: {% if components %}1{% else %}{{ allure_external_artifact_min_count }}{% endif %}
-      maximum-artifacts: {% if components %}50{% else %}{{ allure_external_artifact_max_count }}{% endif %}
-      skip-empty-artifacts: {% if components %}false{% else %}true{% endif %}
+      source-workflow: {% if allure_mode == 'component' %}Validate{% else %}{{ allure_external_workflow_name | tojson }}{% endif %}
+      source-workflow-path: {% if allure_mode == 'component' %}.github/workflows/validate.yml{% else %}{{ allure_external_workflow_path | tojson }}{% endif %}
+      artifact-prefix: {% if allure_mode == 'component' %}allure-results-{% else %}{{ allure_external_artifact_prefix | tojson }}{% endif %}
+      artifact-mode: {% if allure_mode == 'component' %}component{% else %}external{% endif %}
+      minimum-artifacts: {% if allure_mode == 'component' %}1{% else %}{{ allure_external_artifact_min_count }}{% endif %}
+      maximum-artifacts: {% if allure_mode == 'component' %}50{% else %}{{ allure_external_artifact_max_count }}{% endif %}
+      skip-empty-artifacts: {% if allure_mode == 'component' %}false{% else %}true{% endif %}
       config-file: .github/allure/allurerc.mjs
       categories-file: {{ allure_categories_file | tojson }}
       publish-pages: {{ 'true' if allure_publish_pages else 'false' }}
@@ -44,8 +44,8 @@ jobs:
       contents: write
       pull-requests: read
     with:
-      source-workflow: {% if components %}Validate{% else %}{{ allure_external_workflow_name | tojson }}{% endif %}
-      source-workflow-path: {% if components %}.github/workflows/validate.yml{% else %}{{ allure_external_workflow_path | tojson }}{% endif %}
+      source-workflow: {% if allure_mode == 'component' %}Validate{% else %}{{ allure_external_workflow_name | tojson }}{% endif %}
+      source-workflow-path: {% if allure_mode == 'component' %}.github/workflows/validate.yml{% else %}{{ allure_external_workflow_path | tojson }}{% endif %}
       managed-pages-layout: true
       pr-number: {% raw %}${{ needs.report.outputs.pr-number }}{% endraw %}
       pages-destination-directory: {% raw %}${{ format('allure/pr-{0}', needs.report.outputs.pr-number) }}{% endraw %}

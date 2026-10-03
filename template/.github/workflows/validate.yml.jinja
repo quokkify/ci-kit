@@ -56,7 +56,11 @@ jobs:
           if answers.get("allure_report") and any(not path.is_file() for path in allure_paths):
               raise SystemExit("allure_report=true requires its generated workflow, config, and bounded extractor")
           components = answers.get("components")
-          if answers.get("allure_report") and not components:
+          allure_source = answers.get("allure_source") or "auto"
+          allure_mode = allure_source if allure_source in ("component", "external") else ("component" if components else "external")
+          if answers.get("allure_report") and allure_mode == "component" and not components:
+              raise SystemExit("allure_source=component requires at least one component")
+          if answers.get("allure_report") and allure_mode == "external":
               source_path = Path(str(answers.get("allure_external_workflow_path", "")))
               if not source_path.is_file():
                   raise SystemExit("external Allure reporting requires its configured source workflow")
@@ -114,9 +118,9 @@ jobs:
     uses: quokkify/project-toolkit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
     with:
       working-directory: {{ component.path | tojson }}
-{% if allure_report and component.type == 'python' %}      install-command: "python -m pip install pytest allure-pytest"
+{% if allure_report and allure_mode == 'component' and component.type == 'python' %}      install-command: "python -m pip install pytest allure-pytest"
 {% endif -%}
-{% if allure_report %}      upload-test-artifacts: true
+{% if allure_report and allure_mode == 'component' %}      upload-test-artifacts: true
       test-artifact-path: {{ component.get('allure_results_path', 'allure-results') | tojson }}
       test-artifact-name: allure-results-{{ component.id }}
 {% endif -%}

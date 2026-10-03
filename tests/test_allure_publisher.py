@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase, main
@@ -516,14 +517,15 @@ class AllureConcurrencyTests(TestCase):
 
 
 class AllureCallerContracts(TestCase):
-    def test_forty_generated_variants_delegate_exact_inputs_and_no_broad_token(self) -> None:
+    def test_generated_variants_delegate_exact_inputs_and_no_broad_token(self) -> None:
         template = jinja2.Environment().from_string((ROOT / 'template/.github/workflows/allure-report.yml.jinja').read_text())
         with tempfile.TemporaryDirectory(prefix='allure-callers-') as directory:
-            for component in [False, True]:
+            for has_components, component in [(False, False), (True, True), (True, False)]:
                 for pages in [False, True]:
                     for name in ['Validate', 'Run tests', 'CI: build', 'A "quoted" name', 'Workflow with spaces']:
                         for category in ['', '.github/allure/categories.json']:
-                            text = template.render(toolkit_version='v99.0.0', components=[{'id': 'current-id'}] if component else [],
+                            text = template.render(toolkit_version='v99.0.0', components=[{'id': 'current-id'}] if has_components else [],
+                                allure_mode='component' if component else 'external',
                                 allure_external_workflow_name=name, allure_external_workflow_path='.github/workflows/test.yml',
                                 allure_external_artifact_prefix='external-allure-', allure_external_artifact_min_count=2,
                                 allure_external_artifact_max_count=7, allure_categories_file=category,
@@ -550,6 +552,49 @@ class AllureCallerContracts(TestCase):
                             path = Path(directory) / 'allure.yml'; path.write_text(text)
                             self.assertIsNotNone(shutil.which('actionlint'), 'actionlint is required for rendered callers')
                             subprocess.run(['actionlint', str(path)], capture_output=True, text=True, timeout=15, check=True)
+
+    def test_components_with_external_source_skip_component_allure_uploads(self) -> None:
+        copier = shutil.which('copier')
+        self.assertIsNotNone(copier, 'Copier is required for generated workflow regression coverage')
+        answers = {
+            'project_name': 'fixture-mixed', 'toolkit_version': 'v1.0.0', 'docker': False, 'release_please': False,
+            'renovate': False, 'codeql': False,
+            'components': [{'type': 'python', 'path': '.', 'id': 'app-python', 'name': 'App Python'},
+                           {'type': 'java', 'path': '.', 'id': 'app-java', 'name': 'App Java'}],
+            'allure_report': True, 'allure_source': 'external', 'allure_external_workflow_name': 'Run tests',
+            'allure_external_workflow_path': '.github/workflows/test.yml', 'allure_external_artifact_prefix': 'allure-results-',
+            'allure_external_artifact_min_count': 2, 'allure_external_artifact_max_count': 9,
+        }
+        with tempfile.TemporaryDirectory(prefix='allure-mixed-') as directory:
+            source = Path(directory) / 'template-source'
+            shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns('.git', '.worktrees', '__pycache__'))
+            data = Path(directory) / 'answers.yml'
+            data.write_text(yaml.safe_dump(answers))
+            destination = Path(directory) / 'consumer'
+            subprocess.run([copier, 'copy', '--trust', '--defaults', '--data-file', str(data), str(source), str(destination)],
+                           check=True, capture_output=True, text=True)
+            validate = yaml.safe_load((destination / '.github/workflows/validate.yml').read_text())
+            for component in ('app-python', 'app-java'):
+                job = validate['jobs'][component]
+                self.assertNotIn('upload-test-artifacts', job['with'])
+                self.assertNotIn('install-command', job['with'])
+            report = yaml.safe_load((destination / '.github/workflows/allure-report.yml').read_text())['jobs']['report']['with']
+            self.assertEqual((report['source-workflow'], report['source-workflow-path'], report['artifact-mode']),
+                             ('Run tests', '.github/workflows/test.yml', 'external'))
+            self.assertEqual((report['minimum-artifacts'], report['maximum-artifacts']), (2, 9))
+            answers_file = destination / '.copier-answers.yml'
+            recorded = yaml.safe_load(answers_file.read_text())
+            self.assertEqual(recorded['allure_source'], 'external')
+            answers_file.write_text(yaml.safe_dump({**recorded, '_commit': 'v1.0.0'}))
+            self.assertIn('The project-owned `Run tests` workflow', (destination / 'README.md').read_text())
+            contract = next(step['run'] for step in validate['jobs']['template-contract']['steps']
+                            if 'Path(".copier-answers.yml")' in str(step.get('run', '')))
+            script = contract.split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0] if "<<'PY'" in contract else contract
+            missing = subprocess.run([sys.executable, '-c', script], cwd=destination, capture_output=True, text=True)
+            self.assertIn('external Allure reporting requires its configured source workflow', missing.stderr + missing.stdout)
+            (destination / '.github/workflows/test.yml').write_text('name: Run tests\n')
+            passing = subprocess.run([sys.executable, '-c', script], cwd=destination, capture_output=True, text=True)
+            self.assertNotIn('Allure', passing.stderr + passing.stdout)
 
     def test_core_permissions_token_and_legacy_api_pages_layout_are_preserved(self) -> None:
         self.assertTrue(all('write' not in job['permissions'].values() or job == CORE['jobs']['comment'] for job in CORE['jobs'].values()))
