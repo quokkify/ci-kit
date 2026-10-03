@@ -104,9 +104,20 @@ allure_report:
   type: bool
   help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.
   default: false
+allure_source:
+  type: str
+  help: "Where Allure results come from: auto follows components; component uses the generated component jobs in Validate; external uses a project-owned workflow, so generated component jobs upload no Allure results."
+  choices: [auto, component, external]
+  default: auto
+  when: "{{ allure_report }}"
+  validator: "{% if allure_source == 'component' and not components %}allure_source=component requires at least one component.{% endif %}"
+allure_mode:
+  type: str
+  default: "{{ allure_source if allure_source in ['component', 'external'] else ('component' if components else 'external') }}"
+  when: false
 allure_external_workflow_name:
   type: str
-  help: Exact workflow name that uploads Allure artifacts when components is empty.
+  help: Exact workflow name that uploads Allure artifacts when allure_source is external.
   default: Validate
   when: "{{ allure_report }}"
   validator: "{% if not (allure_external_workflow_name | regex_search('^[A-Za-z0-9][A-Za-z0-9 ._()/:-]{0,99}$')) %}Use a non-empty workflow name containing only letters, digits, spaces, and ._()/:- characters.{% endif %}"
