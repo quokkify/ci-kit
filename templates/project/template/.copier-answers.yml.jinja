@@ -1,5 +1,37 @@
-{{ _copier_answers | to_nice_yaml -}}
+{#- Prettier-compatible YAML; keep in sync with render_answers in scripts/update_copier_fleet.py. -#}
+{%- macro scalar(value) -%}
+{%- if value is none -%}null
+{%- elif value is sameas true -%}true
+{%- elif value is sameas false -%}false
+{%- elif value is number -%}{{ value | to_json }}
+{%- elif value | regex_search('^[A-Za-z_./][A-Za-z0-9_./@+-]*(?::[A-Za-z0-9_./@+-]+)*(?: [A-Za-z0-9_./@+-]+(?::[A-Za-z0-9_./@+-]+)*)*\\Z')
+    and not value | regex_search('^(?:y|n|yes|no|true|false|on|off|null|\\.inf|\\.nan|\\.[0-9].*)\\Z', ignorecase=True) -%}{{ value }}
+{%- else -%}{{ value | to_json(ensure_ascii=False) }}
+{%- endif -%}
+{%- endmacro -%}
+{%- macro inline(value) -%}
+{%- if value is mapping -%}{}
+{%- elif value is iterable and value is not string -%}[]
+{%- else -%}{{ scalar(value) }}
+{%- endif -%}
+{%- endmacro -%}
+{%- macro nested(value) -%}{{ (value is mapping or (value is iterable and value is not string)) and value | length > 0 }}{%- endmacro -%}
+{%- macro block(value, indent) -%}
+{%- if value is mapping -%}
+{%- for key, item in value.items() -%}
+{{ " " * indent }}{{ scalar(key) }}:{% if nested(item) == "True" %}
+{{ block(item, indent + 2) }}{% else %} {{ inline(item) }}{% endif %}{% if not loop.last %}
+{% endif %}
+{%- endfor -%}
+{%- else -%}
+{%- for item in value -%}
+{{ " " * indent }}- {% if nested(item) == "True" %}{{ block(item, indent + 2) | trim }}{% else %}{{ inline(item) }}{% endif %}{% if not loop.last %}
+{% endif %}
+{%- endfor -%}
+{%- endif -%}
+{%- endmacro -%}
+{{ block(_copier_answers, 0) }}
 {% if q4j_tests %}
 # Toolkit-owned metadata protects the installed test directory during updates.
-q4j_installed_path: {{ q4j_tests_path | to_json }}
+q4j_installed_path: {{ scalar(q4j_tests_path) }}
 {% endif -%}
