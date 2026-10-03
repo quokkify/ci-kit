@@ -1,0 +1,9 @@
+project_name: fixture-q4j-tests
+toolkit_version: v1.0.0
+components: []
+q4j_tests: true
+docker: false
+codeql: false
+gitleaks: false
+release_please: false
+renovate: false

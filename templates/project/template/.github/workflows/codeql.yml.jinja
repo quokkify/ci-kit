@@ -6,6 +6,7 @@
 {%- set language = {'python': 'python', 'node': 'javascript-typescript', 'java': 'java-kotlin'}[component.type] -%}
 {%- if language not in codeql_state.languages -%}{%- set codeql_state.languages = codeql_state.languages + [language] -%}{%- endif -%}
 {%- endfor -%}
+{%- if q4j_tests and 'java-kotlin' not in codeql_state.languages -%}{%- set codeql_state.languages = codeql_state.languages + ['java-kotlin'] -%}{%- endif -%}
 {%- endif -%}
 name: CodeQL
 

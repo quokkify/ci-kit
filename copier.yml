@@ -30,11 +30,29 @@ _exclude:
 # Toolkit-owned Renovate policy reaches these projects through the shared
 # preset in `extends`, not by rewriting the file.
 _skip_if_exists:
-  - README.md
+  - /README.md
   - .github/renovate.json
   - .github/release-please/config.json
   - .github/release-please/manifest.json
   - .github/pull_request_template.md
+  - "{{ q4j_tests_path }}/.gitignore"
+  - "{{ q4j_tests_path }}/.gitattributes"
+  - "{{ q4j_tests_path }}/build.gradle"
+  - "{{ q4j_tests_path }}/settings.gradle"
+  - "{{ q4j_tests_path }}/gradle/compilation.gradle"
+  - "{{ q4j_tests_path }}/gradle/code-analysis.gradle"
+  - "{{ q4j_tests_path }}/gradle/dependencies.gradle"
+  - "{{ q4j_tests_path }}/gradle/tests.gradle"
+  - "{{ q4j_tests_path }}/gradle/libs.versions.toml"
+  - "{{ q4j_tests_path }}/tools/checkstyle/checkstyle.xml"
+  - "{{ q4j_tests_path }}/tools/checkstyle/suppressions.xml"
+  - "{{ q4j_tests_path }}/gradlew"
+  - "{{ q4j_tests_path }}/gradlew.bat"
+  - "{{ q4j_tests_path }}/gradle/wrapper/gradle-wrapper.jar"
+  - "{{ q4j_tests_path }}/gradle/wrapper/gradle-wrapper.properties"
+  - "{{ q4j_tests_path }}/src/test/java/example/TestConfig.java"
+  - "{{ q4j_tests_path }}/src/test/java/example/StarterTest.java"
+  - "{{ q4j_tests_path }}/src/test/resources/test.properties"
 
 project_name:
   type: str
@@ -71,6 +89,21 @@ components:
     {% if allure_path is not string or not (allure_path | trim) %}allure_results_path must be a non-empty string.{% elif not (allure_path | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$')) or '.' in allure_path.split('/') or '..' in allure_path.split('/') %}allure_results_path must be a safe component-relative path without traversal or globs.{% endif %}
     {% endif %}
     {% endfor %}
+
+q4j_tests:
+  type: bool
+  help: Generate a standalone Java 21 q4j starter in a dedicated root folder.
+  default: false
+  validator: >-
+    {% if q4j_installed_path is defined and q4j_installed_path and not q4j_tests %}An existing q4j test project cannot be disabled by Copier; migrate or remove it explicitly first.{% endif %}
+q4j_tests_path:
+  type: str
+  help: Root directory for the standalone q4j tests.
+  default: test-automation
+  when: "{{ q4j_tests }}"
+  validator: >-
+    {% if q4j_installed_path is defined and q4j_installed_path and q4j_tests_path != q4j_installed_path %}An existing q4j test directory cannot be renamed by Copier; migrate it explicitly first.{% endif %}
+    {% if not (q4j_tests_path | regex_search('^[A-Za-z0-9][A-Za-z0-9_-]*$')) %}Use one root directory such as test-automation or qa.{% elif q4j_tests_path in ['src', 'build', 'gradle', 'docs', 'scripts', 'templates', 'node_modules'] %}Choose a dedicated test directory instead of a reserved source or build directory.{% endif %}
 
 docker:
   type: bool
@@ -186,7 +219,7 @@ renovate_presets:
     {%- set component_types = components | map(attribute='type') | list -%}
     {%- if 'python' in component_types -%}{%- set _ = presets.append('python') -%}{%- endif -%}
     {%- if 'node' in component_types -%}{%- set _ = presets.append('javascript') -%}{%- endif -%}
-    {%- if 'java' in component_types -%}{%- set _ = presets.append('java') -%}{%- endif -%}
+    {%- if 'java' in component_types or q4j_tests -%}{%- set _ = presets.append('java') -%}{%- endif -%}
     {%- if docker -%}{%- set _ = presets.append('docker') -%}{%- endif -%}
     {{ presets }}
   validator: >-

@@ -204,11 +204,19 @@ jobs:
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install pinned template dependencies
+        run: python -m pip install PyYAML==6.0.3 copier==9.18.2
       - name: Compile, test, and package Java fixture
         env:
           REQUIRE_MAVEN: "1"
         run: bash scripts/validate_java_fixture.sh
+      - name: Render and compile q4j starter
+        run: python scripts/validate_q4j_fixture.py
 
   validation-complete:
     name: Validation pipeline complete
