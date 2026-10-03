@@ -2,6 +2,16 @@
 
 ## [3.0.0](https://github.com/quokkify/ci-kit/compare/v2.25.0...v3.0.0) (2026-10-03)
 
+<!-- project-toolkit:rich-block:start -->
+<!-- project-toolkit:rich-release-notes pr=364 -->
+### 🔄 Migration
+For q4j, after the release that contains this change:
+1. Set `allure_source: external` in `.copier-answers.yml` (update with `--data allure_source=external`).
+2. Remove the hand-written `external-report` and `external-pages` jobs from `allure-report.yml`. The generated `report` job then publishes `Run tests` with history.
+3. Remove the `placeholder.txt` commands from the component jobs in `validate.yml`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+<!-- project-toolkit:rich-block:end -->
 
 ### ⚠ BREAKING CHANGES
 
