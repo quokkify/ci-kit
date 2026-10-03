@@ -64,6 +64,11 @@ on:
         required: false
         default: false
         type: boolean
+      history-path:
+        description: Workspace-relative <directory>/<file>.jsonl equal to the Allure config historyPath; restores and persists per-PR history. Empty disables history transport.
+        required: false
+        default: ""
+        type: string
     secrets:
       github-token:
         description: Optional legacy token override. Prefer the per-job github.token default; a custom token cannot be attenuated by job permissions.
@@ -72,7 +77,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: allure-publisher-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  group: allure-publisher-${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:
@@ -95,6 +100,7 @@ jobs:
       artifact-mode: ${{ inputs.artifact-mode }}
       skip-empty-artifacts: ${{ inputs.skip-empty-artifacts }}
       managed-pages-layout: ${{ inputs.managed-pages-layout }}
+      history-path: ${{ inputs.history-path }}
     secrets:
       github-token: ${{ secrets.github-token }}
   pages:

@@ -8,7 +8,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: allure-report-{% raw %}${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}{% endraw %}
+  group: allure-report-{% raw %}${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}{% endraw %}
   cancel-in-progress: true
 
 jobs:
@@ -31,6 +31,7 @@ jobs:
       categories-file: {{ allure_categories_file | tojson }}
       publish-pages: {{ 'true' if allure_publish_pages else 'false' }}
       managed-pages-layout: true
+      history-path: allure-history/history.jsonl
       pages-url: {% if allure_publish_pages %}{{ allure_pages_url | tojson }}{% else %}""{% endif %}
 {% if allure_publish_pages %}
   pages:

@@ -1,6 +1,8 @@
 export default {
   name: {{ project_name | tojson }},
   output: "./allure-report",
+  historyPath: "./allure-history/history.jsonl",
+  historyLimit: 20,
   plugins: {
     awesome: {
       options: {
