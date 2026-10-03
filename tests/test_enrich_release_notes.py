@@ -180,6 +180,27 @@ class RichNotesTests(TestCase):
             updated,
         )
 
+    def test_component_reruns_do_not_accumulate_blank_lines(self):
+        body = (
+            ":robot: header\n---\n\n\n"
+            "<details><summary>backend: 1.2.3</summary>\n\n## 1.2.3\n\n### Features\n\n* add api\n</details>\n\n"
+            "<details><summary>frontend: 4.5.6</summary>\n\n## 4.5.6\n\n</details>\n\n"
+            "---\nfooter"
+        )
+        rich = {"backend": "Backend rich", "frontend": "Frontend rich"}
+        first = notes.enrich_component_release_body(body, rich)
+        second = notes.enrich_component_release_body(first, rich)
+        self.assertEqual(notes.enrich_component_release_body(second, rich), first)
+        self.assertEqual(second, first)
+        self.assertIn(notes.BLOCK_END + "\n\n### Features", first)
+
+    def test_footer_insertion_reruns_do_not_accumulate_blank_lines(self):
+        block = notes.BLOCK_START + "\nrich\n" + notes.BLOCK_END
+        body = "## 1.0.0\n\nnotes\n\n---\nfooter\n"
+        first = notes._insert_rich_block(body, block)
+        removed = first.replace(block, "")
+        self.assertEqual(notes._insert_rich_block(removed, block), first)
+
     def test_empty_rich_content_removes_stale_release_body_block(self):
         body = (
             ":robot: header\n---\nnotes\n\n"
