@@ -336,6 +336,33 @@ class AnswersFormatTests(TestCase):
             )
 
 
+class RenamedToolkitRefTests(TestCase):
+    """Project-owned workflows that still use the old repository name follow the rename."""
+
+    def test_renamed_tag_and_digest_references_move_to_the_current_name_and_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "build.yml").write_text(
+                "jobs:\n"
+                "  build:\n"
+                "    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.25.0\n"
+                "    steps:\n"
+                "      - uses: quokkify/project-toolkit/actions/setup-java-gradle@" + "a" * 40 + " # v2.25.0\n"
+                "      - run: echo quokkify/project-toolkit/actions/not-a-reference\n"
+                "      - uses: someone/quokkify/project-toolkit/actions/x@v1.0.0\n",
+                encoding="utf-8",
+            )
+            changed = fleet.bump_project_owned_toolkit_refs(root, "v3.0.0", resolve_commit=lambda: "b" * 40)
+            text = (workflows / "build.yml").read_text()
+        self.assertEqual(changed, [".github/workflows/build.yml"])
+        self.assertIn("uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v3.0.0", text)
+        self.assertIn("uses: quokkify/ci-kit/actions/setup-java-gradle@" + "b" * 40 + " # v3.0.0", text)
+        self.assertIn("run: echo quokkify/project-toolkit/actions/not-a-reference", text)
+        self.assertIn("uses: someone/quokkify/project-toolkit/actions/x@v1.0.0", text)
+
+
 class AuthenticatedGitTests(TestCase):
     """git does not read GH_TOKEN; a hosted runner has no credential helper at all."""
 
