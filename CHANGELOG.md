@@ -1,5 +1,35 @@
 # Changelog
 
+## [3.0.0](https://github.com/quokkify/ci-kit/compare/v2.25.0...v3.0.0) (2026-10-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **template:** the q4j_tests and q4j_tests_path questions are removed; use the quokkify/java-test-automation-template template instead.
+
+### ✨ Features
+
+* **template:** select the Allure result source explicitly ([#364](https://github.com/quokkify/ci-kit/issues/364)) ([c587190](https://github.com/quokkify/ci-kit/commit/c5871906ea8e46a9020ed35a6ee3c55b099b18b6))
+
+
+### 🐛 Bug Fixes
+
+* **release:** keep rich release blocks idempotent across reruns ([#363](https://github.com/quokkify/ci-kit/issues/363)) ([cff74ae](https://github.com/quokkify/ci-kit/commit/cff74ae9ea254dd0efb09ad34dbfe6a9f088d43f))
+* **template:** include SpotBugs in Q4J starter ([#355](https://github.com/quokkify/ci-kit/issues/355)) ([d0c7630](https://github.com/quokkify/ci-kit/commit/d0c7630d7eb24af466e60e4a43dcbcecdd8f4003))
+* **template:** write Prettier-compatible Copier answers ([#362](https://github.com/quokkify/ci-kit/issues/362)) ([725103e](https://github.com/quokkify/ci-kit/commit/725103e679c17c45afd34991bbfa187b36488c7b))
+
+
+### 🧹 Chores
+
+* **deps:** update com.github.spotbugs to v6.5.12 ([#358](https://github.com/quokkify/ci-kit/issues/358)) ([183c7a2](https://github.com/quokkify/ci-kit/commit/183c7a217ae76971cd9bb48a6dee5cf2ea3366c3))
+* **deps:** update quokkify/project-toolkit to v2.25.0 ([#365](https://github.com/quokkify/ci-kit/issues/365)) ([96bdaf3](https://github.com/quokkify/ci-kit/commit/96bdaf351f114d4bbd1bc02adbaee29d15d1884f))
+
+
+### ♻️ Refactoring
+
+* **template:** extract q4j starter to quokkify/java-test-automation-template ([#361](https://github.com/quokkify/ci-kit/issues/361)) ([55f3bdb](https://github.com/quokkify/ci-kit/commit/55f3bdbee3ec803b358c70de9287a1a61186f644))
+* **template:** flatten template to template/ and add generated onboarding guide ([#357](https://github.com/quokkify/ci-kit/issues/357)) ([8e18be7](https://github.com/quokkify/ci-kit/commit/8e18be7791f2af870164a2c226e66ab189ac98d5))
+
 ## [2.25.0](https://github.com/quokkify/project-toolkit/compare/v2.24.0...v2.25.0) (2026-10-03)
 
 <!-- project-toolkit:rich-block:start -->
