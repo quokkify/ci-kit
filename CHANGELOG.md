@@ -2,6 +2,13 @@
 
 ## [2.25.0](https://github.com/quokkify/project-toolkit/compare/v2.24.0...v2.25.0) (2026-10-03)
 
+<!-- project-toolkit:rich-block:start -->
+<!-- project-toolkit:rich-release-notes pr=351 -->
+### 🔄 Migration
+Generated repositories pick up both changes through the normal template update. Custom callers can add `history-path` together with a matching `historyPath` in their own Allure config.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+<!-- project-toolkit:rich-block:end -->
 
 ### ✨ Features
 
