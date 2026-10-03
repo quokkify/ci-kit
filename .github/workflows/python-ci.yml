@@ -18,7 +18,7 @@ on:
       uv-version:
         description: Exact uv version used for dependency installation.
         type: string
-        default: "0.12.22"
+        default: "0.12.23"
       poetry-version:
         description: Exact Poetry version used for dependency installation.
         type: string
