@@ -1816,6 +1816,10 @@ if ERRORS:
     print("\n".join("ERROR: " + e for e in ERRORS), file=sys.stderr)
     raise SystemExit(1)
 
+check(
+    not any("project-toolkit.md" in str(entry) for entry in skip_if_exists),
+    "docs/project-toolkit.md must stay toolkit-owned so copier update refreshes it",
+)
 copier = shutil.which("copier")
 check(copier is not None, "copier executable is required")
 actionlint = shutil.which("actionlint")
@@ -2234,6 +2238,18 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
         )
+        onboarding_path = dest / "docs/project-toolkit.md"
+        check(onboarding_path.is_file(), f"{scenario}: missing docs/project-toolkit.md onboarding guide")
+        if onboarding_path.is_file():
+            onboarding = onboarding_path.read_text()
+            check(
+                not onboarding.endswith("\n\n") and "{%" not in onboarding and "{{" not in onboarding,
+                f"{scenario}: onboarding guide has unrendered Jinja or a trailing blank line",
+            )
+            check(
+                ("allure-report.yml" in onboarding) == scenario.startswith("allure-"),
+                f"{scenario}: onboarding guide Allure row does not match the Copier answers",
+            )
         for owned in ("/README.md", ".github/renovate.json"):
             check(
                 owned in skip_if_exists,

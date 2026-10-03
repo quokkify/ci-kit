@@ -30,7 +30,42 @@ Call supported workflows from a job with an exact release tag: `uses: quokkify/p
 
 The [`Auto-update Copier-managed repositories`](.github/workflows/copier-fleet-auto-update.yml) workflow is repository automation, not a reusable workflow: it audits public Copier-managed consumers for template drift on most days and opens template-update pull requests after every release, plus weekly as a safety net.
 
-## Quick start
+## Start a project from the template
+
+You need `git`, [`gh`](https://cli.github.com/) (authenticated), and [Copier](https://copier.readthedocs.io/) 9.18.2 or newer (`uv tool install copier` or `pipx install copier`).
+
+```bash
+export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tagName --jq .tagName)"
+copier copy https://github.com/quokkify/project-toolkit.git my-project \
+  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
+```
+
+Run the same command with `.` instead of `my-project` from the root of an existing repository. Copier asks for components and optional features, then writes:
+
+```text
+my-project/
+├── .copier-answers.yml          # commit it; copier update needs it
+├── README.md                    # written once, then yours
+├── docs/project-toolkit.md      # onboarding checklist, refreshed on update
+├── test-automation/             # if q4j_tests
+└── .github/
+    ├── pull_request_template.md
+    ├── renovate.json            # if renovate
+    ├── allure/                  # if allure_report
+    ├── release-please/          # if release_please
+    ├── scripts/                 # if release_please
+    └── workflows/
+        ├── validate.yml
+        ├── copier-update.yml
+        ├── codeql.yml           # if codeql
+        ├── gitleaks.yml         # if gitleaks
+        ├── allure-report.yml    # if allure_report
+        └── release.yml          # if release_please
+```
+
+Open `docs/project-toolkit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
+
+## Quick start: reusable workflows
 
 Examples use an exact immutable toolkit release reference. Renovate updates these references when a newer release is published.
 

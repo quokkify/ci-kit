@@ -1,0 +1,75 @@
+# project-toolkit onboarding
+
+This repository is managed by the [`quokkify/project-toolkit`](https://github.com/quokkify/project-toolkit) Copier template at `{{ toolkit_version }}`. This file is toolkit-owned: `copier update` rewrites it, so keep project notes elsewhere.
+
+## What this project received
+
+| Path | Purpose | Owner |
+| --- | --- | --- |
+| `.copier-answers.yml` | Copier answers; required for `copier update` | toolkit |
+| `.github/workflows/validate.yml` | `Validate` workflow{% if components %}: {% for component in components %}{{ component.name }} (`{{ component.path }}`){% if not loop.last %}, {% endif %}{% endfor %}{% endif %} | toolkit |
+| `.github/workflows/copier-update.yml` | Template update automation | toolkit |
+| `.github/pull_request_template.md` | Pull request template | project |
+| `README.md` | Starter README | project |
+| `docs/project-toolkit.md` | This guide | toolkit |
+{%- if codeql %}
+| `.github/workflows/codeql.yml` | CodeQL code scanning | toolkit |
+{%- endif %}
+{%- if gitleaks %}
+| `.github/workflows/gitleaks.yml` | Secret scanning | toolkit |
+{%- endif %}
+{%- if allure_report %}
+| `.github/workflows/allure-report.yml`, `.github/allure/` | Allure 3 pull-request report | toolkit |
+{%- endif %}
+{%- if release_please %}
+| `.github/workflows/release.yml`, `.github/scripts/` | Release Please ({{ release_mode }}) | toolkit |
+| `.github/release-please/` | Release Please config and manifest | project |
+{%- endif %}
+{%- if renovate %}
+| `.github/renovate.json` | Renovate config extending `{{ renovate_config_repository }}` | project |
+{%- endif %}
+{%- if q4j_tests %}
+| `{{ q4j_tests_path }}/` | Standalone Java 21 q4j test starter | project, except `README.md` |
+{%- endif %}
+
+Toolkit-owned files are replaced by `copier update`; change them in project-toolkit, not here. Project-owned files are written once and never overwritten.
+
+## First-day checklist
+
+- [ ] `.copier-answers.yml` is committed.
+{%- if components %}
+- [ ] Component paths in `.github/workflows/validate.yml` match the real directories.
+{%- endif %}
+{%- if allure_report %}
+- [ ] Test runners write Allure results as described in the `README.md` Allure section.
+{%- endif %}
+{%- if codeql %}
+- [ ] Code scanning is available for this repository (GitHub Advanced Security for private repositories).
+{%- endif %}
+{%- if renovate %}
+- [ ] The Renovate GitHub App has access to this repository.
+{%- endif %}
+{%- if q4j_tests %}
+- [ ] `cd {{ q4j_tests_path }} && ./gradlew assemble testClasses` passes with JDK 21.
+{%- endif %}
+- [ ] The first pull request passes `Validate`; then mark its checks as required in branch protection.
+
+## Update to a newer toolkit release
+
+```bash
+git switch main && git pull --ff-only
+export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tagName --jq .tagName)"
+git switch -c "chore/update-project-toolkit-${TOOLKIT_REF}"
+copier update --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
+git diff --check
+git add -A
+git commit -m "chore: update project-toolkit to ${TOOLKIT_REF}"
+git push -u origin HEAD
+gh pr create --fill
+```
+
+Resolve any Copier conflict markers (`<<<<<<<`) before committing. Renovate updates workflow version references between template updates.
+
+## Change answers
+
+Re-run `copier update` with `--data <question>=<value>`, for example `--data gitleaks=false`. Prefer this over editing `.copier-answers.yml` by hand. Question names and allowed values are defined in [`copier.yml`](https://github.com/quokkify/project-toolkit/blob/main/copier.yml).
