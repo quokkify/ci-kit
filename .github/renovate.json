@@ -8,7 +8,10 @@
   "semanticCommitType": "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
   "semanticCommitScope": "deps",
   "github-actions": {
-    "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
+    "managerFilePatterns": [
+      "/^examples/[^/]+\\.ya?ml$/",
+      "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+    ]
   },
   "packageRules": [
     {
