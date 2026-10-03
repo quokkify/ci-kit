@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.25.0](https://github.com/quokkify/project-toolkit/compare/v2.24.0...v2.25.0) (2026-10-03)
+
+<!-- project-toolkit:rich-block:start -->
+<!-- project-toolkit:rich-release-notes pr=351 -->
+### 🔄 Migration
+Generated repositories pick up both changes through the normal template update. Custom callers can add `history-path` together with a matching `historyPath` in their own Allure config.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+<!-- project-toolkit:rich-block:end -->
+
+### ✨ Features
+
+* **template:** add minimal Q4J test automation starter ([#352](https://github.com/quokkify/project-toolkit/issues/352)) ([d14f202](https://github.com/quokkify/project-toolkit/commit/d14f202d7ea7feb95238e5ab37a622d693b3e0d2))
+
+
+### 🐛 Bug Fixes
+
+* **allure:** carry Allure history between report runs ([#351](https://github.com/quokkify/project-toolkit/issues/351)) ([13fbf2d](https://github.com/quokkify/project-toolkit/commit/13fbf2d019e66c93401459500d7e77e911f236ef))
+* **release:** enrich only active manifest components ([#350](https://github.com/quokkify/project-toolkit/issues/350)) ([658cdba](https://github.com/quokkify/project-toolkit/commit/658cdbacac74c35d97760278db321bd16ae34df4))
+* **template:** isolate Gitleaks concurrency by event ([#348](https://github.com/quokkify/project-toolkit/issues/348)) ([6b1515d](https://github.com/quokkify/project-toolkit/commit/6b1515d19313202b5d95947b8a06abd2278758fd))
+
+
+### 🧹 Chores
+
+* **deps:** update allure to v3.20.0 ([#344](https://github.com/quokkify/project-toolkit/issues/344)) ([e920453](https://github.com/quokkify/project-toolkit/commit/e920453f5be347b469da15b9e49ac1c1b032c503))
+* **deps:** update quokkify/project-toolkit to v2.24.0 ([#341](https://github.com/quokkify/project-toolkit/issues/341)) ([5ad585a](https://github.com/quokkify/project-toolkit/commit/5ad585abfa935fed8e8566664d83fc0e6547b4ca))
+* **deps:** update uv to v0.12.22 ([#343](https://github.com/quokkify/project-toolkit/issues/343)) ([6cf0d7d](https://github.com/quokkify/project-toolkit/commit/6cf0d7d4b0ba22d5c817fd24577d52c3b86d69db))
+
 ## [2.24.0](https://github.com/quokkify/project-toolkit/compare/v2.23.5...v2.24.0) (2026-10-01)
 
 
