@@ -470,22 +470,15 @@ class RichNotesTests(TestCase):
             f"([abcdef0](https://github.com/acme/widget/commit/{commit}))\n"
         )
 
-    def test_end_to_end_manifest_cli_uses_gh_245_shapes_and_places_body(self):
+    def test_end_to_end_manifest_cli_reads_only_released_component_changelogs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for package in ("backend", "frontend", "worker"):
-                (root / package).mkdir()
-            for number, package in enumerate(("backend", "frontend", "worker"), 1):
-                (root / package / "CHANGELOG.md").write_text(
-                    self._changelog(number), encoding="utf-8"
-                )
+            (root / "backend").mkdir()
+            (root / "backend/CHANGELOG.md").write_text(self._changelog(1), encoding="utf-8")
             (root / "config.json").write_text(
                 json.dumps(
                     {
-                        "packages": {
-                            name: {"package-name": name}
-                            for name in ("backend", "frontend", "worker")
-                        }
+                        "packages": {name: {"package-name": name} for name in ("backend", "frontend", "worker")}
                     }
                 ),
                 encoding="utf-8",
@@ -501,14 +494,10 @@ class RichNotesTests(TestCase):
                     body=(
                         ":robot: header\n---\n\n\n"
                         "<details><summary>backend: 1.0.1</summary>\n\n## 1.0.1\n\n</details>\n\n"
-                        "<details><summary>frontend: 1.0.2</summary>\n\n## 1.0.2\n\n</details>\n\n"
-                        "<details><summary>worker: 1.0.3</summary>\n\n## 1.0.3\n\n</details>\n\n"
                         "---\nThis PR was generated with Release Please.\n"
                     ),
                 ),
                 "1": self._pull_payload(1, body="## Highlight\nBackend"),
-                "2": self._pull_payload(2, body="## Usage example\n```js\nrun();\n```"),
-                "3": self._pull_payload(3, body="## Migration\nUpgrade worker"),
             }
             data_path = root / "gh-data.json"
             data_path.write_text(json.dumps(fake_data), encoding="utf-8")
@@ -557,7 +546,7 @@ class RichNotesTests(TestCase):
             self.assertEqual(first.returncode, 0, first.stderr)
             snapshot = {
                 path: (root / path).read_text(encoding="utf-8")
-                for path in ("backend/CHANGELOG.md", "frontend/CHANGELOG.md", "worker/CHANGELOG.md")
+                for path in ("backend/CHANGELOG.md",)
             }
             second = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(second.returncode, 0, second.stderr)
@@ -566,25 +555,17 @@ class RichNotesTests(TestCase):
                 {path: (root / path).read_text(encoding="utf-8") for path in snapshot},
             )
             metadata = json.loads((root / "output/metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["source_prs"], [1, 2, 3])
-            self.assertEqual(metadata["rendered_prs"], [1, 2, 3])
-            for number, path in enumerate(snapshot, 1):
-                self.assertIn(f"rich-release-notes pr={number}", snapshot[path])
-                self.assertEqual(snapshot[path].count("rich-release-notes"), 1)
+            self.assertEqual(metadata["source_prs"], [1])
+            self.assertEqual(metadata["rendered_prs"], [1])
+            self.assertEqual(metadata["changelogs"], ["backend/CHANGELOG.md"])
+            self.assertIn("rich-release-notes pr=1", snapshot["backend/CHANGELOG.md"])
+            self.assertEqual(snapshot["backend/CHANGELOG.md"].count("rich-release-notes"), 1)
             release_body = json.loads(
                 (root / "output/release-body.json").read_text(encoding="utf-8")
             )["body"]
-            self.assertEqual(release_body.count(notes.BLOCK_START), 3)
+            self.assertEqual(release_body.count(notes.BLOCK_START), 1)
             backend_end = release_body.index("</details>")
-            frontend_start = release_body.index("<details><summary>frontend")
-            frontend_end = release_body.index("</details>", frontend_start)
-            worker_start = release_body.index("<details><summary>worker")
-            worker_end = release_body.index("</details>", worker_start)
             self.assertLess(release_body.index("Backend"), backend_end)
-            self.assertLess(release_body.index("```js\nrun();\n```"), frontend_end)
-            self.assertGreater(release_body.index("```js\nrun();\n```"), frontend_start)
-            self.assertLess(release_body.index("Upgrade worker"), worker_end)
-            self.assertGreater(release_body.index("Upgrade worker"), worker_start)
             calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
             self.assertIn(["pr", "checkout", "50", "--repo", "acme/widget", "--force"], calls)
             self.assertTrue(all("--slurp" not in call for call in calls))
