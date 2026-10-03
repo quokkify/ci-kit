@@ -58,6 +58,11 @@ on:
         required: false
         default: false
         type: boolean
+      history-path:
+        description: Workspace-relative <directory>/<file>.jsonl equal to the Allure config historyPath. When set, the history of the previous successful run of this workflow for the same pull request is restored before generation and the updated file is persisted as an artifact; empty disables history transport.
+        required: false
+        default: ''
+        type: string
     outputs:
       ready:
         description: Source identity and artifacts passed the resolver contract.
@@ -305,6 +310,138 @@ jobs:
         path: ${{ needs.resolve.outputs.materialize-root }}
         github-token: ${{ secrets.github-token || github.token }}
         run-id: ${{ github.run_id }}
+    - name: Select previous Allure history
+      id: history
+      if: ${{ inputs.history-path != '' }}
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      env:
+        HISTORY_PATH: ${{ inputs.history-path }}
+        PR_NUMBER: ${{ needs.resolve.outputs.pr-number }}
+      with:
+        script: |
+          const historyPath = process.env.HISTORY_PATH;
+          const prNumber = Number(process.env.PR_NUMBER);
+          const historyPathPattern = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\/[A-Za-z0-9_][A-Za-z0-9._-]*)*\/[A-Za-z0-9_][A-Za-z0-9._-]*\.jsonl$/;
+          if (!historyPathPattern.test(historyPath) || historyPath.split("/")[0] === "allure-report") {
+            core.setFailed(`history-path must be a workspace-relative <directory>/<file>.jsonl outside report paths: ${historyPath}`);
+            return;
+          }
+          if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
+            core.setFailed("History scope requires the resolved pull request number.");
+            return;
+          }
+          const name = `allure-history-pr-${prNumber}`;
+          core.setOutput("artifact-name", name);
+          core.setOutput("found", "false");
+          const runs = new Map();
+          const getRun = async (runId) => {
+            if (!runs.has(runId)) {
+              runs.set(runId, (await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+              })).data);
+            }
+            return runs.get(runId);
+          };
+          const current = await getRun(Number(context.runId));
+          const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            name,
+            per_page: 100,
+          });
+          const candidates = artifacts
+            .filter((artifact) => artifact.name === name &&
+              Number.isSafeInteger(Number(artifact.workflow_run?.id)) &&
+              Number(artifact.workflow_run.id) < Number(context.runId) &&
+              artifact.workflow_run.head_repository_id === artifact.workflow_run.repository_id)
+            .sort((left, right) => Number(right.workflow_run.id) - Number(left.workflow_run.id) ||
+              Number(right.id) - Number(left.id));
+          for (const artifact of candidates) {
+            if (artifact.expired) {
+              core.info(`Skip expired history artifact ${artifact.id} from run ${artifact.workflow_run.id}.`);
+              continue;
+            }
+            const producer = await getRun(Number(artifact.workflow_run.id));
+            if (producer.workflow_id !== current.workflow_id || producer.event !== "workflow_run" ||
+                producer.status !== "completed" || producer.conclusion !== "success") {
+              core.info(`Skip history artifact ${artifact.id}: run ${producer.id} is not a successful run of this workflow.`);
+              continue;
+            }
+            if (!Number.isSafeInteger(Number(artifact.id)) || Number(artifact.id) <= 0 ||
+                !Number.isSafeInteger(Number(artifact.size_in_bytes)) || Number(artifact.size_in_bytes) > 52428800) {
+              core.setFailed(`History artifact ${artifact.id} from run ${producer.id} has invalid identity or exceeds 50 MiB.`);
+              return;
+            }
+            core.notice(`Restoring Allure history for PR #${prNumber} from run ${producer.id} (artifact ${artifact.id}).`);
+            core.setOutput("found", "true");
+            core.setOutput("source-run-id", String(producer.id));
+            core.setOutput("artifact_manifest", JSON.stringify([{ name, id: Number(artifact.id) }]));
+            return;
+          }
+          core.notice(`No previous Allure history is available for PR #${prNumber}; this report starts a new history.`);
+        github-token: ${{ secrets.github-token || github.token }}
+    - name: Check out trusted toolkit extractor
+      if: ${{ steps.history.outputs.found == 'true' }}
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        repository: ${{ job.workflow_repository }}
+        ref: ${{ job.workflow_sha }}
+        path: .toolkit
+        persist-credentials: false
+    - name: Restore previous Allure history
+      if: ${{ steps.history.outputs.found == 'true' }}
+      shell: bash
+      env:
+        ARTIFACT_MANIFEST: ${{ steps.history.outputs.artifact_manifest }}
+        API_URL: ${{ github.api_url }}
+        REPOSITORY: ${{ github.repository }}
+        GH_TOKEN: ${{ secrets.github-token || github.token }}
+        ARCHIVE_ROOT: ${{ runner.temp }}/allure-history-archives
+        OUTPUT_ROOT: ${{ runner.temp }}/allure-history-expanded
+      run: python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja
+    - name: Install restored Allure history
+      id: restored
+      if: ${{ steps.history.outputs.found == 'true' }}
+      shell: python
+      env:
+        HISTORY_PATH: ${{ inputs.history-path }}
+        EXPANDED_ROOT: ${{ runner.temp }}/allure-history-expanded
+        SOURCE_RUN_ID: ${{ steps.history.outputs.source-run-id }}
+      run: |
+        import hashlib
+        import json
+        import os
+        import shutil
+        import sys
+        from pathlib import Path
+
+        target = Path(os.environ["HISTORY_PATH"])
+        expanded = Path(os.environ["EXPANDED_ROOT"])
+        source = f"history artifact from run {os.environ['SOURCE_RUN_ID']}"
+        entries = sorted(path.relative_to(expanded).as_posix() for path in expanded.rglob("*") if not path.is_dir())
+        if entries != [target.name]:
+            sys.exit(f"Corrupted {source}: expected only {target.name}, found {entries}")
+        restored = expanded / target.name
+        for number, line in enumerate(restored.read_text(encoding="utf-8").splitlines(), 1):
+            try:
+                valid = not line.strip() or isinstance(json.loads(line), dict)
+            except ValueError:
+                valid = False
+            if not valid:
+                sys.exit(f"Corrupted {source}: line {number} is not a JSON object")
+        for ancestor in [*reversed(target.parents[:-1]), target]:
+            if ancestor.is_symlink() or (ancestor != target and ancestor.exists() and not ancestor.is_dir()):
+                sys.exit(f"Unsafe history-path ancestor in the checkout: {ancestor}")
+        if os.path.lexists(target):
+            sys.exit(f"history-path already exists in the checkout and would be overwritten: {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(restored, target)
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"sha256={digest}\n")
+        print(f"Restored {target} from {source}")
     - name: Build report without write privileges
       uses: quokkify/allure-report-action@b2a25adb4d080b2c56f5342ef1f69976163590d7 # v0.5.2
       with:
@@ -331,6 +468,36 @@ jobs:
         if-no-files-found: error
         retention-days: 14
       id: upload
+    - name: Check updated Allure history
+      id: updated
+      if: ${{ inputs.history-path != '' }}
+      shell: bash
+      env:
+        HISTORY_PATH: ${{ inputs.history-path }}
+        RESTORED_SHA256: ${{ steps.restored.outputs.sha256 }}
+      run: |
+        if [[ -L "$HISTORY_PATH" ]]; then
+          echo "::error::Allure history must be a regular file: $HISTORY_PATH"
+          exit 1
+        fi
+        if [[ -f "$HISTORY_PATH" ]]; then
+          digest="$({ sha256sum "$HISTORY_PATH" 2>/dev/null || shasum -a 256 "$HISTORY_PATH"; } | cut -d " " -f 1)"
+          if [[ -n "$RESTORED_SHA256" && "$digest" == "$RESTORED_SHA256" ]]; then
+            echo "::warning::Allure left the restored history at $HISTORY_PATH unchanged; check that the config historyPath matches it and that appendHistory is intentionally disabled. The unchanged history is persisted."
+          fi
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Allure wrote no history at $HISTORY_PATH; set the config historyPath to this path, or keep appendHistory disabled knowingly. Nothing is persisted."
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Upload updated Allure history
+      if: ${{ inputs.history-path != '' && steps.updated.outputs.present == 'true' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.history.outputs.artifact-name }}
+        path: ${{ inputs.history-path }}
+        if-no-files-found: error
+        retention-days: 30
     outputs:
       report-artifact-name: allure-report-${{ github.run_id }}
       report-artifact-id: ${{ steps.upload.outputs.artifact-id }}

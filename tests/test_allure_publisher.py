@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import json
 import os
 import shutil
@@ -233,6 +234,236 @@ class AllurePublicationRuntimeTests(TestCase):
                 self.assertEqual(execute(poster, data)['posted'], [])
 
 
+HISTORY_SELECTOR_HARNESS = r"""
+const fixture = JSON.parse(process.argv[1]);
+const body = JSON.parse(process.argv[2]);
+const context = {repo: {owner: 'example', repo: 'project'}, runId: 99};
+const requests = [], failures = [], notices = [], infos = [];
+const outputs = {};
+const github = {
+  rest: {actions: {
+    listArtifactsForRepo: 'repo-artifacts',
+    getWorkflowRun: async ({run_id}) => {
+      requests.push({operation: 'getWorkflowRun', run_id});
+      if (fixture.denied) throw Object.assign(new Error('Resource not accessible by integration'), {status: 403});
+      const run = fixture.runs[String(run_id)];
+      if (!run) throw Object.assign(new Error('Not Found'), {status: 404});
+      return {data: run};
+    },
+  }},
+  paginate: async (operation, params) => {
+    requests.push({operation, params});
+    if (operation !== 'repo-artifacts') throw Error(`Unexpected API operation: ${operation}`);
+    return fixture.artifacts;
+  },
+};
+const core = {setOutput: (name, value) => outputs[name] = value, setFailed: (message) => failures.push(message),
+  notice: (message) => notices.push(message), info: (message) => infos.push(message)};
+const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+new AsyncFunction('github', 'context', 'core', 'process', body)(github, context, core, process)
+  .then(() => console.log(JSON.stringify({outputs, failures, notices, infos, requests})),
+        (error) => console.log(JSON.stringify({outputs, failures, notices, infos, requests, error: error.message})));
+"""
+
+
+def generate_step(name: str) -> dict:
+    return next(step for step in CORE['jobs']['generate']['steps'] if step.get('name') == name)
+
+
+def history_run(identifier: int, **overrides) -> dict:
+    return {'id': identifier, 'workflow_id': 5, 'event': 'workflow_run', 'status': 'completed',
+            'conclusion': 'success', **overrides}
+
+
+def history_artifact(identifier: int, run_id: int, name: str = 'allure-history-pr-42', **overrides) -> dict:
+    return {'id': identifier, 'name': name, 'size_in_bytes': 512, 'expired': False,
+            'workflow_run': {'id': run_id, 'repository_id': 1, 'head_repository_id': 1}, **overrides}
+
+
+class AllureHistoryTransportTests(TestCase):
+    def select(self, fixture: dict, history_path: str = 'allure-history/history.jsonl', pr_number: str = '42') -> dict:
+        fixture = {'runs': {'99': history_run(99, status='in_progress', conclusion=None)}, 'artifacts': [], **fixture}
+        env = dict(os.environ, HISTORY_PATH=history_path, PR_NUMBER=pr_number)
+        result = subprocess.run(['node', '-e', HISTORY_SELECTOR_HARNESS, json.dumps(fixture),
+                                 json.dumps(script(CORE['jobs']['generate'], 'history'))],
+                                env=env, text=True, capture_output=True, timeout=15, check=False)
+        if result.returncode:
+            raise AssertionError(result.stderr)
+        return json.loads(result.stdout)
+
+    def test_first_run_without_previous_history_is_an_explicit_new_history(self) -> None:
+        outcome = self.select({})
+        self.assertEqual(outcome['failures'], [])
+        self.assertEqual(outcome['outputs']['found'], 'false')
+        self.assertEqual(outcome['outputs']['artifact-name'], 'allure-history-pr-42')
+        self.assertIn('this report starts a new history', outcome['notices'][0])
+        listing = next(request for request in outcome['requests'] if request['operation'] == 'repo-artifacts')
+        self.assertEqual(listing['params']['name'], 'allure-history-pr-42')
+
+    def test_selects_newest_accepted_run_of_the_same_workflow_and_pull_request(self) -> None:
+        runs = {'99': history_run(99, status='in_progress', conclusion=None),
+                '98': history_run(98, conclusion='cancelled'), '97': history_run(97, workflow_id=6),
+                '96': history_run(96, conclusion='failure'), '95': history_run(95, event='push'),
+                '93': history_run(93), '90': history_run(90), '120': history_run(120)}
+        artifacts = [history_artifact(1, 90), history_artifact(2, 93), history_artifact(3, 95), history_artifact(4, 96),
+                     history_artifact(5, 97), history_artifact(6, 98), history_artifact(7, 99), history_artifact(8, 120),
+                     history_artifact(9, 94, expired=True), history_artifact(10, 98, name='allure-history-pr-7'),
+                     history_artifact(11, 98), history_artifact(12, 92, workflow_run={'id': 92, 'repository_id': 1,
+                                                                                    'head_repository_id': 2})]
+        outcome = self.select({'runs': runs, 'artifacts': artifacts})
+        self.assertEqual(outcome['failures'], [])
+        self.assertEqual(outcome['outputs']['found'], 'true')
+        self.assertEqual(outcome['outputs']['source-run-id'], '93')
+        self.assertEqual(json.loads(outcome['outputs']['artifact_manifest']), [{'name': 'allure-history-pr-42', 'id': 2}])
+        inspected = [request['run_id'] for request in outcome['requests'] if request['operation'] == 'getWorkflowRun']
+        self.assertEqual(inspected, [99, 98, 97, 96, 95, 93])
+
+    def test_forged_artifact_floods_cost_one_lookup_per_run_and_fork_runs_none(self) -> None:
+        runs = {'99': history_run(99, status='in_progress', conclusion=None), '98': history_run(98, event='pull_request')}
+        forged = [history_artifact(index, 98) for index in range(100, 400)]
+        forked = [history_artifact(index, 97, workflow_run={'id': 97, 'repository_id': 1, 'head_repository_id': 2})
+                  for index in range(400, 700)]
+        outcome = self.select({'runs': runs, 'artifacts': forged + forked})
+        self.assertEqual(outcome['outputs']['found'], 'false')
+        inspected = [request['run_id'] for request in outcome['requests'] if request['operation'] == 'getWorkflowRun']
+        self.assertEqual(inspected, [99, 98])
+
+    def test_access_errors_and_oversized_history_are_not_reported_as_missing_history(self) -> None:
+        denied = self.select({'artifacts': [history_artifact(2, 93)], 'denied': True})
+        self.assertIn('Resource not accessible', denied['error'])
+        self.assertNotEqual(denied['outputs'].get('found'), 'true')
+        self.assertEqual(denied['notices'], [])
+        oversized = self.select({'runs': {'99': history_run(99), '93': history_run(93)},
+                                 'artifacts': [history_artifact(2, 93, size_in_bytes=52428801)]})
+        self.assertIn('exceeds 50 MiB', oversized['failures'][0])
+        self.assertEqual(oversized['outputs']['found'], 'false')
+
+    def test_history_path_must_be_a_dedicated_workspace_relative_jsonl(self) -> None:
+        for unsafe in ['/tmp/history.jsonl', '../history.jsonl', 'history.jsonl', 'allure-history/../x.jsonl',
+                       'allure-report/history.jsonl', '.allure-input/history.jsonl', 'allure-history/history.json',
+                       'allure-history/-x.jsonl', 'allure history/history.jsonl']:
+            outcome = self.select({}, history_path=unsafe)
+            self.assertTrue(outcome['failures'], unsafe)
+            self.assertEqual([request for request in outcome['requests'] if request['operation'] == 'repo-artifacts'], [])
+        self.assertTrue(self.select({}, pr_number='')['failures'])
+
+    def test_restore_steps_are_gated_bounded_and_read_only(self) -> None:
+        names = [step.get('name') for step in CORE['jobs']['generate']['steps']]
+        self.assertLess(names.index('Install restored Allure history'), names.index('Build report without write privileges'))
+        self.assertLess(names.index('Build report without write privileges'), names.index('Upload updated Allure history'))
+        self.assertEqual(CORE['jobs']['generate']['permissions'], {'actions': 'read', 'contents': 'read'})
+        restore = generate_step('Restore previous Allure history')
+        self.assertEqual(restore['run'], 'python .toolkit/templates/project/template/.github/allure/safe_extract.py.jinja')
+        self.assertEqual(restore['env']['ARTIFACT_MANIFEST'], '${{ steps.history.outputs.artifact_manifest }}')
+        self.assertNotIn('MATERIALIZE_ROOT', restore['env'])
+        self.assertEqual(generate_step('Install restored Allure history')['env']['EXPANDED_ROOT'], restore['env']['OUTPUT_ROOT'])
+        for name in ['Check out trusted toolkit extractor', 'Restore previous Allure history', 'Install restored Allure history']:
+            self.assertEqual(next(step for step in CORE['jobs']['generate']['steps'] if step.get('name') == name)['if'],
+                             "${{ steps.history.outputs.found == 'true' }}")
+        upload = generate_step('Upload updated Allure history')
+        self.assertEqual(upload['with']['name'], '${{ steps.history.outputs.artifact-name }}')
+        self.assertEqual(upload['with']['path'], '${{ inputs.history-path }}')
+        self.assertIn("steps.updated.outputs.present == 'true'", upload['if'])
+        self.assertEqual(CORE[True]['workflow_call']['inputs']['history-path']['default'], '')
+
+    def run_install(self, expanded: dict[str, str], checkout: dict[str, str | None] | None = None,
+                    history_path: str = 'allure-history/history.jsonl') -> tuple[subprocess.CompletedProcess, Path]:
+        step = generate_step('Install restored Allure history')
+        root = Path(tempfile.mkdtemp(prefix='allure-history-install-'))
+        self.addCleanup(shutil.rmtree, root)
+        workspace, temporary = root / 'workspace', root / 'expanded'
+        for base, files in ((temporary, expanded), (workspace, checkout or {})):
+            base.mkdir(parents=True, exist_ok=True)
+            for relative, content in files.items():
+                target = base / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if content is None:
+                    target.symlink_to(root)
+                else:
+                    target.write_text(content)
+        env = dict(os.environ, HISTORY_PATH=history_path, EXPANDED_ROOT=str(temporary), SOURCE_RUN_ID='93',
+                   GITHUB_OUTPUT=str(root / 'github-output'))
+        result = subprocess.run(['python3', '-c', step['run']], cwd=workspace, env=env, text=True,
+                                capture_output=True, timeout=15, check=False)
+        return result, root
+
+    def test_restored_history_must_be_one_regular_jsonl_file(self) -> None:
+        valid, root = self.run_install({'history.jsonl': '{"uuid": "a"}\n\n{"uuid": "b"}\n'})
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        self.assertIn('from history artifact from run 93', valid.stdout)
+        self.assertEqual((root / 'workspace/allure-history/history.jsonl').read_text(), '{"uuid": "a"}\n\n{"uuid": "b"}\n')
+        self.assertRegex((root / 'github-output').read_text(), r'^sha256=[0-9a-f]{64}\n$')
+        corrupted, _ = self.run_install({'history.jsonl': '{"uuid": "a"}\n{"uuid":\n'})
+        self.assertIn('line 2', corrupted.stderr)
+        self.assertNotEqual(corrupted.returncode, 0)
+        not_object, _ = self.run_install({'history.jsonl': '[1, 2]\n'})
+        self.assertIn('is not a JSON object', not_object.stderr)
+        extra, root = self.run_install({'history.jsonl': '{}\n', 'run.sh': 'exit 0\n'})
+        self.assertIn('expected only', extra.stderr)
+        self.assertFalse((root / 'workspace/allure-history').exists())
+        renamed, _ = self.run_install({'other.jsonl': '{}\n'})
+        self.assertIn('expected only history.jsonl', renamed.stderr)
+
+    def test_restore_never_deletes_or_overwrites_checked_out_files(self) -> None:
+        sibling, root = self.run_install({'history.jsonl': '{}\n'},
+                                         {'tools/allure/allurerc.mjs': 'export default {};\n'},
+                                         history_path='tools/allure/history.jsonl')
+        self.assertEqual(sibling.returncode, 0, sibling.stderr)
+        self.assertEqual((root / 'workspace/tools/allure/allurerc.mjs').read_text(), 'export default {};\n')
+        self.assertEqual((root / 'workspace/tools/allure/history.jsonl').read_text(), '{}\n')
+        existing, root = self.run_install({'history.jsonl': '{}\n'}, {'allure-history/history.jsonl': 'committed\n'})
+        self.assertIn('already exists', existing.stderr)
+        self.assertEqual((root / 'workspace/allure-history/history.jsonl').read_text(), 'committed\n')
+        linked, root = self.run_install({'history.jsonl': '{}\n'}, {'allure-history': None})
+        self.assertIn('Unsafe history-path ancestor', linked.stderr)
+        self.assertEqual(list(root.glob('history.jsonl')), [])
+
+    def run_check(self, setup, restored_sha256: str = '') -> tuple[subprocess.CompletedProcess, str]:
+        step = generate_step('Check updated Allure history')
+        workspace = Path(tempfile.mkdtemp(prefix='allure-history-check-'))
+        self.addCleanup(shutil.rmtree, workspace)
+        setup(workspace)
+        output = workspace / 'github-output'
+        env = dict(os.environ, HISTORY_PATH='allure-history/history.jsonl', GITHUB_OUTPUT=str(output),
+                   RESTORED_SHA256=restored_sha256)
+        result = subprocess.run(['bash', '-c', step['run']], cwd=workspace, env=env, text=True,
+                                capture_output=True, timeout=15, check=False)
+        return result, output.read_text() if output.exists() else ''
+
+    def test_persistence_respects_disabled_history_and_rejects_symlinks(self) -> None:
+        def written(workspace: Path) -> None:
+            (workspace / 'allure-history').mkdir()
+            (workspace / 'allure-history/history.jsonl').write_text('{}\n')
+        result, output = self.run_check(written)
+        self.assertEqual((result.returncode, output), (0, 'present=true\n'))
+        self.assertNotIn('unchanged', result.stdout)
+        unchanged = hashlib.sha256(b'{}\n').hexdigest()
+        result, output = self.run_check(written, restored_sha256=unchanged)
+        self.assertEqual((result.returncode, output), (0, 'present=true\n'))
+        self.assertIn('left the restored history at allure-history/history.jsonl unchanged', result.stdout)
+        result, output = self.run_check(written, restored_sha256='0' * 64)
+        self.assertNotIn('unchanged', result.stdout)
+        result, output = self.run_check(lambda workspace: None)
+        self.assertEqual((result.returncode, output), (0, 'present=false\n'))
+        self.assertIn('Allure wrote no history', result.stdout)
+
+        def linked(workspace: Path) -> None:
+            (workspace / 'allure-history').mkdir()
+            (workspace / 'allure-history/history.jsonl').symlink_to('/etc/hosts')
+        result, output = self.run_check(linked)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(output, '')
+
+    def test_template_config_and_caller_share_one_history_path(self) -> None:
+        config = (ROOT / 'templates/project/template/.github/allure/allurerc.mjs.jinja').read_text()
+        self.assertIn('historyPath: "./allure-history/history.jsonl",', config)
+        self.assertIn('historyLimit: 20,', config)
+        self.assertNotIn('appendHistory', config)
+        legacy = yaml.safe_load((ROOT / '.github/workflows/allure-publisher.yml').read_text())
+        self.assertEqual(legacy[True]['workflow_call']['inputs']['history-path']['default'], '')
+        self.assertEqual(legacy['jobs']['report']['with']['history-path'], '${{ inputs.history-path }}')
+
+
 class AllureCallerContracts(TestCase):
     def test_forty_generated_variants_delegate_exact_inputs_and_no_broad_token(self) -> None:
         template = jinja2.Environment().from_string((ROOT / 'templates/project/template/.github/workflows/allure-report.yml.jinja').read_text())
@@ -259,6 +490,7 @@ class AllureCallerContracts(TestCase):
                                 'maximum-artifacts': 50 if component else 7, 'skip-empty-artifacts': not component,
                                 'config-file': '.github/allure/allurerc.mjs', 'categories-file': category,
                                 'publish-pages': pages, 'managed-pages-layout': True,
+                                'history-path': 'allure-history/history.jsonl',
                                 'pages-url': 'https://example.org/reports' if pages else ''})
                             if pages:
                                 self.assertEqual(jobs['pages']['permissions'], {'actions': 'read', 'contents': 'write', 'pull-requests': 'read'})

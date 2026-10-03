@@ -31,6 +31,7 @@ jobs:
       categories-file: {{ allure_categories_file | tojson }}
       publish-pages: {{ 'true' if allure_publish_pages else 'false' }}
       managed-pages-layout: true
+      history-path: allure-history/history.jsonl
       pages-url: {% if allure_publish_pages %}{{ allure_pages_url | tojson }}{% else %}""{% endif %}
 {% if allure_publish_pages %}
   pages:
