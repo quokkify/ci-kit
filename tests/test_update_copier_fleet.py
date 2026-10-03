@@ -363,6 +363,34 @@ class RenamedToolkitRefTests(TestCase):
         self.assertIn("uses: someone/quokkify/project-toolkit/actions/x@v1.0.0", text)
 
 
+class AlreadyAppliedRejectTests(TestCase):
+    """A rejected hunk the project already carries is not a conflict."""
+
+    REJECTED = (
+        "diff a/.github/workflows/report.yml b/.github/workflows/report.yml\t(rejected hunks)\n"
+        "@@ -1,3 +1,2 @@ jobs:\n"
+        " jobs:\n"
+        "   report: {}\n"
+        "-\n"
+    )
+
+    def check(self, content: str) -> tuple[bool, bool]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workflows = root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "report.yml").write_text(content, encoding="utf-8")
+            rejected = workflows / "report.yml.rej"
+            rejected.write_text(self.REJECTED, encoding="utf-8")
+            return fleet.discard_if_already_applied(root, rejected), rejected.exists()
+
+    def test_reject_for_a_change_the_project_already_made_is_discarded(self) -> None:
+        self.assertEqual(self.check("jobs:\n  report: {}\n"), (True, False))
+
+    def test_reject_for_a_change_that_is_still_missing_is_kept(self) -> None:
+        self.assertEqual(self.check("jobs:\n  report: {name: local}\n"), (False, True))
+
+
 class AuthenticatedGitTests(TestCase):
     """git does not read GH_TOKEN; a hosted runner has no credential helper at all."""
 
