@@ -40,6 +40,12 @@ RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+# Answers files are written in the style Prettier emits for YAML, by both the
+# template and this updater: plain scalars where YAML reads them back as the same
+# string, double-quoted JSON strings otherwise, and sequences indented under their
+# key. The template's .copier-answers.yml.jinja repeats these two patterns.
+ANSWERS_PLAIN_PATTERN = re.compile(r"^[A-Za-z_./][A-Za-z0-9_./@+-]*(?::[A-Za-z0-9_./@+-]+)*(?: [A-Za-z0-9_./@+-]+(?::[A-Za-z0-9_./@+-]+)*)*$")
+ANSWERS_RESERVED_PATTERN = re.compile(r"^(?:y|n|yes|no|true|false|on|off|null|\.inf|\.nan|\.[0-9].*)$", re.IGNORECASE)
 
 
 class FleetUpdateError(RuntimeError):
@@ -1124,20 +1130,48 @@ def restore_answers_format_if_semantically_equal(
     if original_answers == updated_answers and original_text != updated_text:
         answers_path.write_text(original_text, encoding="utf-8")
     elif original_answers != updated_answers:
-        class IndentedSafeDumper(yaml.SafeDumper):
-            def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
-                return super().increase_indent(flow, False)
+        answers_path.write_text(render_answers(updated_answers), encoding="utf-8")
 
-        answers_path.write_text(
-            yaml.dump(
-                updated_answers,
-                Dumper=IndentedSafeDumper,
-                allow_unicode=True,
-                default_flow_style=False,
-                sort_keys=False,
-            ),
-            encoding="utf-8",
-        )
+
+def render_answers_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return json.dumps(value)
+    text = str(value)
+    if ANSWERS_PLAIN_PATTERN.fullmatch(text) and not ANSWERS_RESERVED_PATTERN.fullmatch(text):
+        return text
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _render_answers_lines(value: Any, indent: int) -> list[str]:
+    pad = " " * indent
+    lines: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, (dict, list)) and item:
+                lines.append(f"{pad}{render_answers_scalar(key)}:")
+                lines.extend(_render_answers_lines(item, indent + 2))
+            else:
+                inline = ("{}" if isinstance(item, dict) else "[]") if isinstance(item, (dict, list)) else render_answers_scalar(item)
+                lines.append(f"{pad}{render_answers_scalar(key)}: {inline}")
+        return lines
+    for item in value:
+        if isinstance(item, (dict, list)) and item:
+            nested = _render_answers_lines(item, indent + 2)
+            lines.append(f"{pad}- {nested[0].lstrip()}")
+            lines.extend(nested[1:])
+        else:
+            inline = ("{}" if isinstance(item, dict) else "[]") if isinstance(item, (dict, list)) else render_answers_scalar(item)
+            lines.append(f"{pad}- {inline}")
+    return lines
+
+
+def render_answers(answers: dict[str, Any]) -> str:
+    """Serialize Copier answers exactly as the template's answers file does."""
+    return "\n".join(_render_answers_lines(answers, 0)) + "\n"
 
 
 def verify_release_helper(repository_path: Path, template_source: str, template_ref: str, *, env: dict[str, str]) -> None:

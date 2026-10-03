@@ -244,6 +244,98 @@ class ProjectOwnedToolkitRefTests(TestCase):
         self.assertIn("other/repo/.github/workflows/ci.yml@v2.14.0", foreign)
 
 
+ANSWERS_TEMPLATE = ROOT / "templates/project/template/.copier-answers.yml.jinja"
+ANSWERS_CORPUS = [
+    {
+        "_commit": "v2.25.0",
+        "_src_path": "https://github.com/quokkify/project-toolkit.git",
+        "allure_categories_file": "",
+        "project_name": "App & Co",
+        "flag": "on",
+        "Yes": "No",
+        "count_text": "123",
+        "colon": "a: b",
+        "comment": "tag #1",
+        "unicode": "Привет мир",
+        "infinity": ".inf",
+        "dotted": ".github/workflows/test.yml",
+        "here": ".",
+        "newline": "first\nsecond",
+        "quote": 'say "hi"',
+        "nothing": None,
+        "enabled": True,
+        "disabled": False,
+        "count": 7,
+        "languages": [],
+        "settings": {},
+        "renovate_presets": ["default", "github-actions", "123"],
+        "components": [
+            {"id": "app-java", "name": "App Java", "path": ".", "type": "java"},
+            {"id": "web", "name": "", "path": "frontend", "type": "node", "tags": ["a", "on"], "extra": {"k": "v"}},
+        ],
+        "nested": {"inner": {"list": [1, "x"]}, "empty": []},
+    },
+    {"_commit": "v1.0.0", "only": "value"},
+]
+
+
+def render_answers_template(answers: dict) -> str:
+    import jinja2
+
+    environment = jinja2.Environment(
+        extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"], keep_trailing_newline=True
+    )
+    return environment.from_string(ANSWERS_TEMPLATE.read_text(encoding="utf-8")).render(
+        _copier_answers=answers, q4j_tests=False
+    )
+
+
+class AnswersFormatTests(TestCase):
+    """The template and the updater must write one Prettier-compatible answers format."""
+
+    def test_updater_and_template_write_identical_round_tripping_answers(self) -> None:
+        for answers in ANSWERS_CORPUS:
+            rendered = fleet.render_answers(answers)
+            with self.subTest(keys=list(answers)[:3]):
+                self.assertEqual(yaml.safe_load(rendered), answers)
+                self.assertEqual(render_answers_template(answers), rendered)
+
+    def test_format_matches_prettier_conventions(self) -> None:
+        rendered = fleet.render_answers(ANSWERS_CORPUS[0])
+        for line in [
+            "_src_path: https://github.com/quokkify/project-toolkit.git",
+            'allure_categories_file: ""',
+            'flag: "on"',
+            '"Yes": "No"',
+            'count_text: "123"',
+            'colon: "a: b"',
+            'infinity: ".inf"',
+            "dotted: .github/workflows/test.yml",
+            "here: .",
+            'newline: "first\\nsecond"',
+            "languages: []",
+            "settings: {}",
+            "renovate_presets:\n  - default\n  - github-actions\n  - \"123\"",
+            "components:\n  - id: app-java\n    name: App Java\n    path: .\n    type: java\n  - id: web\n    name: \"\"",
+            "    tags:\n      - a\n      - \"on\"\n    extra:\n      k: v",
+        ]:
+            self.assertIn(line, rendered)
+        self.assertNotIn("'", rendered)
+        self.assertTrue(rendered.endswith("\n") and not rendered.endswith("\n\n"))
+
+    def test_changed_answers_are_rewritten_without_single_quotes(self) -> None:
+        original = '_commit: v2.24.0\nallure_categories_file: ""\n'
+        copier_serialized = "_commit: v2.25.0\nallure_categories_file: ''\nq4j_tests: false\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            answers = Path(temporary) / fleet.ANSWERS_FILE
+            answers.write_text(copier_serialized, encoding="utf-8")
+            fleet.restore_answers_format_if_semantically_equal(answers, original)
+            self.assertEqual(
+                answers.read_text(encoding="utf-8"),
+                '_commit: v2.25.0\nallure_categories_file: ""\nq4j_tests: false\n',
+            )
+
+
 class AuthenticatedGitTests(TestCase):
     """git does not read GH_TOKEN; a hosted runner has no credential helper at all."""
 
