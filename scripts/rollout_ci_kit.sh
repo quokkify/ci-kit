@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ORG="${ORG:-quokkify}"
-ANSWERS_DIR="${1:?usage: rollout_project_toolkit.sh ANSWERS_DIR}"
-TOOLKIT_REPO="quokkify/project-toolkit"
+ANSWERS_DIR="${1:?usage: rollout_ci_kit.sh ANSWERS_DIR}"
+TOOLKIT_REPO="quokkify/ci-kit"
 TOOLKIT_SOURCE="https://github.com/$TOOLKIT_REPO.git"
 TOOLKIT_REF="${TOOLKIT_REF:?export an exact reviewed tag, for example TOOLKIT_REF=v2.6.0}"
 if [[ ! "$TOOLKIT_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -11,7 +11,7 @@ if [[ ! "$TOOLKIT_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 gh release view "$TOOLKIT_REF" --repo "$TOOLKIT_REPO" >/dev/null
-BRANCH="chore/project-toolkit-${TOOLKIT_REF}"
+BRANCH="chore/ci-kit-${TOOLKIT_REF}"
 WORK_ROOT="$(mktemp -d)"
 trap 'rm -rf "$WORK_ROOT"' EXIT
 
@@ -62,7 +62,7 @@ for answers in "${answer_files[@]}"; do
   git -C "$worktree" switch -c "$BRANCH"
 
   if [[ -f "$worktree/.copier-answers.yml" ]]; then
-    if ! grep -Eq "^_src_path:[[:space:]]*['\"]?(gh:quokkify/project-toolkit|https://github\.com/quokkify/project-toolkit(\.git)?)[\"']?[[:space:]]*$" "$worktree/.copier-answers.yml"; then
+    if ! grep -Eq "^_src_path:[[:space:]]*['\"]?(gh:quokkify/ci-kit|https://github\.com/quokkify/ci-kit(\.git)?)[\"']?[[:space:]]*$" "$worktree/.copier-answers.yml"; then
       echo "$full_repo is managed by a different Copier template; stopping before changes" >&2
       exit 1
     fi
@@ -95,12 +95,12 @@ for answers in "${answer_files[@]}"; do
     echo "Copier conflict in $full_repo; stopping before push" >&2
     exit 1
   fi
-  git -C "$worktree" commit -m "chore: apply project-toolkit ${TOOLKIT_REF}"
+  git -C "$worktree" commit -m "chore: apply ci-kit ${TOOLKIT_REF}"
   git -C "$worktree" push -u origin "$BRANCH"
   gh pr create \
     --repo "$full_repo" \
     --base "$default_branch" \
     --head "$BRANCH" \
-    --title "chore: apply project-toolkit ${TOOLKIT_REF}" \
+    --title "chore: apply ci-kit ${TOOLKIT_REF}" \
     --body "Generated with Copier from ${TOOLKIT_REPO}@${TOOLKIT_REF}. Review all generated workflow and Renovate changes before merging."
 done

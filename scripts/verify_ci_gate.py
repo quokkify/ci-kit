@@ -234,7 +234,7 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
     if not isinstance(answers, dict) or answers.get("_commit") != target:
         raise GateError(f"Pilot {repository}@{sha} is not on {target}")
     source = answers.get("_src_path")
-    if not isinstance(source, str) or normalize_template_source(source) != "quokkify/project-toolkit":
+    if not isinstance(source, str) or normalize_template_source(source) != "quokkify/ci-kit":
         raise GateError(f"Pilot {repository}@{sha} uses a different template source")
     wait_until(lambda: pilot_ready(repository, sha, PILOT_CHECKS[repository], pr=pr, snapshot=snapshot), timeout)
     if current_snapshot(repository, pr) != snapshot:

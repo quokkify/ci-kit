@@ -1,6 +1,6 @@
-# project-toolkit onboarding
+# ci-kit onboarding
 
-This repository is managed by the [`quokkify/project-toolkit`](https://github.com/quokkify/project-toolkit) Copier template at `{{ toolkit_version }}`. This file is toolkit-owned: `copier update` rewrites it, so keep project notes elsewhere.
+This repository is managed by the [`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) Copier template at `{{ toolkit_version }}`. This file is toolkit-owned: `copier update` rewrites it, so keep project notes elsewhere.
 
 ## What this project received
 
@@ -11,7 +11,7 @@ This repository is managed by the [`quokkify/project-toolkit`](https://github.co
 | `.github/workflows/copier-update.yml` | Template update automation | toolkit |
 | `.github/pull_request_template.md` | Pull request template | project |
 | `README.md` | Starter README | project |
-| `docs/project-toolkit.md` | This guide | toolkit |
+| `docs/ci-kit.md` | This guide | toolkit |
 {%- if codeql %}
 | `.github/workflows/codeql.yml` | CodeQL code scanning | toolkit |
 {%- endif %}
@@ -29,7 +29,7 @@ This repository is managed by the [`quokkify/project-toolkit`](https://github.co
 | `.github/renovate.json` | Renovate config extending `{{ renovate_config_repository }}` | project |
 {%- endif %}
 
-Toolkit-owned files are replaced by `copier update`; change them in project-toolkit, not here. Project-owned files are written once and never overwritten.
+Toolkit-owned files are replaced by `copier update`; change them in ci-kit, not here. Project-owned files are written once and never overwritten.
 
 ## First-day checklist
 
@@ -52,12 +52,12 @@ Toolkit-owned files are replaced by `copier update`; change them in project-tool
 
 ```bash
 git switch main && git pull --ff-only
-export TOOLKIT_REF="$(gh release view --repo quokkify/project-toolkit --json tagName --jq .tagName)"
-git switch -c "chore/update-project-toolkit-${TOOLKIT_REF}"
+export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq .tagName)"
+git switch -c "chore/update-ci-kit-${TOOLKIT_REF}"
 copier update --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
 git diff --check
 git add -A
-git commit -m "chore: update project-toolkit to ${TOOLKIT_REF}"
+git commit -m "chore: update ci-kit to ${TOOLKIT_REF}"
 git push -u origin HEAD
 gh pr create --fill
 ```
@@ -66,4 +66,4 @@ Resolve any Copier conflict markers (`<<<<<<<`) before committing. Renovate upda
 
 ## Change answers
 
-Re-run `copier update` with `--data <question>=<value>`, for example `--data gitleaks=false`. Prefer this over editing `.copier-answers.yml` by hand. Question names and allowed values are defined in [`copier.yml`](https://github.com/quokkify/project-toolkit/blob/main/copier.yml).
+Re-run `copier update` with `--data <question>=<value>`, for example `--data gitleaks=false`. Prefer this over editing `.copier-answers.yml` by hand. Question names and allowed values are defined in [`copier.yml`](https://github.com/quokkify/ci-kit/blob/main/copier.yml).

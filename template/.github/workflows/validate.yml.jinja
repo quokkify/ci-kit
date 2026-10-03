@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out repository
-        uses: quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}
+        uses: quokkify/ci-kit/actions/checkout@{{ toolkit_version }}
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -80,7 +80,7 @@ jobs:
               text = path.read_text()
               yaml.safe_load(text)
               for line in text.splitlines():
-                  marker = "uses: quokkify/project-toolkit/"
+                  marker = "uses: quokkify/ci-kit/"
                   if line.lstrip().startswith(marker):
                       reference = line.split("@", 1)[1].split()[0]
                       comment = line.partition("#")[2].strip()
@@ -115,7 +115,7 @@ jobs:
 {% for component in components %}
   {{ component.id }}:
     name: {{ component.name | tojson }}
-    uses: quokkify/project-toolkit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
+    uses: quokkify/ci-kit/.github/workflows/{{ component.type }}-ci.yml@{{ toolkit_version }}
     with:
       working-directory: {{ component.path | tojson }}
 {% if allure_report and allure_mode == 'component' and component.type == 'python' %}      install-command: "python -m pip install pytest allure-pytest"
@@ -127,7 +127,7 @@ jobs:
 {% endfor -%}
 {% if docker %}
   docker:
-    uses: quokkify/project-toolkit/.github/workflows/docker-build.yml@{{ toolkit_version }}
+    uses: quokkify/ci-kit/.github/workflows/docker-build.yml@{{ toolkit_version }}
     with:
       push: false
 {% endif -%}

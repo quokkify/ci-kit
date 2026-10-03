@@ -1,6 +1,6 @@
 # Shared checkout
 
-`actions/checkout` is a composite action in project-toolkit. It checks out the
+`actions/checkout` is a composite action in ci-kit. It checks out the
 caller repository in the caller's job and delegates to one SHA-pinned upstream
 `actions/checkout`. All upstream inputs and the `ref` and `commit` outputs are
 forwarded. The upstream pin is maintained in `actions/checkout/action.yml`.
@@ -13,7 +13,7 @@ line in custom workflows such as `.github/workflows/docs.yml`:
 ```yaml
 - name: Checkout
   id: source
-  uses: quokkify/project-toolkit/actions/checkout@vX.Y.Z
+  uses: quokkify/ci-kit/actions/checkout@vX.Y.Z
   with:
     persist-credentials: false
 ```
@@ -39,7 +39,7 @@ apply; `allow-unsafe-pr-checkout` defaults to `false`.
 
 1. The existing global Renovate preset enables the built-in `github-actions`
    manager. It discovers `actions/checkout/action.yml` automatically and updates
-   the upstream SHA and version comment in project-toolkit. No local custom
+   the upstream SHA and version comment in ci-kit. No local custom
    manager or consumer Renovate override is required for this dependency.
 2. Toolkit validation checks the forwarding contract and renders the Copier
    scenarios. The toolkit CI also performs a real checkout through the candidate
@@ -47,7 +47,7 @@ apply; `allow-unsafe-pr-checkout` defaults to `false`.
    credential persistence.
 3. Release Please publishes the next toolkit version. The existing release
    follow-up runs the Copier fleet updater and opens template update PRs.
-4. Copier-generated workflows use `quokkify/project-toolkit/actions/checkout@{{ toolkit_version }}`.
+4. Copier-generated workflows use `quokkify/ci-kit/actions/checkout@{{ toolkit_version }}`.
    The fleet updater also advances toolkit action references in project-owned
    workflows, including exact tags and SHA pins with a release comment. The
    answers and workflow references move in the same PR.
@@ -60,7 +60,7 @@ that one-time migration must use a release which already contains the wrapper.
 
 Use the fleet updater for coordinated updates of project-owned workflows; plain
 `copier update` only renders template-owned files. Direct Renovate updates of
-project-toolkit references in custom workflows are a separate global-preset
+ci-kit references in custom workflows are a separate global-preset
 policy: if disabled for a Copier fleet, the rule belongs in that fleet's shared
 preset. Do not disable upstream `actions/checkout` globally, since non-migrated
 workflows still need its updates.

@@ -27,7 +27,7 @@ def action_reference_errors(text: str, label: str, *, require_toolkit_pin: bool 
         if not sep:
             errors.append(f"{label}: action without ref: {use}")
             continue
-        toolkit = target.startswith(("quokkify/project-toolkit/.github/workflows/", "quokkify/project-toolkit/actions/"))
+        toolkit = target.startswith(("quokkify/ci-kit/.github/workflows/", "quokkify/ci-kit/actions/"))
         digest = bool(re.fullmatch(r"[0-9a-f]{40}", ref))
         release = bool(re.fullmatch(r"v\d+\.\d+\.\d+", (match[2] or "").strip()))
         if toolkit:

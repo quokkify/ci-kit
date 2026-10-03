@@ -43,7 +43,7 @@ project_name:
 
 toolkit_version:
   type: str
-  help: Immutable project-toolkit SemVer tag used by generated workflows.
+  help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's
   # automatic latest-tag selection. Existing answers still take precedence.
   default: "{{ _copier_answers.get('_commit', '') if (_copier_answers.get('_commit', '') | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) else 'v2.23.5' }}"

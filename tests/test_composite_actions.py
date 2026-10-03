@@ -1213,7 +1213,7 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             workflow = yaml.safe_load(
                 (destination / ".github/workflows/allure-report.yml").read_text()
             )
-            self.assertEqual(workflow["jobs"]["report"]["uses"], "quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@v1.0.0")
+            self.assertEqual(workflow["jobs"]["report"]["uses"], "quokkify/ci-kit/.github/workflows/allure-publisher-core.yml@v1.0.0")
             workflow = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())
             poster_step = next(
                 step

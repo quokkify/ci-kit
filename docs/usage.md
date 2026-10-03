@@ -1,13 +1,13 @@
 # Usage
 
-Examples pin an exact immutable project-toolkit release. All toolkit references in this page are managed by Renovate and move together when a new release is published.
+Examples pin an exact immutable ci-kit release. All toolkit references in this page are managed by Renovate and move together when a new release is published.
 
 Copy a small caller workflow from [`examples/`](../examples/) and replace commands/paths. Production callers use an exact released tag:
 
 ```yaml
 jobs:
   backend:
-    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2.25.0
+    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v2.25.0
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -54,7 +54,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy https://github.com/quokkify/project-toolkit.git my-project --vcs-ref v2.25.0 --trust
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v2.25.0 --trust
 cd my-project
 copier update --trust
 ```
@@ -68,7 +68,7 @@ Every generated repository receives the shared baseline workflows:
 - `allure-report.yml` securely consumes source-run `allure-results-*` artifacts and comments an Allure 3 report when `allure_report` is enabled;
 - `.github/renovate.json` extends the selected organization presets when `renovate` is enabled.
 
-The `Auto-update Copier-managed repositories` workflow runs in read-only mode on its daily audit schedule and can also be started by a CODEOWNER from the Actions UI or with `gh workflow run copier-fleet-auto-update.yml --repo quokkify/project-toolkit -f dry-run=true`; the API call is authenticated by the caller's current `gh` session. A separate audit workflow used to hold this role and was removed: the same script, arguments, and reports are reached through this workflow's `dry-run` mode, so one file now covers both fronts. Full-fleet runs share one concurrency lock, while explicit `repository` dispatches use repository-specific locks; targeted updates can therefore run in parallel without GitHub silently replacing older pending runs. Because the hosted job intentionally uses only the repository-scoped `GITHUB_TOKEN`, its supported scheduled fleet is explicitly limited to public Quokkify repositories; private consumers require an explicit CODEOWNER-run local audit and are never silently claimed as covered by the badge. The workflow discovers non-archived, non-fork public organization repositories containing `.copier-answers.yml`, accepts only answers whose `_src_path` resolves to `quokkify/project-toolkit`, and performs a `copier update` preview against the latest released template tag. The organization profile repository `quokkify/.github` and template source repository `quokkify/project-toolkit` are explicitly excluded before Copier metadata is inspected because neither is a generated consumer project. The audit fails with a distinct drift status when any supported repository would change, making the README badge red; a green badge means the most recent audit completed and found no drift in that public fleet. An explicitly requested repository that cannot be accessed fails the run. Console output includes the recorded template version, components (from Copier answers, with workflow-based language inference for older answers), baseline coverage, and Docker, CodeQL, Allure, Release Please, and Renovate states for each managed repository. Custom Allure and Release Please paths are reported as `custom`, not `missing`. Drift status and configuration-gap counts are reported independently in console, Markdown, and JSON. The Actions job summary renders the same inventory as a Markdown matrix with drift and missing-output details, and the workflow uploads a versioned `copier-fleet-audit.json` artifact for automation. JSON schema version 3 moves `codeql` out of the baseline set and reports it as a feature state; version 2 added `allure_report`. The baseline is therefore `validate.yml` and `gitleaks.yml`, and a repository that opted out of CodeQL no longer counts as missing a baseline file. Conditional outputs are classified as enabled, disabled, missing, custom, or unknown rather than treating absent legacy answers as false.
+The `Auto-update Copier-managed repositories` workflow runs in read-only mode on its daily audit schedule and can also be started by a CODEOWNER from the Actions UI or with `gh workflow run copier-fleet-auto-update.yml --repo quokkify/ci-kit -f dry-run=true`; the API call is authenticated by the caller's current `gh` session. A separate audit workflow used to hold this role and was removed: the same script, arguments, and reports are reached through this workflow's `dry-run` mode, so one file now covers both fronts. Full-fleet runs share one concurrency lock, while explicit `repository` dispatches use repository-specific locks; targeted updates can therefore run in parallel without GitHub silently replacing older pending runs. Because the hosted job intentionally uses only the repository-scoped `GITHUB_TOKEN`, its supported scheduled fleet is explicitly limited to public Quokkify repositories; private consumers require an explicit CODEOWNER-run local audit and are never silently claimed as covered by the badge. The workflow discovers non-archived, non-fork public organization repositories containing `.copier-answers.yml`, accepts only answers whose `_src_path` resolves to `quokkify/ci-kit`, and performs a `copier update` preview against the latest released template tag. The organization profile repository `quokkify/.github` and template source repository `quokkify/ci-kit` are explicitly excluded before Copier metadata is inspected because neither is a generated consumer project. The audit fails with a distinct drift status when any supported repository would change, making the README badge red; a green badge means the most recent audit completed and found no drift in that public fleet. An explicitly requested repository that cannot be accessed fails the run. Console output includes the recorded template version, components (from Copier answers, with workflow-based language inference for older answers), baseline coverage, and Docker, CodeQL, Allure, Release Please, and Renovate states for each managed repository. Custom Allure and Release Please paths are reported as `custom`, not `missing`. Drift status and configuration-gap counts are reported independently in console, Markdown, and JSON. The Actions job summary renders the same inventory as a Markdown matrix with drift and missing-output details, and the workflow uploads a versioned `copier-fleet-audit.json` artifact for automation. JSON schema version 3 moves `codeql` out of the baseline set and reports it as a feature state; version 2 added `allure_report`. The baseline is therefore `validate.yml` and `gitleaks.yml`, and a repository that opted out of CodeQL no longer counts as missing a baseline file. Conditional outputs are classified as enabled, disabled, missing, custom, or unknown rather than treating absent legacy answers as false.
 
 ### Applying updates
 
@@ -80,7 +80,7 @@ Template updates reach a consumer through one of two paths, chosen by the consum
 
 ```console
 GH_TOKEN="$(gh auth token)" python scripts/update_copier_fleet.py --org quokkify --write
-gh workflow run copier-fleet-auto-update.yml --repo quokkify/project-toolkit -f dry-run=true
+gh workflow run copier-fleet-auto-update.yml --repo quokkify/ci-kit -f dry-run=true
 ```
 
 The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v2.21.5`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
@@ -144,7 +144,7 @@ For consumers that own their test workflow, call the trusted publisher at job le
 ```yaml
 jobs:
   allure:
-    uses: quokkify/project-toolkit/.github/workflows/allure-publisher-core.yml@RELEASE_TAG
+    uses: quokkify/ci-kit/.github/workflows/allure-publisher-core.yml@RELEASE_TAG
     permissions:
       actions: read
       contents: read
@@ -190,7 +190,7 @@ Use [`examples/release-single.yml`](../examples/release-single.yml) for one prod
 
 New Copier-generated projects extend selected presets from `quokkify/renovate-presets` by default. The repository slug comes from the `renovate_config_repository` Copier answer, so project teams can point new projects at their own shared Renovate preset repository while keeping the selected preset paths. The `renovate_presets` answer uses user-facing names: `default` maps to `//presets/base`, `python` to `//presets/python/default`, `javascript` to `//presets/npm/default`, `java` to `//presets/gradle/default`, `docker` to `//presets/docker/default`, and `github-actions` to `//presets/github-actions/default`.
 
-The bundled `github>quokkify/project-toolkit//renovate/default.json` preset remains available for toolkit-specific workflow reference updates. New generated projects intentionally follow the shared preset repository's default branch unless the generated `.github/renovate.json` is manually pinned to a tag or commit later.
+The bundled `github>quokkify/ci-kit//renovate/default.json` preset remains available for toolkit-specific workflow reference updates. New generated projects intentionally follow the shared preset repository's default branch unless the generated `.github/renovate.json` is manually pinned to a tag or commit later.
 
 The repository also manages versions that are easy to miss with Renovate's built-in managers:
 

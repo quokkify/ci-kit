@@ -71,7 +71,7 @@ def _require_list(value: Any, label: str) -> list[Any]:
 
 def managed_name(owner: str, repo: str) -> str:
     """Return the deterministic identity used to find this repository's managed ruleset."""
-    return f"project-toolkit/security/{owner}/{repo}"
+    return f"ci-kit/security/{owner}/{repo}"
 
 
 def build_desired(name: str, branch: str, checks: list[str], mode: str, codeql_threshold: str | None) -> dict[str, Any]:

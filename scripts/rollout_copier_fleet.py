@@ -41,7 +41,7 @@ def rollout(arguments: list[str]) -> None:
             raise GateError(f"Fleet updater stopped with exit code {result.returncode}")
         return
     if (args.org != "quokkify" or not args.public_only
-            or args.template_repository != "quokkify/project-toolkit"
+            or args.template_repository != "quokkify/ci-kit"
             or args.branch != "automation/copier-template-update"):
         raise GateError("Full rollout requires the public quokkify fleet and standard automation branch")
     if any(pilot in args.exclude for pilot in PILOT_CHECKS):

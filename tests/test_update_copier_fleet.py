@@ -203,15 +203,15 @@ class ProjectOwnedToolkitRefTests(TestCase):
         (workflows / "ci.yml").write_text(
             "jobs:\n"
             "  build:\n"
-            "    uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.14.0\n"
+            "    uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.14.0\n"
             "    steps:\n"
-            "      - uses: quokkify/project-toolkit/actions/setup-node@v2.14.0\n",
+            "      - uses: quokkify/ci-kit/actions/setup-node@v2.14.0\n",
             encoding="utf-8",
         )
         (workflows / "pinned.yml").write_text(
             "jobs:\n"
             "  build:\n"
-            "    uses: quokkify/project-toolkit/actions/setup-node@"
+            "    uses: quokkify/ci-kit/actions/setup-node@"
             + "a" * 40
             + " # v2.14.0\n",
             encoding="utf-8",
@@ -248,7 +248,7 @@ ANSWERS_TEMPLATE = ROOT / "template/.copier-answers.yml.jinja"
 ANSWERS_CORPUS = [
     {
         "_commit": "v2.25.0",
-        "_src_path": "https://github.com/quokkify/project-toolkit.git",
+        "_src_path": "https://github.com/quokkify/ci-kit.git",
         "allure_categories_file": "",
         "project_name": "App & Co",
         "flag": "on",
@@ -303,7 +303,7 @@ class AnswersFormatTests(TestCase):
     def test_format_matches_prettier_conventions(self) -> None:
         rendered = fleet.render_answers(ANSWERS_CORPUS[0])
         for line in [
-            "_src_path: https://github.com/quokkify/project-toolkit.git",
+            "_src_path: https://github.com/quokkify/ci-kit.git",
             'allure_categories_file: ""',
             'flag: "on"',
             '"Yes": "No"',
@@ -561,25 +561,41 @@ class ExplicitRepositoryVisibilityTests(TestCase):
 
 class TemplateSourceTests(TestCase):
     def test_accepts_supported_github_source_forms(self) -> None:
-        expected = "quokkify/project-toolkit"
+        expected = "quokkify/ci-kit"
         for source in (
-            "gh:quokkify/project-toolkit",
-            "https://github.com/quokkify/project-toolkit.git",
-            "git@github.com:quokkify/project-toolkit.git",
-            "ssh://git@github.com/quokkify/project-toolkit/",
+            "gh:quokkify/ci-kit",
+            "https://github.com/quokkify/ci-kit.git",
+            "git@github.com:quokkify/ci-kit.git",
+            "ssh://git@github.com/quokkify/ci-kit/",
         ):
             with self.subTest(source=source):
                 self.assertEqual(fleet.normalize_template_source(source), expected)
 
+    def test_renamed_repository_sources_resolve_to_ci_kit(self) -> None:
+        for source in ("https://github.com/quokkify/project-toolkit.git", "gh:quokkify/project-toolkit"):
+            with self.subTest(source=source):
+                self.assertEqual(fleet.normalize_template_source(source), "quokkify/ci-kit")
+
+    def test_renamed_source_is_rewritten_to_canonical_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            answers = repository / fleet.ANSWERS_FILE
+            answers.write_text("_commit: v2.25.0\n_src_path: https://github.com/quokkify/project-toolkit.git\n", encoding="utf-8")
+            self.assertTrue(fleet.canonicalize_answers_source(repository, "quokkify/ci-kit"))
+            self.assertEqual(
+                answers.read_text(encoding="utf-8"),
+                "_commit: v2.25.0\n_src_path: https://github.com/quokkify/ci-kit.git\n",
+            )
+
     def test_rejects_local_or_ambiguous_sources(self) -> None:
-        for source in ("../project-toolkit", "/tmp/template", "github.com/quokkify/project-toolkit"):
+        for source in ("../project-toolkit", "/tmp/template", "github.com/quokkify/ci-kit"):
             with self.subTest(source=source):
                 self.assertIsNone(fleet.normalize_template_source(source))
 
     def test_requires_answers_source(self) -> None:
         self.assertEqual(
-            fleet.parse_template_source("_src_path: gh:quokkify/project-toolkit\n"),
-            "gh:quokkify/project-toolkit",
+            fleet.parse_template_source("_src_path: gh:quokkify/ci-kit\n"),
+            "gh:quokkify/ci-kit",
         )
         with self.assertRaises(fleet.FleetUpdateError):
             fleet.parse_template_source("project_name: example\n")
@@ -589,16 +605,16 @@ class TemplateSourceTests(TestCase):
             repository = Path(temporary)
             answers = repository / fleet.ANSWERS_FILE
             answers.write_text(
-                "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\nproject_name: example\n",
+                "_commit: v2.8.2\n_src_path: gh:quokkify/ci-kit\nproject_name: example\n",
                 encoding="utf-8",
             )
             self.assertTrue(
-                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+                fleet.canonicalize_answers_source(repository, "quokkify/ci-kit")
             )
             self.assertEqual(
                 answers.read_text(encoding="utf-8"),
                 "_commit: v2.8.2\n"
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+                "_src_path: https://github.com/quokkify/ci-kit.git\n"
                 "project_name: example\n",
             )
 
@@ -606,10 +622,10 @@ class TemplateSourceTests(TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
             answers = repository / fleet.ANSWERS_FILE
-            content = "_commit: v2.8.2\n_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            content = "_commit: v2.8.2\n_src_path: https://github.com/quokkify/ci-kit.git\n"
             answers.write_text(content, encoding="utf-8")
             self.assertFalse(
-                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+                fleet.canonicalize_answers_source(repository, "quokkify/ci-kit")
             )
             self.assertEqual(answers.read_text(encoding="utf-8"), content)
 
@@ -618,27 +634,27 @@ class TemplateSourceTests(TestCase):
             repository = Path(temporary)
             answers = repository / fleet.ANSWERS_FILE
             answers.write_text(
-                "_src_path: gh:quokkify/project-toolkit\n"
-                "_src_path: gh:quokkify/project-toolkit\n",
+                "_src_path: gh:quokkify/ci-kit\n"
+                "_src_path: gh:quokkify/ci-kit\n",
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(fleet.FleetUpdateError, "exactly one"):
-                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+                fleet.canonicalize_answers_source(repository, "quokkify/ci-kit")
 
     def test_rejects_symlinked_answers_file(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
             target = repository / "target.yml"
             target.write_text(
-                "_src_path: gh:quokkify/project-toolkit\n",
+                "_src_path: gh:quokkify/ci-kit\n",
                 encoding="utf-8",
             )
             (repository / fleet.ANSWERS_FILE).symlink_to(target)
             with self.assertRaisesRegex(fleet.FleetUpdateError, "must not be a symlink"):
-                fleet.canonicalize_answers_source(repository, "quokkify/project-toolkit")
+                fleet.canonicalize_answers_source(repository, "quokkify/ci-kit")
             self.assertEqual(
                 target.read_text(encoding="utf-8"),
-                "_src_path: gh:quokkify/project-toolkit\n",
+                "_src_path: gh:quokkify/ci-kit\n",
             )
 
 
@@ -676,14 +692,14 @@ class TemplateUpdateTests(TestCase):
                     "HOME": str(cache_home),
                     "GIT_CONFIG_COUNT": "1",
                     "GIT_CONFIG_KEY_0": f"url.file://{legacy_template}/.insteadOf",
-                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
+                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/ci-kit.git",
                 }
             )
             subprocess.run(
                 [
                     "copier", "copy", "--trust", "--defaults", "--vcs-ref", legacy_revision,
                     "--data-file", str(data),
-                    "https://github.com/quokkify/project-toolkit.git", str(source),
+                    "https://github.com/quokkify/ci-kit.git", str(source),
                 ], check=True, text=True, capture_output=True, env=legacy_env,
             )
             subprocess.run(["git", "init", "-q"], cwd=source, check=True)
@@ -711,7 +727,7 @@ class TemplateUpdateTests(TestCase):
                     "HOME": str(update_home),
                     "GIT_CONFIG_COUNT": "1",
                     "GIT_CONFIG_KEY_0": f"url.file://{candidate_source}/.insteadOf",
-                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/project-toolkit.git",
+                    "GIT_CONFIG_VALUE_0": "https://github.com/quokkify/ci-kit.git",
                 }
             )
 
@@ -724,7 +740,7 @@ class TemplateUpdateTests(TestCase):
                  mock.patch.object(fleet, "push_automation_branch") as push_mock, \
                  mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
                 result = fleet.process_repository(
-                    repository, expected_template="quokkify/project-toolkit",
+                    repository, expected_template="quokkify/ci-kit",
                     branch="automation/copier-template-update", dry_run=False,
                     template_ref=current_revision, env=integration_env, workspace=generated,
                 )
@@ -762,12 +778,12 @@ class TemplateUpdateTests(TestCase):
                 "components:\n"
                 "  - type: java\n"
                 "    path: worker\n"
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+                "_src_path: https://github.com/quokkify/ci-kit.git\n"
             )
             answers.write_text(original, encoding="utf-8")
             fleet.update_template(
                 repository,
-                template_source="quokkify/project-toolkit",
+                template_source="quokkify/ci-kit",
                 template_ref="v2.21.5",
                 env={},
             )
@@ -798,12 +814,12 @@ class TemplateUpdateTests(TestCase):
             repository = Path(temporary)
             (repository / fleet.ANSWERS_FILE).write_text(
                 "components:\n  - type: python\n    path: 123-worker\n"
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                "_src_path: https://github.com/quokkify/ci-kit.git\n",
                 encoding="utf-8",
             )
             fleet.update_template(
                 repository,
-                template_source="quokkify/project-toolkit",
+                template_source="quokkify/ci-kit",
                 template_ref="v2.21.5",
                 env={},
             )
@@ -837,12 +853,12 @@ class TemplateUpdateTests(TestCase):
                 "    path: api/v1\n"
                 "  - type: python\n"
                 "    path: api-v1\n"
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                "_src_path: https://github.com/quokkify/ci-kit.git\n",
                 encoding="utf-8",
             )
             fleet.update_template(
                 repository,
-                template_source="quokkify/project-toolkit",
+                template_source="quokkify/ci-kit",
                 template_ref="v2.21.5",
                 env={},
             )
@@ -871,14 +887,14 @@ class TemplateUpdateTests(TestCase):
                 yaml.safe_dump(
                     {
                         "components": components,
-                        "_src_path": "https://github.com/quokkify/project-toolkit.git",
+                        "_src_path": "https://github.com/quokkify/ci-kit.git",
                     }
                 ),
                 encoding="utf-8",
             )
             fleet.update_template(
                 repository,
-                template_source="quokkify/project-toolkit",
+                template_source="quokkify/ci-kit",
                 template_ref="v2.21.5",
                 env={},
             )
@@ -908,12 +924,12 @@ class TemplateUpdateTests(TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
             (repository / fleet.ANSWERS_FILE).write_text(
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                "_src_path: https://github.com/quokkify/ci-kit.git\n",
                 encoding="utf-8",
             )
             fleet.update_template(
                 repository,
-                template_source="quokkify/project-toolkit",
+                template_source="quokkify/ci-kit",
                 template_ref="v2.8.1",
                 env={},
             )
@@ -930,7 +946,7 @@ class TemplateUpdateTests(TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repository_path = Path(temporary)
             (repository_path / fleet.ANSWERS_FILE).write_text(
-                "_src_path: https://github.com/quokkify/project-toolkit.git\n",
+                "_src_path: https://github.com/quokkify/ci-kit.git\n",
                 encoding="utf-8",
             )
             with mock.patch.object(
@@ -943,7 +959,7 @@ class TemplateUpdateTests(TestCase):
             ), mock.patch.object(fleet, "changed_paths", return_value=[]):
                 fleet.update_template(
                     repository_path,
-                    template_source="quokkify/project-toolkit",
+                    template_source="quokkify/ci-kit",
                     template_ref="v2.8.1",
                     env={},
                     repository=fleet.Repository("quokkify/example", "main"),
@@ -952,7 +968,7 @@ class TemplateUpdateTests(TestCase):
 
         original = (
             "_commit: v2.8.2\n"
-            "_src_path: https://github.com/quokkify/project-toolkit.git\n"
+            "_src_path: https://github.com/quokkify/ci-kit.git\n"
             "renovate_presets:\n"
             "  - default\n"
             "  - github-actions\n"
@@ -985,7 +1001,7 @@ class TemplateUpdateTests(TestCase):
         self,
         gh_json_mock: mock.Mock,
     ) -> None:
-        resolved = fleet.resolve_template_ref("quokkify/project-toolkit", None, env={})
+        resolved = fleet.resolve_template_ref("quokkify/ci-kit", None, env={})
 
         self.assertEqual(resolved, "v2.10.1")
         gh_json_mock.assert_called_once_with(
@@ -993,7 +1009,7 @@ class TemplateUpdateTests(TestCase):
                 "release",
                 "view",
                 "--repo",
-                "quokkify/project-toolkit",
+                "quokkify/ci-kit",
                 "--json",
                 "tagName",
             ],
@@ -1006,25 +1022,25 @@ class TemplateUpdateTests(TestCase):
         _: mock.Mock,
     ) -> None:
         with self.assertRaisesRegex(fleet.FleetUpdateError, "exact vMAJOR.MINOR.PATCH"):
-            fleet.resolve_template_ref("quokkify/project-toolkit", None, env={})
+            fleet.resolve_template_ref("quokkify/ci-kit", None, env={})
 
     def test_keeps_explicit_non_release_template_ref_for_preview(self) -> None:
         self.assertEqual(
-            fleet.resolve_template_ref("quokkify/project-toolkit", "feature/allure", env={}),
+            fleet.resolve_template_ref("quokkify/ci-kit", "feature/allure", env={}),
             "feature/allure",
         )
 
     @mock.patch.object(fleet, "gh_json", return_value={"sha": "a" * 40})
     def test_resolves_release_tag_to_its_commit(self, gh_json_mock: mock.Mock) -> None:
         resolved = fleet.resolve_template_commit(
-            "quokkify/project-toolkit", "v2.19.2", env={}
+            "quokkify/ci-kit", "v2.19.2", env={}
         )
 
         self.assertEqual(resolved, "a" * 40)
         gh_json_mock.assert_called_once_with(
             [
                 "api",
-                "repos/quokkify/project-toolkit/commits/v2.19.2",
+                "repos/quokkify/ci-kit/commits/v2.19.2",
                 "--jq",
                 "{sha: .sha}",
             ],
@@ -1034,7 +1050,7 @@ class TemplateUpdateTests(TestCase):
     @mock.patch.object(fleet, "gh_json", return_value={"sha": "not-a-commit"})
     def test_rejects_a_tag_that_does_not_resolve_to_a_commit(self, _: mock.Mock) -> None:
         with self.assertRaisesRegex(fleet.FleetUpdateError, "did not resolve to a commit"):
-            fleet.resolve_template_commit("quokkify/project-toolkit", "v2.19.2", env={})
+            fleet.resolve_template_commit("quokkify/ci-kit", "v2.19.2", env={})
 
 
 class ProjectOwnedToolkitRefTests(TestCase):
@@ -1053,7 +1069,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "publish-maven-central.yml"
             workflow.write_text(
-                "        uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                "        uses: quokkify/ci-kit/actions/setup-java-gradle@"
                 f"{self.OLD_COMMIT} # v2.19.1\n",
                 encoding="utf-8",
             )
@@ -1065,7 +1081,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             self.assertEqual(changed, [".github/workflows/publish-maven-central.yml"])
             self.assertEqual(
                 workflow.read_text(encoding="utf-8"),
-                "        uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                "        uses: quokkify/ci-kit/actions/setup-java-gradle@"
                 f"{self.NEW_COMMIT} # v2.19.2\n",
             )
 
@@ -1074,7 +1090,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "ci.yml"
             workflow.write_text(
-                "      uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@"
+                "      uses: quokkify/ci-kit/.github/workflows/java-ci.yml@"
                 f"{self.OLD_COMMIT} # v2.20.0\n",
                 encoding="utf-8",
             )
@@ -1085,7 +1101,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
 
             self.assertEqual(
                 workflow.read_text(encoding="utf-8"),
-                "      uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@"
+                "      uses: quokkify/ci-kit/.github/workflows/java-ci.yml@"
                 f"{self.NEW_COMMIT} # v2.19.2\n",
             )
 
@@ -1094,7 +1110,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "ci.yaml"
             workflow.write_text(
-                "      uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.19.1\n",
+                "      uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.19.1\n",
                 encoding="utf-8",
             )
 
@@ -1105,7 +1121,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             self.assertEqual(changed, [".github/workflows/ci.yaml"])
             self.assertEqual(
                 workflow.read_text(encoding="utf-8"),
-                "      uses: quokkify/project-toolkit/.github/workflows/node-ci.yml@v2.19.2\n",
+                "      uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.19.2\n",
             )
 
     def test_leaves_a_digest_pin_without_a_release_comment_alone(self) -> None:
@@ -1113,7 +1129,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "ci.yml"
             original = (
-                "      uses: quokkify/project-toolkit/actions/setup-node@"
+                "      uses: quokkify/ci-kit/actions/setup-node@"
                 f"{self.OLD_COMMIT}\n"
             )
             workflow.write_text(original, encoding="utf-8")
@@ -1147,7 +1163,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "ci.yml"
             original = (
-                "      uses: quokkify/project-toolkit/actions/setup-java-gradle@"
+                "      uses: quokkify/ci-kit/actions/setup-java-gradle@"
                 f"{self.NEW_COMMIT} # v2.19.2\n"
             )
             workflow.write_text(original, encoding="utf-8")
@@ -1164,7 +1180,7 @@ class ProjectOwnedToolkitRefTests(TestCase):
             repository = Path(temporary)
             workflow = self.workflows(repository) / "ci.yml"
             original = (
-                "      uses: quokkify/project-toolkit/actions/setup-python@"
+                "      uses: quokkify/ci-kit/actions/setup-python@"
                 f"{self.OLD_COMMIT} # v2.19.1\n"
             )
             workflow.write_text(original, encoding="utf-8")
@@ -1188,7 +1204,7 @@ class TemplateInventoryTests(TestCase):
             workflow = repository / ".github/workflows/java.yml"
             workflow.parent.mkdir(parents=True)
             workflow.write_text(
-                "jobs:\n  build:\n    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.21.2\n"
+                "jobs:\n  build:\n    uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v2.21.2\n"
                 "    with:\n      working-directory: backend\n",
                 encoding="utf-8",
             )
@@ -1201,7 +1217,7 @@ class TemplateInventoryTests(TestCase):
             workflow = repository / ".github/workflows/ci.yml"
             workflow.parent.mkdir(parents=True)
             workflow.write_text(
-                "jobs:\n  test:\n    uses: quokkify/project-toolkit/.github/workflows/python-ci.yml@v2\n"
+                "jobs:\n  test:\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v2\n"
                 "    with:\n      working-directory: backend\n",
                 encoding="utf-8",
             )
@@ -1903,7 +1919,7 @@ class TemplateInventoryTests(TestCase):
     def test_symlinked_parent_directory_does_not_materialize_outputs(self) -> None:
         raw_answers = (
             "_commit: v2.8.2\n"
-            "_src_path: gh:quokkify/project-toolkit\n"
+            "_src_path: gh:quokkify/ci-kit\n"
             "release_please: true\n"
             "renovate: true\n"
         )
@@ -2010,7 +2026,7 @@ class RepositoryProcessingTests(TestCase):
     def test_skips_repository_without_answers(self, _: mock.Mock) -> None:
         result = fleet.process_repository(
             fleet.Repository("quokkify/plain", "main"),
-            expected_template="quokkify/project-toolkit",
+            expected_template="quokkify/ci-kit",
             branch=fleet.DEFAULT_BRANCH,
             dry_run=True,
             template_ref=None,
@@ -2027,7 +2043,7 @@ class RepositoryProcessingTests(TestCase):
     def test_skips_foreign_template(self, _: mock.Mock) -> None:
         result = fleet.process_repository(
             fleet.Repository("quokkify/foreign", "main"),
-            expected_template="quokkify/project-toolkit",
+            expected_template="quokkify/ci-kit",
             branch=fleet.DEFAULT_BRANCH,
             dry_run=True,
             template_ref=None,
@@ -2045,7 +2061,7 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(
         fleet,
         "fetch_answers",
-        return_value="_src_path: gh:quokkify/project-toolkit\n",
+        return_value="_src_path: gh:quokkify/ci-kit\n",
     )
     def test_revalidates_template_source_from_cloned_revision(
         self,
@@ -2057,7 +2073,7 @@ class RepositoryProcessingTests(TestCase):
             with self.assertRaisesRegex(fleet.FleetUpdateError, "changed to a different template"):
                 fleet.process_repository(
                     fleet.Repository("quokkify/example", "main"),
-                    expected_template="quokkify/project-toolkit",
+                    expected_template="quokkify/ci-kit",
                     branch=fleet.DEFAULT_BRANCH,
                     dry_run=True,
                     template_ref=None,
@@ -2072,14 +2088,14 @@ class RepositoryProcessingTests(TestCase):
         "clone_repository",
         side_effect=cloned_answers(
             "_commit: v2.8.2\n"
-            "_src_path: gh:quokkify/project-toolkit\n"
+            "_src_path: gh:quokkify/ci-kit\n"
             "components: []\n"
         ),
     )
     @mock.patch.object(
         fleet,
         "fetch_answers",
-        return_value="_src_path: gh:quokkify/project-toolkit\n",
+        return_value="_src_path: gh:quokkify/ci-kit\n",
     )
     def test_preserves_inventory_when_copier_update_fails(
         self,
@@ -2091,7 +2107,7 @@ class RepositoryProcessingTests(TestCase):
             with self.assertRaisesRegex(fleet.RepositoryProcessError, "conflict") as raised:
                 fleet.process_repository(
                     fleet.Repository("quokkify/example", "main"),
-                    expected_template="quokkify/project-toolkit",
+                    expected_template="quokkify/ci-kit",
                     branch=fleet.DEFAULT_BRANCH,
                     dry_run=True,
                     template_ref=None,
@@ -2106,7 +2122,7 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(
         fleet,
         "fetch_answers",
-        return_value="_src_path: gh:quokkify/project-toolkit\n",
+        return_value="_src_path: gh:quokkify/ci-kit\n",
     )
     def test_dry_run_reports_changes_without_push(
         self,
@@ -2115,12 +2131,12 @@ class RepositoryProcessingTests(TestCase):
         update_mock: mock.Mock,
     ) -> None:
         clone_mock.side_effect = cloned_answers(
-            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+            "_commit: v2.8.2\n_src_path: gh:quokkify/ci-kit\n"
         )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
-                expected_template="quokkify/project-toolkit",
+                expected_template="quokkify/ci-kit",
                 branch=fleet.DEFAULT_BRANCH,
                 dry_run=True,
                 template_ref="v3.0.0",
@@ -2132,7 +2148,7 @@ class RepositoryProcessingTests(TestCase):
         clone_mock.assert_called_once()
         self.assertEqual(update_mock.call_args.kwargs["template_ref"], "v3.0.0")
         self.assertEqual(
-            update_mock.call_args.kwargs["template_source"], "quokkify/project-toolkit"
+            update_mock.call_args.kwargs["template_source"], "quokkify/ci-kit"
         )
 
     @mock.patch.object(fleet, "ensure_pull_request", return_value="https://github.com/quokkify/example/pull/1")
@@ -2142,7 +2158,7 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(
         fleet,
         "fetch_answers",
-        return_value="_src_path: gh:quokkify/project-toolkit\n",
+        return_value="_src_path: gh:quokkify/ci-kit\n",
     )
     def test_write_mode_pushes_branch_and_returns_pull_request(
         self,
@@ -2153,12 +2169,12 @@ class RepositoryProcessingTests(TestCase):
         pull_request_mock: mock.Mock,
     ) -> None:
         clone_mock.side_effect = cloned_answers(
-            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+            "_commit: v2.8.2\n_src_path: gh:quokkify/ci-kit\n"
         )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
-                expected_template="gh:quokkify/project-toolkit.git",
+                expected_template="gh:quokkify/ci-kit.git",
                 branch=fleet.DEFAULT_BRANCH,
                 dry_run=False,
                 template_ref=None,
@@ -2179,7 +2195,7 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(
         fleet,
         "fetch_answers",
-        return_value="_src_path: gh:quokkify/project-toolkit\n",
+        return_value="_src_path: gh:quokkify/ci-kit\n",
     )
     def test_up_to_date_repository_does_not_push(
         self,
@@ -2190,12 +2206,12 @@ class RepositoryProcessingTests(TestCase):
         pull_request_mock: mock.Mock,
     ) -> None:
         clone_mock.side_effect = cloned_answers(
-            "_commit: v2.8.2\n_src_path: gh:quokkify/project-toolkit\n"
+            "_commit: v2.8.2\n_src_path: gh:quokkify/ci-kit\n"
         )
         with tempfile.TemporaryDirectory() as temporary:
             result = fleet.process_repository(
                 fleet.Repository("quokkify/example", "main"),
-                expected_template="quokkify/project-toolkit",
+                expected_template="quokkify/ci-kit",
                 branch=fleet.DEFAULT_BRANCH,
                 dry_run=False,
                 template_ref=None,
@@ -2350,7 +2366,7 @@ class ReleaseHelperDriftTests(TestCase):
         helper.parent.mkdir(parents=True)
         helper.write_text("canonical helper\n", encoding="utf-8")
         run_mock.return_value = type("Result", (), {"stdout": "canonical helper\n"})()
-        fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+        fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})
 
     @mock.patch.object(fleet, "run")
     def test_stale_helper_fails_closed_with_reconciliation_guidance(self, run_mock: mock.Mock) -> None:
@@ -2359,11 +2375,11 @@ class ReleaseHelperDriftTests(TestCase):
         helper.write_text("stale helper\n", encoding="utf-8")
         run_mock.return_value = type("Result", (), {"stdout": "canonical helper\n"})()
         with self.assertRaisesRegex(fleet.FleetUpdateError, "customized changes"):
-            fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+            fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})
 
     def test_missing_release_helper_fails_when_feature_is_enabled(self) -> None:
         with self.assertRaisesRegex(fleet.FleetUpdateError, "release_please is enabled"):
-            fleet.verify_release_helper(self.repository, "quokkify/project-toolkit", "v2.23.0", env={})
+            fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})
 
 
 if __name__ == "__main__":

@@ -120,7 +120,7 @@ class PilotGateTests(unittest.TestCase):
                 gate.pilot_ready(REPO, SHA, ("Tests",))
 
     def test_no_change_verifies_version_and_freshness(self):
-        payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/project-toolkit\n").decode()}
+        payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n").decode()}
         with patch.object(gate, "current_snapshot", side_effect=[(SHA, "", ""), (OTHER, "", "")]), \
              patch.object(gate, "api", return_value=payload), patch.object(gate, "wait_until"):
             with self.assertRaises(gate.GateError):

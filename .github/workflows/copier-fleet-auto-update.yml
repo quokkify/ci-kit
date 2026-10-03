@@ -17,7 +17,7 @@ on:
         type: string
         required: false
       template-ref:
-        description: Optional project-toolkit ref; empty uses the latest released tag.
+        description: Optional ci-kit ref; empty uses the latest released tag.
         type: string
         required: false
       dry-run:
@@ -32,7 +32,7 @@ on:
         type: string
         required: false
       template-ref:
-        description: Optional project-toolkit ref; empty uses the latest released tag.
+        description: Optional ci-kit ref; empty uses the latest released tag.
         type: string
         required: false
       dry-run:
@@ -54,11 +54,11 @@ concurrency:
 jobs:
   update:
     name: Update Copier fleet and create PRs
-    if: ${{ github.repository == 'quokkify/project-toolkit' }}
+    if: ${{ github.repository == 'quokkify/ci-kit' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Check out project-toolkit
+      - name: Check out ci-kit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -88,7 +88,7 @@ jobs:
             --public-only
             --include-health
             --exclude quokkify/.github
-            --exclude quokkify/project-toolkit
+            --exclude quokkify/ci-kit
             --branch automation/copier-template-update
           )
           if [[ "${DRY_RUN:-}" == "true" ]]; then

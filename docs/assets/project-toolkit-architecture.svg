@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
-  <title id="title">project-toolkit architecture</title>
-  <desc id="desc">A consuming repository uses versioned project-toolkit workflows and composite actions. Copier creates local project files, Renovate proposes updates, Release Please publishes immutable releases, and a read-only fleet audit detects template drift.</desc>
+  <title id="title">ci-kit architecture</title>
+  <desc id="desc">A consuming repository uses versioned ci-kit workflows and composite actions. Copier creates local project files, Renovate proposes updates, Release Please publishes immutable releases, and a read-only fleet audit detects template drift.</desc>
   <defs>
     <linearGradient id="blue" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#2563eb"/><stop offset="1" stop-color="#1d4ed8"/></linearGradient>
     <linearGradient id="violet" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#5b21b6"/></linearGradient>
@@ -18,7 +18,7 @@
   <text x="88" y="374" class="small">Owns triggers, paths, permissions</text>
 
   <rect x="450" y="120" width="300" height="310" rx="18" fill="url(#blue)"/>
-  <text x="480" y="166" class="label white">project-toolkit</text>
+  <text x="480" y="166" class="label white">ci-kit</text>
   <text x="480" y="192" class="small white">versioned GitHub repository</text>
   <rect x="480" y="220" width="240" height="52" rx="10" fill="#fff" fill-opacity=".95"/><text x="500" y="252" font-size="16" font-weight="700">Reusable workflows</text>
   <rect x="480" y="284" width="240" height="52" rx="10" fill="#fff" fill-opacity=".95"/><text x="500" y="316" font-size="16" font-weight="700">Composite actions</text>
