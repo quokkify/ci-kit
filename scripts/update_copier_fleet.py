@@ -1419,6 +1419,9 @@ TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+
 TOOLKIT_DIGEST_REFERENCE = re.compile(
     rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
 )
+RENAMED_TOOLKIT_REFERENCE = re.compile(
+    r"(?<![\w./-])(" + "|".join(re.escape(name) for name in RENAMED_TEMPLATE_REPOSITORIES) + r")/(?=(?:\.github/workflows|actions)/[^@\s]+@)"
+)
 
 
 def bump_project_owned_toolkit_refs(
@@ -1441,7 +1444,8 @@ def bump_project_owned_toolkit_refs(
     names the recorded toolkit_version, so leaving the comment behind is the same failure
     as leaving a stale tag behind, and neither this update nor the Renovate bump can pass
     that check on its own. A digest pin without a release comment is left alone, since
-    nothing identifies which release it was meant to track.
+    nothing identifies which release it was meant to track. References that still use a
+    renamed toolkit repository name are moved to the current name first.
 
     ``resolve_commit`` runs at most once, and only when a digest pin is present, so a
     fleet of tag-only consumers costs no extra API call.
@@ -1451,7 +1455,8 @@ def bump_project_owned_toolkit_refs(
     workflows = repository_path / ".github" / "workflows"
     for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
         original = workflow.read_text(encoding="utf-8")
-        updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", original)
+        updated = RENAMED_TOOLKIT_REFERENCE.sub(lambda match: RENAMED_TEMPLATE_REPOSITORIES[match.group(1)] + "/", original)
+        updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", updated)
         if resolve_commit is not None and TOOLKIT_DIGEST_REFERENCE.search(updated):
             if commit is None:
                 commit = resolve_commit()

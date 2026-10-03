@@ -49,4 +49,4 @@ jobs:
       managed-pages-layout: true
       pr-number: {% raw %}${{ needs.report.outputs.pr-number }}{% endraw %}
       pages-destination-directory: {% raw %}${{ format('allure/pr-{0}', needs.report.outputs.pr-number) }}{% endraw %}
-{% endif %}
+{% endif -%}
