@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -237,7 +238,7 @@ class AllurePublicationRuntimeTests(TestCase):
 HISTORY_SELECTOR_HARNESS = r"""
 const fixture = JSON.parse(process.argv[1]);
 const body = JSON.parse(process.argv[2]);
-const context = {repo: {owner: 'example', repo: 'project'}, runId: 99};
+const context = {repo: {owner: 'example', repo: 'project'}, runId: 99, payload: {workflow_run: {workflow_id: fixture.source_workflow_id ?? 3}}};
 const requests = [], failures = [], notices = [], infos = [];
 const outputs = {};
 const github = {
@@ -275,7 +276,7 @@ def history_run(identifier: int, **overrides) -> dict:
             'conclusion': 'success', **overrides}
 
 
-def history_artifact(identifier: int, run_id: int, name: str = 'allure-history-pr-42', **overrides) -> dict:
+def history_artifact(identifier: int, run_id: int, name: str = 'allure-history-3-pr-42', **overrides) -> dict:
     return {'id': identifier, 'name': name, 'size_in_bytes': 512, 'expired': False,
             'workflow_run': {'id': run_id, 'repository_id': 1, 'head_repository_id': 1}, **overrides}
 
@@ -295,10 +296,10 @@ class AllureHistoryTransportTests(TestCase):
         outcome = self.select({})
         self.assertEqual(outcome['failures'], [])
         self.assertEqual(outcome['outputs']['found'], 'false')
-        self.assertEqual(outcome['outputs']['artifact-name'], 'allure-history-pr-42')
+        self.assertEqual(outcome['outputs']['artifact-name'], 'allure-history-3-pr-42')
         self.assertIn('this report starts a new history', outcome['notices'][0])
         listing = next(request for request in outcome['requests'] if request['operation'] == 'repo-artifacts')
-        self.assertEqual(listing['params']['name'], 'allure-history-pr-42')
+        self.assertEqual(listing['params']['name'], 'allure-history-3-pr-42')
 
     def test_selects_newest_accepted_run_of_the_same_workflow_and_pull_request(self) -> None:
         runs = {'99': history_run(99, status='in_progress', conclusion=None),
@@ -307,14 +308,14 @@ class AllureHistoryTransportTests(TestCase):
                 '93': history_run(93), '90': history_run(90), '120': history_run(120)}
         artifacts = [history_artifact(1, 90), history_artifact(2, 93), history_artifact(3, 95), history_artifact(4, 96),
                      history_artifact(5, 97), history_artifact(6, 98), history_artifact(7, 99), history_artifact(8, 120),
-                     history_artifact(9, 94, expired=True), history_artifact(10, 98, name='allure-history-pr-7'),
+                     history_artifact(9, 94, expired=True), history_artifact(10, 98, name='allure-history-3-pr-7'),
                      history_artifact(11, 98), history_artifact(12, 92, workflow_run={'id': 92, 'repository_id': 1,
                                                                                     'head_repository_id': 2})]
         outcome = self.select({'runs': runs, 'artifacts': artifacts})
         self.assertEqual(outcome['failures'], [])
         self.assertEqual(outcome['outputs']['found'], 'true')
         self.assertEqual(outcome['outputs']['source-run-id'], '93')
-        self.assertEqual(json.loads(outcome['outputs']['artifact_manifest']), [{'name': 'allure-history-pr-42', 'id': 2}])
+        self.assertEqual(json.loads(outcome['outputs']['artifact_manifest']), [{'name': 'allure-history-3-pr-42', 'id': 2}])
         inspected = [request['run_id'] for request in outcome['requests'] if request['operation'] == 'getWorkflowRun']
         self.assertEqual(inspected, [99, 98, 97, 96, 95, 93])
 
@@ -346,6 +347,15 @@ class AllureHistoryTransportTests(TestCase):
             self.assertTrue(outcome['failures'], unsafe)
             self.assertEqual([request for request in outcome['requests'] if request['operation'] == 'repo-artifacts'], [])
         self.assertTrue(self.select({}, pr_number='')['failures'])
+        for invalid in (0, 'x'):
+            self.assertTrue(self.select({'source_workflow_id': invalid})['failures'], invalid)
+
+    def test_history_streams_are_separated_by_source_workflow(self) -> None:
+        runs = {'99': history_run(99, status='in_progress', conclusion=None), '93': history_run(93)}
+        outcome = self.select({'runs': runs, 'source_workflow_id': 4,
+                               'artifacts': [history_artifact(2, 93, name='allure-history-3-pr-42')]})
+        self.assertEqual(outcome['outputs']['artifact-name'], 'allure-history-4-pr-42')
+        self.assertEqual(outcome['outputs']['found'], 'false')
 
     def test_restore_steps_are_gated_bounded_and_read_only(self) -> None:
         names = [step.get('name') for step in CORE['jobs']['generate']['steps']]
@@ -462,6 +472,47 @@ class AllureHistoryTransportTests(TestCase):
         legacy = yaml.safe_load((ROOT / '.github/workflows/allure-publisher.yml').read_text())
         self.assertEqual(legacy[True]['workflow_call']['inputs']['history-path']['default'], '')
         self.assertEqual(legacy['jobs']['report']['with']['history-path'], '${{ inputs.history-path }}')
+
+
+def concurrency_group(text: str, values: dict[str, str]) -> str:
+    group = yaml.safe_load(text)['concurrency']['group']
+    return re.sub(r'\$\{\{\s*([^}]+?)\s*\}\}', lambda match: values[match.group(1)], group)
+
+
+class AllureConcurrencyTests(TestCase):
+    """A report triggered by one source workflow must not cancel the report of another source workflow."""
+
+    def groups(self, trigger: int, source_path: str, branch: str = 'feature') -> dict[str, str]:
+        values = {'github.event.workflow_run.workflow_id': str(trigger),
+                  'github.event.workflow_run.head_repository.id': '1',
+                  'github.event.workflow_run.head_branch': branch,
+                  'inputs.source-workflow-path': source_path}
+        caller = jinja2.Environment().from_string(
+            (ROOT / 'templates/project/template/.github/workflows/allure-report.yml.jinja').read_text()).render(
+            toolkit_version='v99.0.0', components=[], allure_external_workflow_name='Run tests',
+            allure_external_workflow_path='.github/workflows/test.yml', allure_external_artifact_prefix='allure-results-',
+            allure_external_artifact_min_count=1, allure_external_artifact_max_count=7, allure_categories_file='',
+            allure_publish_pages=False, allure_pages_url='')
+        return {'caller': concurrency_group(caller, values),
+                'core': concurrency_group(CORE_PATH.read_text(), values),
+                'legacy': concurrency_group((ROOT / '.github/workflows/allure-publisher.yml').read_text(), values)}
+
+    def test_sibling_sources_never_share_a_cancelling_group(self) -> None:
+        validate, run_tests = 11, 12
+        validate_report = self.groups(validate, '.github/workflows/validate.yml')
+        run_tests_report = self.groups(run_tests, '.github/workflows/test.yml')
+        validate_call_on_run_tests = self.groups(run_tests, '.github/workflows/validate.yml')
+        for level in ('caller', 'core', 'legacy'):
+            self.assertNotEqual(validate_report[level], run_tests_report[level], level)
+        self.assertNotEqual(validate_call_on_run_tests['core'], run_tests_report['core'])
+        self.assertNotEqual(validate_call_on_run_tests['core'], validate_report['core'])
+
+    def test_newer_commit_of_the_same_source_still_supersedes_the_older_report(self) -> None:
+        first = self.groups(12, '.github/workflows/test.yml')
+        self.assertEqual(first, self.groups(12, '.github/workflows/test.yml'))
+        self.assertNotEqual(first['core'], self.groups(12, '.github/workflows/test.yml', branch='other')['core'])
+        for source in (CORE, yaml.safe_load((ROOT / '.github/workflows/allure-publisher.yml').read_text())):
+            self.assertTrue(source['concurrency']['cancel-in-progress'])
 
 
 class AllureCallerContracts(TestCase):

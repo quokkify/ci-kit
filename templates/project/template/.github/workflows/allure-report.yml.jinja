@@ -8,7 +8,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: allure-report-{% raw %}${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}{% endraw %}
+  group: allure-report-{% raw %}${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}{% endraw %}
   cancel-in-progress: true
 
 jobs:

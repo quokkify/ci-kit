@@ -77,7 +77,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: allure-publisher-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  group: allure-publisher-${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 jobs:

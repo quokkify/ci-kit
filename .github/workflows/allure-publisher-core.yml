@@ -85,7 +85,7 @@ on:
         required: false
 permissions: {}
 concurrency:
-  group: allure-publisher-core-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
+  group: allure-publisher-core-${{ github.event.workflow_run.workflow_id }}-${{ inputs.source-workflow-path }}-${{ github.event.workflow_run.head_repository.id }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 jobs:
   resolve:
@@ -326,11 +326,12 @@ jobs:
             core.setFailed(`history-path must be a workspace-relative <directory>/<file>.jsonl outside report paths: ${historyPath}`);
             return;
           }
-          if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
-            core.setFailed("History scope requires the resolved pull request number.");
+          const sourceWorkflowId = Number(context.payload.workflow_run?.workflow_id);
+          if (!Number.isSafeInteger(prNumber) || prNumber <= 0 || !Number.isSafeInteger(sourceWorkflowId) || sourceWorkflowId <= 0) {
+            core.setFailed("History scope requires the resolved pull request number and source workflow.");
             return;
           }
-          const name = `allure-history-pr-${prNumber}`;
+          const name = `allure-history-${sourceWorkflowId}-pr-${prNumber}`;
           core.setOutput("artifact-name", name);
           core.setOutput("found", "false");
           const runs = new Map();
