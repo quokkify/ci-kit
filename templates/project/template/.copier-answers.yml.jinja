@@ -1,1 +1,5 @@
 {{ _copier_answers | to_nice_yaml -}}
+{% if q4j_tests %}
+# Toolkit-owned metadata protects the installed test directory during updates.
+q4j_installed_path: {{ q4j_tests_path | to_json }}
+{% endif -%}

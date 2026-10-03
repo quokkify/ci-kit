@@ -1,0 +1,9 @@
+[versions]
+q4j = "0.7.0"
+testng = "7.12.0"
+checkstyle = "14.1.0"
+
+[libraries]
+q4j-config = { module = "dev.quokkify:config", version.ref = "q4j" }
+testng = { module = "org.testng:testng", version.ref = "testng" }
+checkstyle = { module = "com.puppycrawl.tools:checkstyle", version.ref = "checkstyle" }

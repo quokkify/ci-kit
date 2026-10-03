@@ -109,6 +109,14 @@ The split is by file, not by manager: Renovate in the generated project keeps fu
 
 `scripts/validate.py` fails when the shared preset and the set of template workflows disagree, so a new template workflow cannot ship without extending that rule. A project pointing at a different preset repository through `renovate_config_repository` does not receive the rule and must carry its own equivalent.
 
+### Optional Q4J test automation
+
+Set `q4j_tests: true` to add a standalone Java 21 / Gradle test project under
+`test-automation/`, with Q4J configuration and a minimal TestNG example. Set
+`q4j_tests_path` to choose another root folder. See
+[Q4J test automation](q4j-tests.md) for the generated layout, extension points, and
+the build, compilation, and Checkstyle checks used by the toolkit.
+
 ### CodeQL languages
 
 The generated CodeQL workflow scans `actions` plus the languages implied by `components`. A repository that builds real source without describing it through `components` therefore gets `actions` only, and its application code is silently not scanned. Set `codeql_languages` to an explicit list to say what CodeQL should analyze:

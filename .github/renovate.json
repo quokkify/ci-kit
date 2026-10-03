@@ -4,6 +4,7 @@
     "github>quokkify/project-toolkit//renovate/default.json",
     "github>quokkify/renovate-presets//presets/github-actions/default"
   ],
+  "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",
   "semanticCommitType": "{{#if (equals depName 'quokkify/project-toolkit')}}docs{{else}}chore{{/if}}",
   "semanticCommitScope": "deps",

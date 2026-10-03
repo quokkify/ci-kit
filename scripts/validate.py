@@ -487,7 +487,7 @@ def validate_toolkit_workflow_errors(
             "needs": {"detect-runner", "lint"},
         },
         "java": {
-            "setups": {"actions/setup-java"},
+            "setups": {"actions/setup-java", "actions/setup-python"},
             "command": "bash scripts/validate_java_fixture.sh",
             "needs": {"detect-runner", "lint"},
         },
@@ -552,6 +552,10 @@ def validate_toolkit_workflow_errors(
                 f"{name} job must run only its focused validation entrypoint",
             )
         if name == "java":
+            require(
+                "python scripts/validate_q4j_fixture.py" in commands,
+                "java CI validation must render and compile the q4j starter",
+            )
             java_steps = [
                 step
                 for step in steps
@@ -2230,7 +2234,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             not generated_readme.endswith("\n\n"),
             f"{scenario}: README has a trailing blank line that blocks Copier rollout",
         )
-        for owned in ("README.md", ".github/renovate.json"):
+        for owned in ("/README.md", ".github/renovate.json"):
             check(
                 owned in skip_if_exists,
                 f"copier.yml must keep {owned} in _skip_if_exists so an update never "
@@ -2942,6 +2946,7 @@ if not ARGS.static:
         ("Python", validate_python_fixture),
         ("Node.js", lambda: run(["node", "scripts/validate_node_fixture.mjs"])),
         ("Java", lambda: run(["bash", "scripts/validate_java_fixture.sh"])),
+        ("q4j", lambda: run([sys.executable, "scripts/validate_q4j_fixture.py"])),
     )
     for language, validate_fixture in fixture_commands:
         try:
