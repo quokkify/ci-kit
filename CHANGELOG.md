@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.0.1](https://github.com/quokkify/ci-kit/compare/v3.0.0...v3.0.1) (2026-10-03)
+
+
+### 🐛 Bug Fixes
+
+* **template:** keep v3 generated files lint-clean and follow the rename ([#368](https://github.com/quokkify/ci-kit/issues/368)) ([f395512](https://github.com/quokkify/ci-kit/commit/f395512952fba0381ee8beff476d7b62a08800d8))
+
+
+### 🧹 Chores
+
+* **deps:** update renovate to v44.132.4 ([#360](https://github.com/quokkify/ci-kit/issues/360)) ([a0fe427](https://github.com/quokkify/ci-kit/commit/a0fe42734dc18f50d58873bce17401394e5614a4))
+* **deps:** update uv to v0.12.23 ([#359](https://github.com/quokkify/ci-kit/issues/359)) ([0f9d4b2](https://github.com/quokkify/ci-kit/commit/0f9d4b26bf38bfbff23da99446a02d6e74b4db10))
+
 ## [3.0.0](https://github.com/quokkify/ci-kit/compare/v2.25.0...v3.0.0) (2026-10-03)
 
 <!-- project-toolkit:rich-block:start -->
