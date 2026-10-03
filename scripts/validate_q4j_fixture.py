@@ -103,6 +103,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
             ".gitattributes", "build.gradle", "gradle/compilation.gradle", "gradle/dependencies.gradle",
             "gradle/tests.gradle", "gradle/libs.versions.toml", "gradle/code-analysis.gradle",
             "tools/checkstyle/checkstyle.xml", "tools/checkstyle/suppressions.xml",
+            "tools/spotbugs/excludeFilter.xml",
         ):
             assert (starter / name).read_bytes() == (template_starter / name).read_bytes(), (
                 f"generation changed project-owned Gradle configuration: {name}"
@@ -117,7 +118,10 @@ def validate_q4j_fixture(static: bool = False) -> None:
         assert catalog["libraries"]["checkstyle"] == {
             "module": "com.puppycrawl.tools:checkstyle", "version": {"ref": "checkstyle"},
         }, "catalog must pin the Checkstyle tool used by code analysis"
-        for dependency in ("q4j", "testng", "checkstyle"):
+        assert catalog["plugins"]["spotbugs"] == {
+            "id": "com.github.spotbugs", "version": {"ref": "spotbugs-plugin"},
+        }, "catalog must pin the SpotBugs Gradle plugin"
+        for dependency in ("q4j", "testng", "checkstyle", "spotbugs-plugin"):
             assert re.fullmatch(
                 r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",
                 catalog["versions"][dependency],
@@ -127,7 +131,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
         if not static:
             run([
                 "./gradlew", "--no-daemon", "assemble", "testClasses",
-                "checkstyleMain", "checkstyleTest",
+                "checkstyleMain", "checkstyleTest", "spotbugsMain", "spotbugsTest",
             ], starter)
 
         init_git(destination)
@@ -182,7 +186,7 @@ def validate_q4j_fixture(static: bool = False) -> None:
         assert "Updated toolkit fixture content" in (starter / "README.md").read_text(), "README must update"
         updated_answers = yaml.safe_load((destination / ".copier-answers.yml").read_text())
         assert updated_answers["q4j_installed_path"] == "test-automation", "update must retain ownership metadata"
-    print("q4j fixture: OK" + (" (static)" if static else " (compile and Checkstyle only)"))
+    print("q4j fixture: OK" + (" (static)" if static else " (compile, Checkstyle, and SpotBugs only)"))
 
 
 if __name__ == "__main__":
