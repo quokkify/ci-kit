@@ -1389,11 +1389,43 @@ def update_template(
                 template_source, template_ref, env=env
             ),
         )
-    rejected = sorted(repository_path.rglob("*.rej"))
+    rejected = [
+        path
+        for path in sorted(repository_path.rglob("*.rej"))
+        if not discard_if_already_applied(repository_path, path)
+    ]
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
         raise FleetUpdateError(f"Copier produced conflict files: {names}")
     return changed_paths(repository_path)
+
+
+def discard_if_already_applied(repository_path: Path, rejected: Path) -> bool:
+    """Delete a Copier .rej whose hunks the project already carries.
+
+    A project that already made the template's change locally (for example a lint fix
+    that dropped a trailing blank line) rejects the same change from the template,
+    although nothing is left to apply. When every rejected hunk applies in reverse, the
+    file is already in the template's new state and the conflict is not real.
+    """
+    target = rejected.with_suffix("").relative_to(repository_path).as_posix()
+    try:
+        lines = rejected.read_text(encoding="utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return False
+    if not lines or not lines[0].startswith("diff "):
+        return False
+    patch = f"--- a/{target}\n+++ b/{target}\n" + "".join(lines[1:])
+    with tempfile.NamedTemporaryFile("w", suffix=".diff", encoding="utf-8", delete=False) as handle:
+        handle.write(patch)
+    try:
+        completed = run(["git", "apply", "--check", "--reverse", handle.name], cwd=repository_path, check=False)
+    finally:
+        os.unlink(handle.name)
+    if completed.returncode:
+        return False
+    rejected.unlink()
+    return True
 
 
 def authenticated_git() -> list[str]:
