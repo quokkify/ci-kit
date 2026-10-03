@@ -47,7 +47,7 @@ toolkit_version:
   # Fresh copies use the selected immutable template tag, including Copier's
   # automatic latest-tag selection. Existing answers still take precedence.
   default: "{{ _copier_answers.get('_commit', '') if (_copier_answers.get('_commit', '') | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) else 'v2.23.5' }}"
-  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.24.0{% endif %}"
+  validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v2.25.0{% endif %}"
 
 components:
   type: yaml
