@@ -111,11 +111,7 @@ The split is by file, not by manager: Renovate in the generated project keeps fu
 
 ### Optional Q4J test automation
 
-Set `q4j_tests: true` to add a standalone Java 21 / Gradle test project under
-`test-automation/`, with Q4J configuration and a minimal TestNG example. Set
-`q4j_tests_path` to choose another root folder. See
-[Q4J test automation](q4j-tests.md) for the generated layout, extension points, and
-the build, compilation, and Checkstyle checks used by the toolkit.
+Java/q4j test automation is a separate template, [quokkify/java-test-automation-template](https://github.com/quokkify/java-test-automation-template). Generate it into its own folder, for example `copier copy gh:quokkify/java-test-automation-template test-automation`. Add `java` to `renovate_presets` if Renovate should maintain it.
 
 ### CodeQL languages
 

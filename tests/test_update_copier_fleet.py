@@ -286,7 +286,7 @@ def render_answers_template(answers: dict) -> str:
         extensions=["jinja2_ansible_filters.AnsibleCoreFiltersExtension"], keep_trailing_newline=True
     )
     return environment.from_string(ANSWERS_TEMPLATE.read_text(encoding="utf-8")).render(
-        _copier_answers=answers, q4j_tests=False
+        _copier_answers=answers
     )
 
 
@@ -325,14 +325,14 @@ class AnswersFormatTests(TestCase):
 
     def test_changed_answers_are_rewritten_without_single_quotes(self) -> None:
         original = '_commit: v2.24.0\nallure_categories_file: ""\n'
-        copier_serialized = "_commit: v2.25.0\nallure_categories_file: ''\nq4j_tests: false\n"
+        copier_serialized = "_commit: v2.25.0\nallure_categories_file: ''\ngitleaks: false\n"
         with tempfile.TemporaryDirectory() as temporary:
             answers = Path(temporary) / fleet.ANSWERS_FILE
             answers.write_text(copier_serialized, encoding="utf-8")
             fleet.restore_answers_format_if_semantically_equal(answers, original)
             self.assertEqual(
                 answers.read_text(encoding="utf-8"),
-                '_commit: v2.25.0\nallure_categories_file: ""\nq4j_tests: false\n',
+                '_commit: v2.25.0\nallure_categories_file: ""\ngitleaks: false\n',
             )
 
 
