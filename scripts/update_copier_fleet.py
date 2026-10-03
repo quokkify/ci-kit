@@ -1526,9 +1526,33 @@ def push_automation_branch(
     push = [*authenticated_git(), "push"]
     if remote:
         remote_sha = remote.split()[0]
+        if remote_has_same_change(repository, repository_path, remote_sha, env=env):
+            return
         push.append(f"--force-with-lease=refs/heads/{branch}:{remote_sha}")
     push.extend(["origin", f"HEAD:refs/heads/{branch}"])
     run(push, cwd=repository_path, env=env)
+
+
+def remote_has_same_change(
+    repository: Repository,
+    repository_path: Path,
+    remote_sha: str,
+    *,
+    env: dict[str, str],
+) -> bool:
+    """Whether the automation branch already carries this exact update.
+
+    Every run makes a fresh commit, so pushing it unconditionally would restart CI
+    on an identical tree and throw away pilot evidence a rerun is waiting for.
+    """
+    try:
+        remote = gh_json(["api", f"repos/{repository.name_with_owner}/commits/{remote_sha}"], env=env)
+    except FleetUpdateError:
+        return False
+    local_tree = run(["git", "rev-parse", "HEAD^{tree}"], cwd=repository_path).stdout.strip()
+    local_parent = run(["git", "rev-parse", "HEAD^"], cwd=repository_path).stdout.strip()
+    parents = [parent.get("sha") for parent in remote.get("parents", [])]
+    return remote.get("commit", {}).get("tree", {}).get("sha") == local_tree and parents == [local_parent]
 
 
 def ensure_pull_request(
