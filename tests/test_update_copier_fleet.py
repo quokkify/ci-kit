@@ -440,6 +440,36 @@ class AuthenticatedGitTests(TestCase):
                 self.assertNotIn("credential.helper=!gh auth git-credential", command)
 
 
+class IdenticalBranchPushTests(TestCase):
+    """A rerun must not restart pilot CI by pushing the same change again."""
+
+    def push(self, remote_tree: str, remote_parent: str) -> list[list[str]]:
+        repository = fleet.Repository("quokkify/example", "main")
+        outputs = {"ls-remote": "c" * 40 + "\trefs/heads/branch\n", "HEAD^{tree}": "t" * 40, "HEAD^": "p" * 40}
+
+        def fake_run(command, **_):
+            key = next((arg for arg in command if arg in outputs), None)
+            return subprocess.CompletedProcess(command, 0, outputs.get(key, ""), "")
+
+        remote = {"commit": {"tree": {"sha": remote_tree}}, "parents": [{"sha": remote_parent}]}
+        with (
+            mock.patch.object(fleet, "run", side_effect=fake_run) as run_mock,
+            mock.patch.object(fleet, "gh_json", return_value=remote),
+            tempfile.TemporaryDirectory() as temporary,
+        ):
+            fleet.push_automation_branch(repository, Path(temporary), branch="branch", env={})
+        return [call.args[0] for call in run_mock.call_args_list if "push" in call.args[0]]
+
+    def test_same_tree_on_same_base_is_not_pushed(self) -> None:
+        self.assertEqual(self.push("t" * 40, "p" * 40), [])
+
+    def test_changed_tree_is_pushed(self) -> None:
+        self.assertEqual(len(self.push("x" * 40, "p" * 40)), 1)
+
+    def test_same_tree_on_a_moved_base_is_pushed(self) -> None:
+        self.assertEqual(len(self.push("t" * 40, "x" * 40)), 1)
+
+
 class ExplicitRepositoryVisibilityTests(TestCase):
     """--public-only is an invariant of the public fleet front, not only a discovery filter."""
 
