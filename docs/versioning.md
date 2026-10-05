@@ -19,8 +19,12 @@ Release notes
 Release Please remains authoritative for versions and Conventional Commit
 sections, including breaking changes from the `BREAKING CHANGE:` footer. Enrich
 adds only the optional PR template sections `Highlight`, `Usage example`, and
-`Migration`. Leave these fields empty for ordinary changes. Usage examples may
-contain fenced Markdown, including language identifiers.
+`Migration`. Leave these fields empty for ordinary changes; a section that
+holds only the template comment is skipped, while placeholder text such as
+"None" is published verbatim. Each section is rendered once per release with
+every contributing PR listed under it, so write entries that stand on their own
+and avoid Markdown headings inside them. Usage examples may contain fenced
+Markdown, including language identifiers.
 
 Dependency updates use `chore(deps)` or `deps(deps)` Conventional Commits and
 appear with other chores in the `🧹 Chores` section. Enrich does not move,

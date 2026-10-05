@@ -155,6 +155,15 @@ class RichNotesTests(TestCase):
         self.assertEqual(notes._attribution(6, "Plain title"), "Plain title (#6)")
         self.assertEqual(notes._attribution(7, "   "), "#7")
         self.assertEqual(notes._attribution(8, "feat(a/b)!: thing"), "**a/b:** thing (#8)")
+    def test_untouched_pull_request_template_contributes_no_release_notes(self):
+        template = (ROOT / "template/.github/pull_request_template.md.jinja").read_text(encoding="utf-8")
+        body = Environment(undefined=StrictUndefined).from_string(template).render()
+        for heading in ("Highlight", "Usage example", "Migration"):
+            self.assertIn(f"## {heading}\n", body)
+        self.assertEqual(notes.extract_rich_sections(body), {})
+        self.assertIn('Do not write "None"', body)
+        placeholder = notes.extract_rich_sections(body.replace("## Migration\n", "## Migration\nNone.\n"))
+        self.assertTrue(placeholder["migration"].startswith("None."))
 
     def test_release_notes_section_is_ignored(self):
         changelog = "## 1.0.0\n"
