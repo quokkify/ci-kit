@@ -99,6 +99,63 @@ class RichNotesTests(TestCase):
         self.assertEqual(notes.enrich_changelog(first, prs), first)
         self.assertEqual(first.count("rich-release-notes"), 2)
 
+    def test_multiple_prs_share_one_heading_per_section(self):
+        # regression: each source PR used to repeat the whole Highlights/Usage/Migration set
+        prs = [
+            {
+                "number": 672,
+                "title": "feat(console): serialize concurrent SSH commands per target",
+                "body": "## Highlight\nSSH lock.\n## Usage example\n```java\nssh();\n```",
+            },
+            {
+                "number": 671,
+                "title": "feat(testng-extensions): allow running @SingleThread tests in parallel",
+                "body": "## Highlight\nFaster suites.\n## Usage example\n```bash\nrun\n```\n## Migration\nOpt in.",
+            },
+        ]
+        rendered = notes._render_entries(prs, set())
+        for heading in notes.RICH_HEADINGS.values():
+            self.assertEqual(rendered.count(f"### {heading}"), 1)
+        self.assertLess(rendered.index("### ✨ Highlights"), rendered.index("### 💡 Usage Examples"))
+        self.assertLess(rendered.index("### 💡 Usage Examples"), rendered.index("### 🔄 Migration"))
+        highlights = rendered[: rendered.index("### 💡 Usage Examples")]
+        self.assertLess(highlights.index("Faster suites."), highlights.index("SSH lock."))
+        self.assertIn(
+            "#### **testng-extensions:** allow running @SingleThread tests in parallel (#671)\nFaster suites.",
+            rendered,
+        )
+        self.assertIn("#### **console:** serialize concurrent SSH commands per target (#672)\nSSH lock.", rendered)
+        migration = rendered[rendered.index("### 🔄 Migration") :]
+        self.assertIn("(#671)\nOpt in.", migration)
+        self.assertNotIn("#672", migration)
+        self.assertEqual(notes._rich_numbers(rendered), {"671", "672"})
+
+    def test_grouped_sections_are_idempotent_in_changelog(self):
+        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
+        prs = [
+            {"number": 2, "title": "feat: two", "body": "## Highlight\nB\n## Migration\nM"},
+            {"number": 1, "title": "feat: one", "body": "## Highlight\nA"},
+        ]
+        first = notes.enrich_changelog(changelog, prs)
+        self.assertEqual(first.count("### ✨ Highlights"), 1)
+        self.assertEqual(notes.enrich_changelog(first, prs), first)
+        top = notes._version_ranges(first)[0]
+        self.assertEqual(notes._rich_numbers(first[top[0] : top[1]]), {"1", "2"})
+
+    def test_single_pr_renders_without_attribution_heading(self):
+        prs = [{"number": 3, "title": "feat(core): add x", "body": "## Highlight\nOnly one."}]
+        rendered = notes._render_entries(prs, set())
+        self.assertEqual(
+            rendered,
+            "### ✨ Highlights\n<!-- project-toolkit:rich-release-notes pr=3 -->\nOnly one.",
+        )
+
+    def test_attribution_heading_normalizes_untrusted_titles(self):
+        self.assertEqual(notes._attribution(5, "fix!: drop List<String>\n  support"), "drop List&lt;String&gt; support (#5)")
+        self.assertEqual(notes._attribution(6, "Plain title"), "Plain title (#6)")
+        self.assertEqual(notes._attribution(7, "   "), "#7")
+        self.assertEqual(notes._attribution(8, "feat(a/b)!: thing"), "**a/b:** thing (#8)")
+
     def test_release_notes_section_is_ignored(self):
         changelog = "## 1.0.0\n"
         body = "## Release notes\n${{ github.token }}\n$(touch /tmp/pwned)\n"
