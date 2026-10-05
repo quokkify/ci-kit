@@ -56,7 +56,8 @@ jobs:
     name: Update Copier fleet and create PRs
     if: ${{ github.repository == 'quokkify/ci-kit' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Pilots are verified one after another: up to 15 + 15 + 45 minutes, then the fanout.
+    timeout-minutes: 90
     steps:
       - name: Check out ci-kit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
