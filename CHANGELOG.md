@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.0.2](https://github.com/quokkify/ci-kit/compare/v3.0.1...v3.0.2) (2026-10-05)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** drop Copier rejects the project already carries ([#371](https://github.com/quokkify/ci-kit/issues/371)) ([807516f](https://github.com/quokkify/ci-kit/commit/807516f4be921f158ef74fe1c86f1264fa0e32cf))
+* **fleet:** keep the pilot head when a rerun renders the same change ([#373](https://github.com/quokkify/ci-kit/issues/373)) ([b53456d](https://github.com/quokkify/ci-kit/commit/b53456d088f4d0f4ee637f567512ce75aaf1d700))
+* **release:** group rich release notes by section ([#374](https://github.com/quokkify/ci-kit/issues/374)) ([45131f8](https://github.com/quokkify/ci-kit/commit/45131f80e3d7f2a71793a52ea5536a3fda6185dc))
+
+
+### 🧹 Chores
+
+* **deps:** update renovate to v44.132.5 ([#369](https://github.com/quokkify/ci-kit/issues/369)) ([75859fa](https://github.com/quokkify/ci-kit/commit/75859fa9538fe3b249bc416840a3258068fb6054))
+
 ## [3.0.1](https://github.com/quokkify/ci-kit/compare/v3.0.0...v3.0.1) (2026-10-03)
 
 
