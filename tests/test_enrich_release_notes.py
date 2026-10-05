@@ -83,6 +83,14 @@ class RichNotesTests(TestCase):
         self.assertIn("```java\nVerifier.verify();\n```", sections["usage example"])
         self.assertNotIn("migration", sections)
 
+    def test_trailing_whitespace_is_dropped_so_the_changelog_passes_diff_check(self):
+        body = "## Highlight\nBefore:  \n```text\nArchitectureRunner - \t\n```\n"
+        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
+        sections = notes.extract_rich_sections(body)
+        self.assertEqual(sections["highlight"], "Before:\n```text\nArchitectureRunner -\n```")
+        enriched = notes.enrich_changelog(changelog, [{"number": 7, "title": "Report", "body": body}])
+        self.assertEqual([line for line in enriched.splitlines() if line != line.rstrip()], [])
+
     def test_comments_and_unknown_or_duplicate_headings_are_ignored(self):
         body = "## Highlight\n<!-- only guidance -->\n## Highlight\nsecond\n## Other\nno\n"
         self.assertEqual(notes.extract_rich_sections(body), {})
