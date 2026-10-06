@@ -133,6 +133,24 @@ PILOT_CHECKS = {
     "quokkify/skills": ("Gitleaks", "App Python / ci", "Shared template contract"),
     "quokkify/q4j": ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete", "Shared template contract"),
 }
+# Contexts produced only by pull_request workflows. A pilot that is already up to date is verified on its
+# default branch, where these checks never run, so waiting for them could only time out.
+PILOT_PULL_REQUEST_ONLY_CHECKS = {
+    "quokkify/q4j": ("Tests pipeline complete",),
+}
+DEFAULT_PILOT_TIMEOUT = 900
+# Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
+PILOT_TIMEOUTS = {
+    "quokkify/q4j": 2700,
+}
+
+
+def pilot_contexts(repository: str, pr: int | None) -> tuple[str, ...]:
+    contexts = PILOT_CHECKS[repository]
+    if pr is None:
+        pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
+        contexts = tuple(context for context in contexts if context not in pull_request_only)
+    return contexts
 
 
 def current_snapshot(repository: str, pr: int | None) -> tuple[str, str, str]:
@@ -236,7 +254,8 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
     source = answers.get("_src_path")
     if not isinstance(source, str) or normalize_template_source(source) != "quokkify/ci-kit":
         raise GateError(f"Pilot {repository}@{sha} uses a different template source")
-    wait_until(lambda: pilot_ready(repository, sha, PILOT_CHECKS[repository], pr=pr, snapshot=snapshot), timeout)
+    contexts = pilot_contexts(repository, pr)
+    wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot), timeout)
     if current_snapshot(repository, pr) != snapshot:
         raise GateError(f"Pilot head/base/merge changed while checking: {repository}; update or rerun the PR")
     return sha

@@ -129,6 +129,18 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaises(gate.GateError):
                 gate.verify_pilot(REPO, None, "v2.0.0", 0)
 
+    def test_default_branch_pilot_skips_pull_request_only_checks(self):
+        payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n").decode()}
+        for pr, expected in ((None, False), (7, True)):
+            with self.subTest(pr=pr), patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+                 patch.object(gate, "api", return_value=payload), \
+                 patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+                 patch.object(gate, "pilot_ready", return_value=True) as ready:
+                gate.verify_pilot("quokkify/q4j", pr, "v1.2.3", 0)
+                contexts = ready.call_args.args[2]
+                self.assertEqual("Tests pipeline complete" in contexts, expected)
+                self.assertIn("Shared template contract", contexts)
+
     def test_private_repository_stops(self):
         with patch.object(gate, "api", return_value={"private": True, "visibility": "private"}):
             with self.assertRaises(gate.GateError):
@@ -211,8 +223,11 @@ class RolloutTests(unittest.TestCase):
             return {"schema_version": 4, "configuration_gaps": 1,
                     "repositories": [{"repository": repository, "status": "up-to-date", "detail": "", "health": {"adopted": True}}]}
 
+        timeouts = {}
+
         def verify(repository, pr, target, timeout, expected_snapshot=None):
             events.append(("verify", repository))
+            timeouts.setdefault(repository, timeout)
             return SHA
 
         with tempfile.TemporaryDirectory() as temporary, \
@@ -226,6 +241,8 @@ class RolloutTests(unittest.TestCase):
             rollout.rollout(["--write", "--public-only", "--json-report", str(destination)])
             self.assertEqual(events[-1], ("update", "remaining"))
             self.assertEqual(sum(event[0] == "verify" for event in events), 6)
+            self.assertEqual(timeouts, {repository: 2700 if repository == "quokkify/q4j" else 900
+                                        for repository in gate.PILOT_CHECKS})
             self.assertTrue(json.loads(destination.read_text())["rollout"]["fanout_started"])
             combined = json.loads(destination.read_text())
             self.assertEqual(combined["schema_version"], 4)

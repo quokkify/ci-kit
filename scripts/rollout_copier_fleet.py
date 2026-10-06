@@ -12,7 +12,8 @@ import tempfile
 from pathlib import Path
 
 import update_copier_fleet as fleet
-from verify_ci_gate import GateError, PILOT_CHECKS, current_snapshot, release_ready, verify_pilot, wait_until
+from verify_ci_gate import (DEFAULT_PILOT_TIMEOUT, GateError, PILOT_CHECKS, PILOT_TIMEOUTS, current_snapshot,
+                            release_ready, verify_pilot, wait_until)
 
 
 def run_update(arguments: list[str], report: Path) -> dict:
@@ -91,7 +92,8 @@ def rollout(arguments: list[str]) -> None:
                         raise GateError(f"Unrecognized pilot PR: {repository}")
                     pr = int(match[1])
                 snapshot = current_snapshot(repository, pr)
-                sha = verify_pilot(repository, pr, target, timeout=900, expected_snapshot=snapshot)
+                timeout = PILOT_TIMEOUTS.get(repository, DEFAULT_PILOT_TIMEOUT)
+                sha = verify_pilot(repository, pr, target, timeout=timeout, expected_snapshot=snapshot)
                 verified.append((repository, pr, snapshot))
                 gates.append({"repository": repository, "revision": sha, "base_revision": snapshot[1],
                               "merge_revision": snapshot[2], "pull_request": pr, "result": "success"})
