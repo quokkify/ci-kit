@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.3](https://github.com/quokkify/ci-kit/compare/v3.0.2...v3.0.3) (2026-10-06)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** verify the q4j pilot with checks it can produce ([#377](https://github.com/quokkify/ci-kit/issues/377)) ([ab89287](https://github.com/quokkify/ci-kit/commit/ab892877a8232b3156fc87a3d32b985956edcb71))
+* **release:** drop trailing whitespace from rich release-note sections ([#376](https://github.com/quokkify/ci-kit/issues/376)) ([4a60e4c](https://github.com/quokkify/ci-kit/commit/4a60e4c3a9d26940fd9077b82b31d3dee1aeb2b0))
+
 ## [3.0.2](https://github.com/quokkify/ci-kit/compare/v3.0.1...v3.0.2) (2026-10-05)
 
 
