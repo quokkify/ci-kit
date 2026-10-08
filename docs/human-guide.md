@@ -21,7 +21,7 @@ export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq
 echo "$TOOLKIT_REF"
 ```
 
-Always use a released tag such as `v3.0.3`. Do not generate production files from `main` or `HEAD`.
+Always use a released tag such as `v3.1.0`. Do not generate production files from `main` or `HEAD`.
 
 ## 1. Create a new project from the template
 
@@ -168,7 +168,7 @@ gh repo clone quokkify/ci-kit
 cd ci-kit
 git switch main
 git pull --ff-only
-export TOOLKIT_REF="v3.0.3" # use the exact tag you reviewed above
+export TOOLKIT_REF="v3.1.0" # use the exact tag you reviewed above
 scripts/rollout_ci_kit.sh "$HOME/ci-kit-rollout"
 ```
 
