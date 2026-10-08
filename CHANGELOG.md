@@ -2,6 +2,11 @@
 
 ## [3.1.0](https://github.com/quokkify/ci-kit/compare/v3.0.3...v3.1.0) (2026-10-08)
 
+<!-- project-toolkit:rich-block:start -->
+### ✨ Highlights
+<!-- project-toolkit:rich-release-notes pr=383 -->
+**Dependency updates now appear in their own 📦 Dependencies section as `deps(scope)` instead of `chore(deps)`.** Renovate titles look like `deps(npm): update dependency react`, so the manager shows up in bold in the changelog. If your repository checks PR titles, allow the `deps` type.
+<!-- project-toolkit:rich-block:end -->
 
 ### ✨ Features
 
