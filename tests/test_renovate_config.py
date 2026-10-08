@@ -49,6 +49,7 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertIsNone(rule["semanticCommitScope"])
         self.assertIsNone(rule["minimumReleaseAge"])
         self.assertFalse(rule["dependencyDashboardApproval"])
+        self.assertEqual(rule["prCreation"], "immediate")
         self.assertTrue(rule["automerge"])
 
     def test_allure_action_updates_share_one_cross_manager_group(self) -> None:

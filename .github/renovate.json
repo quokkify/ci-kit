@@ -18,6 +18,7 @@
       "semanticCommitScope": null,
       "minimumReleaseAge": null,
       "dependencyDashboardApproval": false,
+      "prCreation": "immediate",
       "automerge": true
     },
     {
