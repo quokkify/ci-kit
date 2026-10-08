@@ -15,30 +15,29 @@ class RenovateConfigTests(unittest.TestCase):
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
             config["semanticCommitType"],
-            "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
+            "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}deps{{/if}}",
         )
         self.assertEqual(config["semanticCommitScope"], "deps")
-        # Generated projects retain the shared chore(deps) convention.
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
-        self.assertIn('"semanticCommitType": "chore"', template)
+        self.assertIn('"semanticCommitType": "deps"', template)
         self.assertIn('"semanticCommitScope": "deps"', template)
 
-    def test_dependency_titles_are_chore_deps_in_local_and_generated_configs(self) -> None:
+    def test_dependency_titles_are_deps_in_local_and_generated_configs(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(config["semanticCommits"], "enabled")
-        self.assertEqual(config["semanticCommitType"], "chore")
+        self.assertEqual(config["semanticCommitType"], "deps")
         self.assertEqual(config["semanticCommitScope"], "deps")
 
         toolkit_config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(toolkit_config["semanticCommits"], "enabled")
-        self.assertIn("{{else}}chore{{/if}}", toolkit_config["semanticCommitType"])
+        self.assertIn("{{else}}deps{{/if}}", toolkit_config["semanticCommitType"])
         self.assertEqual(toolkit_config["semanticCommitScope"], "deps")
 
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
         self.assertIn('"semanticCommits": "enabled"', template)
-        self.assertIn('"semanticCommitType": "chore"', template)
+        self.assertIn('"semanticCommitType": "deps"', template)
         self.assertIn('"semanticCommitScope": "deps"', template)
-        self.assertNotIn('"semanticCommitType": "deps"', template)
+        self.assertNotIn('"semanticCommitType": "chore"', template)
 
     def test_allure_action_updates_share_one_cross_manager_group(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))

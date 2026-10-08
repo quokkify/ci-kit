@@ -6,12 +6,17 @@
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",
-  "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
+  "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}deps{{/if}}",
   "semanticCommitScope": "deps",
   "github-actions": {
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
   },
   "packageRules": [
+    {
+      "description": "Keep dependency updates in the Dependencies release section after shared presets set chore.",
+      "matchPackageNames": ["*"],
+      "semanticCommitType": "deps"
+    },
     {
       "description": "Merge ci-kit documentation updates without a stability wait.",
       "matchPackageNames": ["/^quokkify\\/ci-kit$/"],

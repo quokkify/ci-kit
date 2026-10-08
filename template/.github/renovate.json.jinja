@@ -25,8 +25,15 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": {{ json_array(renovate_extends, 'extends', 2) }},
   "semanticCommits": "enabled",
-  "semanticCommitType": "chore",
+  "semanticCommitType": "deps",
   "semanticCommitScope": "deps",
+  "packageRules": [
+    {
+      "description": "Keep dependency updates in the Dependencies release section after shared presets set chore.",
+      "matchPackageNames": ["*"],
+      "semanticCommitType": "deps"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",

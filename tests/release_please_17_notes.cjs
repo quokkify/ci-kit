@@ -84,6 +84,9 @@ const commits = [
   if ((rendered.match(/🧹 Chores/g) || []).length !== 1) {
     throw new Error('dependency and chore commits must share one Chores section');
   }
+  if (!rendered.includes('📦 Dependencies')) {
+    throw new Error('deps commits must render in the Dependencies section');
+  }
   if (!rendered.includes('native dependency update')) {
     throw new Error('deps(deps) message did not render');
   }

@@ -40,7 +40,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 package = self.load_config(path)["packages"]["."]
                 sections = package["changelog-sections"]
                 self.assertIn(
-                    {"type": "deps", "section": "🧹 Chores"},
+                    {"type": "deps", "section": "📦 Dependencies"},
                     sections,
                 )
                 chore = next(section for section in sections if section["type"] == "chore")
@@ -50,15 +50,15 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 self.assertTrue(docs["hidden"])
                 self.assertEqual(package["changelog-path"], "CHANGELOG.md")
 
-    def test_renovate_produces_chore_dependency_type(self) -> None:
+    def test_renovate_produces_deps_dependency_type(self) -> None:
         renovate = self.load_config(RENOVATE_PATH)
         self.assertEqual(renovate["semanticCommits"], "enabled")
-        self.assertEqual(renovate["semanticCommitType"], "chore")
+        self.assertEqual(renovate["semanticCommitType"], "deps")
         self.assertEqual(renovate["semanticCommitScope"], "deps")
-        # Release Please owns chore(deps); Enrich only adds authored rich sections.
+        # Release Please owns deps(deps); Enrich only adds authored rich sections.
         self.assertEqual(
             f"{renovate['semanticCommitType']}({renovate['semanticCommitScope']})",
-            "chore(deps)",
+            "deps(deps)",
         )
 
     def test_release_please_17_stages_chore_dependencies_for_enrichment(self) -> None:
@@ -162,7 +162,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             )["packages"]["."]
             self.assertEqual(rendered["changelog-path"], "CHANGELOG.md")
             self.assertIn(
-                {"type": "deps", "section": "🧹 Chores"},
+                {"type": "deps", "section": "📦 Dependencies"},
                 rendered["changelog-sections"],
             )
             chore = next(
