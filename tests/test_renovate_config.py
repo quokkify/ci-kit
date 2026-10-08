@@ -52,6 +52,15 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertEqual(rule["prCreation"], "immediate")
         self.assertTrue(rule["automerge"])
 
+    def test_renovate_validator_updates_after_one_day(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        rule = next(
+            rule for rule in config["packageRules"]
+            if rule.get("matchPackageNames") == ["renovate"]
+        )
+        self.assertEqual(rule["matchDatasources"], ["npm"])
+        self.assertEqual(rule["minimumReleaseAge"], "1 day")
+
     def test_allure_action_updates_share_one_cross_manager_group(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
         rules = [

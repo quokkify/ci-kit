@@ -22,6 +22,12 @@
       "automerge": true
     },
     {
+      "description": "Update the pinned Renovate config validator after one day instead of the shared three-day stability wait.",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["renovate"],
+      "minimumReleaseAge": "1 day"
+    },
+    {
       "description": "Keep executable examples on immutable GitHub Actions release commits.",
       "matchManagers": ["github-actions"],
       "matchFileNames": ["examples/**"],
