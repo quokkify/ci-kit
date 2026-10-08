@@ -12,9 +12,12 @@
   },
   "packageRules": [
     {
-      "description": "Merge ci-kit documentation updates without a stability wait.",
+      "description": "Merge ci-kit documentation updates without a stability wait or dashboard approval, as docs commits.",
       "matchPackageNames": ["/^quokkify\\/ci-kit$/"],
+      "semanticCommitType": "docs",
+      "semanticCommitScope": null,
       "minimumReleaseAge": null,
+      "dependencyDashboardApproval": false,
       "automerge": true
     },
     {
@@ -101,7 +104,9 @@
       "matchStrings": [
         "(?:quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|][^@\\s]*quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
         "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
-        "such as\\s+`@(?<currentValue>v\\d+\\.\\d+\\.\\d+)`"
+        "such as\\s+`@?(?<currentValue>v\\d+\\.\\d+\\.\\d+)`",
+        "TOOLKIT_REF=\"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\"",
+        "else\\s+'(?<currentValue>v\\d+\\.\\d+\\.\\d+)'"
       ],
       "depNameTemplate": "quokkify/ci-kit",
       "datasourceTemplate": "github-tags",
