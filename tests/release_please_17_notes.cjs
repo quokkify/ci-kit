@@ -58,9 +58,9 @@ const commits = [
   },
   {
     type: 'deps',
-    scope: 'deps',
+    scope: 'github-actions',
     bareMessage: 'native dependency update',
-    message: 'deps(deps): native dependency update',
+    message: 'deps(github-actions): native dependency update',
     sha: 'c'.repeat(40),
     notes: [],
     references: [],
@@ -84,8 +84,11 @@ const commits = [
   if ((rendered.match(/🧹 Chores/g) || []).length !== 1) {
     throw new Error('dependency and chore commits must share one Chores section');
   }
+  if (!rendered.includes('📦 Dependencies')) {
+    throw new Error('deps commits must render in the Dependencies section');
+  }
   if (!rendered.includes('native dependency update')) {
-    throw new Error('deps(deps) message did not render');
+    throw new Error('deps message did not render');
   }
   if (!rendered.includes('legacy dependency update')) {
     throw new Error('chore(deps) must remain visible for release enrichment');

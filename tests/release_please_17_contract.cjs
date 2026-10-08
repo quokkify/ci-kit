@@ -61,7 +61,7 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
     throw new Error('chore commits must remain visible in the Chores section');
   }
   const commits = [
-    {type: 'deps', scope: 'deps', bareMessage: 'update dependency alpha', message: 'deps(deps): update dependency alpha', sha: 'a'.repeat(40), notes: [], references: []},
+    {type: 'deps', scope: 'github-actions', bareMessage: 'update dependency alpha', message: 'deps(github-actions): update dependency alpha', sha: 'a'.repeat(40), notes: [], references: []},
     {type: 'chore', scope: 'deps', bareMessage: 'legacy dependency update', message: 'chore(deps): legacy dependency update', sha: 'b'.repeat(40), notes: [], references: []},
     {type: 'chore', scope: 'maintenance', bareMessage: 'reorganize scripts', message: 'chore(maintenance): reorganize scripts', sha: 'c'.repeat(40), notes: [], references: []},
     {type: 'chore', scope: null, bareMessage: 'internal cleanup', message: 'chore: internal cleanup', sha: 'd'.repeat(40), notes: [], references: []},

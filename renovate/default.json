@@ -6,8 +6,8 @@
   "extends": ["config:recommended"],
   "enabledManagers": ["github-actions", "custom.regex"],
   "semanticCommits": "enabled",
-  "semanticCommitType": "chore",
-  "semanticCommitScope": "deps",
+  "semanticCommitType": "deps",
+  "semanticCommitScope": "{{manager}}",
   "automerge": false,
   "packageRules": [
     {

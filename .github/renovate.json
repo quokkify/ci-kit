@@ -2,21 +2,39 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/ci-kit//renovate/default.json",
-    "github>quokkify/renovate-presets//presets/github-actions/default"
+    "github>quokkify/renovate-presets//presets/github-actions/default#v0.4.0"
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",
-  "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
-  "semanticCommitScope": "deps",
+  "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}deps{{/if}}",
   "github-actions": {
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
   },
   "packageRules": [
     {
-      "description": "Merge ci-kit documentation updates without a stability wait.",
-      "matchPackageNames": ["/^quokkify\\/ci-kit$/"],
+      "description": "Create and merge non-major updates of quokkify libraries immediately, without a stability wait or dashboard approval; major updates keep the shared manual approval because they may need a migration.",
+      "matchPackageNames": ["/^quokkify\\//"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "minimumReleaseAge": null,
+      "dependencyDashboardApproval": false,
+      "prCreation": "immediate",
       "automerge": true
+    },
+    {
+      "description": "Merge ci-kit documentation updates without a stability wait or dashboard approval, as docs commits.",
+      "matchPackageNames": ["/^quokkify\\/ci-kit$/"],
+      "semanticCommitType": "docs",
+      "semanticCommitScope": null,
+      "minimumReleaseAge": null,
+      "dependencyDashboardApproval": false,
+      "prCreation": "immediate",
+      "automerge": true
+    },
+    {
+      "description": "Update the pinned Renovate config validator after one day instead of the shared three-day stability wait.",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["renovate"],
+      "minimumReleaseAge": "1 day"
     },
     {
       "description": "Keep executable examples on immutable GitHub Actions release commits.",
@@ -102,7 +120,9 @@
       "matchStrings": [
         "(?:quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|][^@\\s]*quokkify/ci-kit/(?:\\.github/workflows|actions)/[^@\\s]+@|--vcs-ref\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
         "(?:default:\\s*|Use an exact tag such as\\s+)(?<currentValue>v\\d+\\.\\d+\\.\\d+)",
-        "such as\\s+`@(?<currentValue>v\\d+\\.\\d+\\.\\d+)`"
+        "such as\\s+`@?(?<currentValue>v\\d+\\.\\d+\\.\\d+)`",
+        "TOOLKIT_REF=\"(?<currentValue>v\\d+\\.\\d+\\.\\d+)\"",
+        "else\\s+'(?<currentValue>v\\d+\\.\\d+\\.\\d+)'"
       ],
       "depNameTemplate": "quokkify/ci-kit",
       "datasourceTemplate": "github-tags",

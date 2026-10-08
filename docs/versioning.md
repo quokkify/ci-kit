@@ -26,6 +26,7 @@ every contributing PR listed under it, so write entries that stand on their own
 and avoid Markdown headings inside them. Usage examples may contain fenced
 Markdown, including language identifiers.
 
-Dependency updates use `chore(deps)` or `deps(deps)` Conventional Commits and
-appear with other chores in the `🧹 Chores` section. Enrich does not move,
+Renovate dependency updates use `deps(<manager>)` Conventional Commits (for example `deps(github-actions)`) and appear
+in the `📦 Dependencies` section; legacy `chore(deps)` commits stay in
+`🧹 Chores`. Enrich does not move,
 normalize, or synthesize chore/dependency entries.

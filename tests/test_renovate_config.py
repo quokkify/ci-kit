@@ -15,30 +15,70 @@ class RenovateConfigTests(unittest.TestCase):
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(
             config["semanticCommitType"],
-            "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}chore{{/if}}",
+            "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}deps{{/if}}",
         )
-        self.assertEqual(config["semanticCommitScope"], "deps")
-        # Generated projects retain the shared chore(deps) convention.
+        self.assertNotIn("semanticCommitScope", config)
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
-        self.assertIn('"semanticCommitType": "chore"', template)
-        self.assertIn('"semanticCommitScope": "deps"', template)
+        self.assertIn('"semanticCommitType": "deps"', template)
+        self.assertNotIn("semanticCommitScope", template)
 
-    def test_dependency_titles_are_chore_deps_in_local_and_generated_configs(self) -> None:
+    def test_dependency_titles_are_deps_in_local_and_generated_configs(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(config["semanticCommits"], "enabled")
-        self.assertEqual(config["semanticCommitType"], "chore")
-        self.assertEqual(config["semanticCommitScope"], "deps")
+        self.assertEqual(config["semanticCommitType"], "deps")
+        self.assertEqual(config["semanticCommitScope"], "{{manager}}")
 
         toolkit_config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(toolkit_config["semanticCommits"], "enabled")
-        self.assertIn("{{else}}chore{{/if}}", toolkit_config["semanticCommitType"])
-        self.assertEqual(toolkit_config["semanticCommitScope"], "deps")
+        self.assertIn("{{else}}deps{{/if}}", toolkit_config["semanticCommitType"])
+        self.assertNotIn("semanticCommitScope", toolkit_config)
 
         template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
         self.assertIn('"semanticCommits": "enabled"', template)
-        self.assertIn('"semanticCommitType": "chore"', template)
-        self.assertIn('"semanticCommitScope": "deps"', template)
-        self.assertNotIn('"semanticCommitType": "deps"', template)
+        self.assertIn('"semanticCommitType": "deps"', template)
+        self.assertNotIn("semanticCommitScope", template)
+        self.assertNotIn('"semanticCommitType": "chore"', template)
+
+    def test_quokkify_library_updates_are_created_and_merged_immediately(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        rules = config["packageRules"]
+        index = next(i for i, rule in enumerate(rules) if rule.get("matchPackageNames") == ["/^quokkify\\//"])
+        rule = rules[index]
+        self.assertNotIn("major", rule["matchUpdateTypes"])
+        self.assertEqual(
+            sorted(rule["matchUpdateTypes"]), ["digest", "minor", "patch", "pin", "pinDigest"]
+        )
+        self.assertIsNone(rule["minimumReleaseAge"])
+        self.assertFalse(rule["dependencyDashboardApproval"])
+        self.assertEqual(rule["prCreation"], "immediate")
+        self.assertTrue(rule["automerge"])
+        ci_kit = next(i for i, r in enumerate(rules) if r.get("matchPackageNames") == ["/^quokkify\\/ci-kit$/"])
+        self.assertLess(index, ci_kit, "the ci-kit docs rule must come later so it keeps the docs type")
+        self.assertTrue(
+            any(entry.endswith("#v0.4.0") for entry in config["extends"] if "renovate-presets" in entry)
+        )
+
+    def test_ci_kit_documentation_updates_are_docs_and_automerge_immediately(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        rule = next(
+            rule for rule in config["packageRules"]
+            if rule.get("matchPackageNames") == ["/^quokkify\\/ci-kit$/"]
+        )
+        self.assertEqual(rule["semanticCommitType"], "docs")
+        self.assertIsNone(rule["semanticCommitScope"])
+        self.assertIsNone(rule["minimumReleaseAge"])
+        self.assertFalse(rule["dependencyDashboardApproval"])
+        self.assertEqual(rule["prCreation"], "immediate")
+        self.assertTrue(rule["automerge"])
+
+    def test_renovate_validator_updates_after_one_day(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        rule = next(
+            rule for rule in config["packageRules"]
+            if rule.get("matchPackageNames") == ["renovate"]
+        )
+        self.assertEqual(rule["matchDatasources"], ["npm"])
+        self.assertEqual(rule["minimumReleaseAge"], "1 day")
 
     def test_allure_action_updates_share_one_cross_manager_group(self) -> None:
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
