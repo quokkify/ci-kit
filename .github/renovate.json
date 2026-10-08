@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/ci-kit//renovate/default.json",
-    "github>quokkify/renovate-presets//presets/github-actions/default"
+    "github>quokkify/renovate-presets//presets/github-actions/default#v0.3.0"
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",

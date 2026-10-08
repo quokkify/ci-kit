@@ -26,7 +26,7 @@ class RenovateConfigTests(unittest.TestCase):
         config = json.loads(RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(config["semanticCommits"], "enabled")
         self.assertEqual(config["semanticCommitType"], "deps")
-        self.assertNotIn("semanticCommitScope", config)
+        self.assertEqual(config["semanticCommitScope"], "{{manager}}")
 
         toolkit_config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         self.assertEqual(toolkit_config["semanticCommits"], "enabled")
