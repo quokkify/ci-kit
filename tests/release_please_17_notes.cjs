@@ -58,9 +58,9 @@ const commits = [
   },
   {
     type: 'deps',
-    scope: 'actions',
+    scope: 'github-actions',
     bareMessage: 'native dependency update',
-    message: 'deps(actions): native dependency update',
+    message: 'deps(github-actions): native dependency update',
     sha: 'c'.repeat(40),
     notes: [],
     references: [],
