@@ -39,6 +39,21 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertNotIn("semanticCommitScope", template)
         self.assertNotIn('"semanticCommitType": "chore"', template)
 
+    def test_quokkify_library_updates_are_created_and_merged_immediately(self) -> None:
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        rules = config["packageRules"]
+        index = next(i for i, rule in enumerate(rules) if rule.get("matchPackageNames") == ["/^quokkify\\//"])
+        rule = rules[index]
+        self.assertIsNone(rule["minimumReleaseAge"])
+        self.assertFalse(rule["dependencyDashboardApproval"])
+        self.assertEqual(rule["prCreation"], "immediate")
+        self.assertTrue(rule["automerge"])
+        ci_kit = next(i for i, r in enumerate(rules) if r.get("matchPackageNames") == ["/^quokkify\\/ci-kit$/"])
+        self.assertLess(index, ci_kit, "the ci-kit docs rule must come later so it keeps the docs type")
+        self.assertTrue(
+            any(entry.endswith("#v0.4.0") for entry in config["extends"] if "renovate-presets" in entry)
+        )
+
     def test_ci_kit_documentation_updates_are_docs_and_automerge_immediately(self) -> None:
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         rule = next(

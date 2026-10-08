@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/ci-kit//renovate/default.json",
-    "github>quokkify/renovate-presets//presets/github-actions/default#v0.3.0"
+    "github>quokkify/renovate-presets//presets/github-actions/default#v0.4.0"
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
   "semanticCommits": "enabled",
@@ -11,6 +11,14 @@
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
   },
   "packageRules": [
+    {
+      "description": "Create and merge updates of quokkify libraries immediately, without a stability wait or dashboard approval.",
+      "matchPackageNames": ["/^quokkify\\//"],
+      "minimumReleaseAge": null,
+      "dependencyDashboardApproval": false,
+      "prCreation": "immediate",
+      "automerge": true
+    },
     {
       "description": "Merge ci-kit documentation updates without a stability wait or dashboard approval, as docs commits.",
       "matchPackageNames": ["/^quokkify\\/ci-kit$/"],
