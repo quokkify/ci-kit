@@ -20,7 +20,7 @@ Release publication is surrounded by exact-commit CI verification. A separate fl
 1. **Atomic language workflows.** Python, Node.js, Java, Docker, and release remain independent reusable workflows rather than one universal matrix/generator.
 2. **Caller composition.** A consuming repository owns triggers, path filtering, dependencies, environments, and composition. One polyglot repository can invoke several toolkit workflows in one local orchestrator.
 3. **Copier owns physical project files.** It creates the small local workflow and optional local configs. It does not copy CI implementation.
-4. **Renovate owns version movement.** Production references use immutable release tags such as `@v3.0.3`; Renovate proposes upgrades through PRs. `@main` is not a production contract.
+4. **Renovate owns version movement.** Production references use immutable release tags such as `@v3.1.0`; Renovate proposes upgrades through PRs. `@main` is not a production contract.
 5. **No submodules.** Job-level reuse and template updates solve the sharing problems without coupling consumer Git history to toolkit Git state.
 6. **Two release modes.** A polyglot product may share one version (`single`) or use independent component versions (`manifest`); these are deliberately distinct configurations.
 7. **Composite actions are earned and bounded.** Keep step-level abstractions focused to core setup/runtime tasks that recur across workflows. Do not reference repository-relative toolkit actions from reusable workflows: after checkout, relative actions resolve against the caller repository.
