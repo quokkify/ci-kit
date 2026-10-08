@@ -44,6 +44,10 @@ class RenovateConfigTests(unittest.TestCase):
         rules = config["packageRules"]
         index = next(i for i, rule in enumerate(rules) if rule.get("matchPackageNames") == ["/^quokkify\\//"])
         rule = rules[index]
+        self.assertNotIn("major", rule["matchUpdateTypes"])
+        self.assertEqual(
+            sorted(rule["matchUpdateTypes"]), ["digest", "minor", "patch", "pin", "pinDigest"]
+        )
         self.assertIsNone(rule["minimumReleaseAge"])
         self.assertFalse(rule["dependencyDashboardApproval"])
         self.assertEqual(rule["prCreation"], "immediate")

@@ -12,8 +12,9 @@
   },
   "packageRules": [
     {
-      "description": "Create and merge updates of quokkify libraries immediately, without a stability wait or dashboard approval.",
+      "description": "Create and merge non-major updates of quokkify libraries immediately, without a stability wait or dashboard approval; major updates keep the shared manual approval because they may need a migration.",
       "matchPackageNames": ["/^quokkify\\//"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "minimumReleaseAge": null,
       "dependencyDashboardApproval": false,
       "prCreation": "immediate",
