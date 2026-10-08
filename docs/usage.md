@@ -7,7 +7,7 @@ Copy a small caller workflow from [`examples/`](../examples/) and replace comman
 ```yaml
 jobs:
   backend:
-    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v2.25.0
+    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v3.0.3
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -54,7 +54,7 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v2.25.0 --trust
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v3.0.3 --trust
 cd my-project
 copier update --trust
 ```
@@ -83,7 +83,7 @@ GH_TOKEN="$(gh auth token)" python scripts/update_copier_fleet.py --org quokkify
 gh workflow run copier-fleet-auto-update.yml --repo quokkify/ci-kit -f dry-run=true
 ```
 
-The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v2.21.5`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
+The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v3.0.3`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
 
 Across both paths, existing project changes are preserved by Copier's update algorithm; `.rej` conflicts fail that repository loudly instead of opening a partial pull request. The deterministic `automation/copier-template-update` branch is automation-owned and may be force-updated with an exact lease, so maintainers should not add manual commits to it. Normal updates follow the latest release tag rather than unreleased `main`.
 
