@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.1.0](https://github.com/quokkify/ci-kit/compare/v3.0.3...v3.1.0) (2026-10-08)
+
+
+### ✨ Features
+
+* **release:** group dependency updates in a Dependencies section ([#383](https://github.com/quokkify/ci-kit/issues/383)) ([3bc6bfe](https://github.com/quokkify/ci-kit/commit/3bc6bfe6654b21180ae38aaf091b0b4fa9532a27))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.140.0 ([#384](https://github.com/quokkify/ci-kit/issues/384)) ([ed4e899](https://github.com/quokkify/ci-kit/commit/ed4e899912a225f0de1c88a7d8a88188f32cb340))
+
+
+### 🧹 Chores
+
+* **deps:** update github actions non-major updates ([#379](https://github.com/quokkify/ci-kit/issues/379)) ([6d5d1a3](https://github.com/quokkify/ci-kit/commit/6d5d1a3c0632963e6cbfaa298459904811ada2aa))
+* **deps:** update renovate to v44.133.0 ([#380](https://github.com/quokkify/ci-kit/issues/380)) ([cbb4f75](https://github.com/quokkify/ci-kit/commit/cbb4f75669709e6437d5f91dd95dd19250ef9324))
+
 ## [3.0.3](https://github.com/quokkify/ci-kit/compare/v3.0.2...v3.0.3) (2026-10-06)
 
 
