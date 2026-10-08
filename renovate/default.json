@@ -7,7 +7,6 @@
   "enabledManagers": ["github-actions", "custom.regex"],
   "semanticCommits": "enabled",
   "semanticCommitType": "deps",
-  "semanticCommitScope": "deps",
   "automerge": false,
   "packageRules": [
     {

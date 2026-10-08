@@ -54,12 +54,8 @@ class ReleaseNotesConfigTests(unittest.TestCase):
         renovate = self.load_config(RENOVATE_PATH)
         self.assertEqual(renovate["semanticCommits"], "enabled")
         self.assertEqual(renovate["semanticCommitType"], "deps")
-        self.assertEqual(renovate["semanticCommitScope"], "deps")
-        # Release Please owns deps(deps); Enrich only adds authored rich sections.
-        self.assertEqual(
-            f"{renovate['semanticCommitType']}({renovate['semanticCommitScope']})",
-            "deps(deps)",
-        )
+        # Scope comes from quokkify/renovate-presets; Enrich only adds authored rich sections.
+        self.assertNotIn("semanticCommitScope", renovate)
 
     def test_release_please_17_stages_chore_dependencies_for_enrichment(self) -> None:
         npm = shutil.which("npm")

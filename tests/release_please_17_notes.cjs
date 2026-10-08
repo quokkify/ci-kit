@@ -58,9 +58,9 @@ const commits = [
   },
   {
     type: 'deps',
-    scope: 'deps',
+    scope: 'actions',
     bareMessage: 'native dependency update',
-    message: 'deps(deps): native dependency update',
+    message: 'deps(actions): native dependency update',
     sha: 'c'.repeat(40),
     notes: [],
     references: [],
@@ -88,7 +88,7 @@ const commits = [
     throw new Error('deps commits must render in the Dependencies section');
   }
   if (!rendered.includes('native dependency update')) {
-    throw new Error('deps(deps) message did not render');
+    throw new Error('deps message did not render');
   }
   if (!rendered.includes('legacy dependency update')) {
     throw new Error('chore(deps) must remain visible for release enrichment');
