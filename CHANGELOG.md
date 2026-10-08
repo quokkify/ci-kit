@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.1.1](https://github.com/quokkify/ci-kit/compare/v3.1.0...v3.1.1) (2026-10-08)
+
+
+### 📦 Dependencies
+
+* **allure-report-action:** update quokkify/allure-report-action to v0.5.3 ([#388](https://github.com/quokkify/ci-kit/issues/388)) ([e582be5](https://github.com/quokkify/ci-kit/commit/e582be5dc781c48c70ddeb11c3a8a90fa9061bed))
+* **allure:** update allure to v3.20.1 ([#389](https://github.com/quokkify/ci-kit/issues/389)) ([da1f050](https://github.com/quokkify/ci-kit/commit/da1f05000a26802564529e27690b9c65f5ee6293))
+* **analyze:** update github/codeql-action/analyze digest to 24c5418 ([#390](https://github.com/quokkify/ci-kit/issues/390)) ([9d48c84](https://github.com/quokkify/ci-kit/commit/9d48c84b01574d3e58dc21789ec03e6a6cfd8907))
+* **github-actions:** update actions/setup-node action to v7.1.0 ([#382](https://github.com/quokkify/ci-kit/issues/382)) ([e8e0a3c](https://github.com/quokkify/ci-kit/commit/e8e0a3c532308a81983a03ad9717103e1b3ddb01))
+* **init:** update github/codeql-action/init digest to 24c5418 ([#391](https://github.com/quokkify/ci-kit/issues/391)) ([3886a1b](https://github.com/quokkify/ci-kit/commit/3886a1bc4a1360b35a7bcb4e56c832a11ed953aa))
+* **renovate:** update renovate to v44.143.0 ([#386](https://github.com/quokkify/ci-kit/issues/386)) ([23fb659](https://github.com/quokkify/ci-kit/commit/23fb6591f34ad1f9969b3167eed31eb76eb12314))
+
 ## [3.1.0](https://github.com/quokkify/ci-kit/compare/v3.0.3...v3.1.0) (2026-10-08)
 
 <!-- project-toolkit:rich-block:start -->
