@@ -110,7 +110,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh api --paginate --jq '.jobs[]' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > jobs.raw; then
-            jq -s . jobs.raw > jobs.tmp && mv jobs.tmp jobs.json
+            if jq -s . jobs.raw > jobs.tmp; then
+              mv jobs.tmp jobs.json
+            fi
           fi
       - name: Evaluate gate
         env:
