@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.1](https://github.com/quokkify/ci-kit/compare/v3.2.0...v3.2.1) (2026-10-12)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** install ci_kit runtime dependencies for fleet updates ([#410](https://github.com/quokkify/ci-kit/issues/410)) ([edaa569](https://github.com/quokkify/ci-kit/commit/edaa56943af6c19ae90ca24b28b5c1f88fcb7746))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.150.0 ([#411](https://github.com/quokkify/ci-kit/issues/411)) ([2a90527](https://github.com/quokkify/ci-kit/commit/2a905275e3a0708b2faff82979aed2a5ea5bc73c))
+
 ## [3.2.0](https://github.com/quokkify/ci-kit/compare/v3.1.1...v3.2.0) (2026-10-12)
 
 
