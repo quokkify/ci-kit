@@ -22,6 +22,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
@@ -67,18 +69,21 @@ def api_request(endpoint: str) -> Any:
 
 def legacy_checks_at(repo: str, ref: str) -> list[str]:
     payload = api_request(f"repos/{repo}/contents/.github/workflows/validate.yml?ref={ref}")
-    content = payload.get("content") if isinstance(payload, dict) else None
-    if not isinstance(content, str):
-        raise Refusal(f"validate.yml not found at {ref}; refusing")
+    if not isinstance(payload, dict) or payload.get("type") != "file" or payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+        raise Refusal(f"validate.yml missing or not readable as base64 at {ref}; refusing")
+    content = payload["content"]
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "validate.yml"
         path.write_bytes(base64.b64decode(content))
-        return legacy_check_names(path)
+        names = legacy_check_names(path)
+    if not names:
+        raise Refusal(f"validate.yml at {ref} defines no jobs; refusing")
+    return names
 
 
 def string_list(marker: dict[str, Any], key: str) -> list[str]:
     value = marker.get(key)
-    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) and item for item in value):
         raise ValueError(f"migrate marker {key} must be a list of check names")
     return value
 
@@ -179,12 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         sha = re.compile(r"[0-9a-f]{40}")
         if not all(isinstance(item, str) and sha.fullmatch(item) for item in (head, base)) or not isinstance(branch, str) or not branch:
             raise Refusal(f"PR head or base unavailable for {repo}#{number}")
-        if module_name not in CHECKS_AFTER or after != CHECKS_AFTER[module_name]:
+        if not isinstance(module_name, str) or module_name not in CHECKS_AFTER or after != CHECKS_AFTER[module_name]:
             raise Refusal("migration marker checks_after does not match the module's CHECKS_AFTER; refusing")
         revision = args.revision if args.revert else head
         try:
             before = legacy_checks_at(repo, args.revision if args.revert else base)
-        except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as exc:
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError, subprocess.SubprocessError, yaml.YAMLError) as exc:
             raise Refusal(f"cannot read legacy validate.yml for {repo}: {exc}") from exc
         if before != marker_before:
             raise Refusal(f"marker checks_before {marker_before} differs from validate.yml jobs {before}; refusing")
@@ -197,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         current, threshold = managed_state(client.request("GET", f"/repos/{repo}/rulesets/{managed_id}"), branch)
         try:
             policy = required_checks(api_request, repo, branch)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             raise Refusal(f"required checks unavailable: {exc}") from exc
         try:
             new = plan(policy, managed_id, current, before, after, args.revert)

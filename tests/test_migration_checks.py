@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import importlib.util
 import io
@@ -90,6 +91,41 @@ class NextChecksTests(TestCase):
     def test_missing_marker_rejected(self):
         with self.assertRaises(ValueError):
             module.parse_marker("no marker here")
+
+
+
+def encoded(text, **extra):
+    return {"type": "file", "encoding": "base64", "content": base64.b64encode(text.encode()).decode(), **extra}
+
+
+class LegacyChecksTests(TestCase):
+    def read(self, payload):
+        with patch.object(module, "api_request", lambda endpoint: payload):
+            return module.legacy_checks_at("o/r", BASE)
+
+    def test_encoding_none_refused(self):
+        with self.assertRaises(module.Refusal):
+            self.read({"type": "file", "encoding": "none", "content": ""})
+
+    def test_no_jobs_refused(self):
+        with self.assertRaises(module.Refusal):
+            self.read(encoded("on: push\n"))
+
+    def test_missing_file_refused(self):
+        with self.assertRaises(module.Refusal):
+            self.read(None)
+
+    def test_job_names_and_endpoint(self):
+        seen = []
+
+        def fake(endpoint):
+            seen.append(endpoint)
+            return encoded("jobs:\n  a:\n    name: Alpha\n  b:\n    runs-on: x\n")
+
+        with patch.object(module, "api_request", fake):
+            self.assertEqual(module.legacy_checks_at("o/r", BASE), ["Alpha", "b"])
+        self.assertIn(".github/workflows/validate.yml", seen[0])
+        self.assertIn(f"?ref={BASE}", seen[0])
 
 
 class MainTests(TestCase):
@@ -305,6 +341,34 @@ class MainTests(TestCase):
             raise FileNotFoundError("gh")
         with patch.object(module, "pr_view", boom), patch.dict(os.environ, {"GH_TOKEN": "t"}), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(module.main(["--pr", "o/r#5"]), 1)
+
+    def test_revert_empty_checks_before_refused(self):
+        self.body = MARKER_BODY.replace('["Shared template contract"]', '[]')
+        self.legacy = []
+        FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
+        self.refused(("--pr", "o/r#5", "--revert", "--revision", REV))
+
+    def test_yaml_error_refused(self):
+        import yaml
+        self.legacy = yaml.YAMLError("bad")
+        self.refused(needle="validate.yml")
+
+    def test_timeout_refused(self):
+        self.legacy = module.subprocess.TimeoutExpired("gh", 45)
+        self.refused(needle="validate.yml")
+
+    def test_required_checks_timeout_refused(self):
+        def boom(request, repository, branch):
+            raise module.subprocess.TimeoutExpired("gh", 45)
+        with patch.object(module, "pr_view", lambda r, n: {"body": self.body, "headRefOid": HEAD, "baseRefName": "develop", "baseRefOid": BASE}), \
+                patch.object(module, "legacy_checks_at", lambda r, ref: self.legacy), patch.object(module, "required_checks", boom), \
+                patch.object(module, "GitHubClient", FakeClient), patch.dict(os.environ, {"GH_TOKEN": "t"}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(module.main(["--pr", "o/r#5"]), 1)
+
+    def test_non_string_module_refused(self):
+        self.body = MARKER_BODY.replace('"core"', '["core"]')
+        self.refused(needle="CHECKS_AFTER")
 
     def test_missing_token_exit_2(self):
         with patch.dict(os.environ, {}, clear=True):
