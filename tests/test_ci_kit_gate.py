@@ -218,7 +218,8 @@ class GateCliTests(unittest.TestCase):
     def test_plan_failure_cli_output_and_annotations(self):
         args = ("--enabled", '["core","java"]', "--needs", json.dumps(needs(plan="failure", core="skipped", java="skipped")), "--ref", REF,
                 "--plan-codes", '["CIK-CORE-010"]', "--template-commits", '{"core":"c0ffee"}')
-        code, out, err = self.run_gate(*args)
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+            code, out, err = self.run_gate(*args)
         self.assertEqual(code, 1)
         self.assertIn("| core | c0ffee |", out)
         self.assertIn("CIK-CORE-010 plan: fail", err)
