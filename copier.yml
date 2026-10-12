@@ -22,6 +22,7 @@ _exclude:
   - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
+  - "{% if 'validate' in (handed_off | default([])) %}.github/workflows/validate.yml{% endif %}"
 
 # Written once when the project is generated, then owned by the project.
 # The template ships a starter README and a minimal Renovate config; real
@@ -125,6 +126,22 @@ codeql_languages:
     {% set codeql_language_state = namespace(seen=[]) %}
     {% for language in codeql_languages %}
     {% if language is not string %}Every codeql_languages entry must be a string.{% elif language not in allowed_codeql_languages %}Unsupported CodeQL language: {{ language }}.{% elif language in codeql_language_state.seen %}Duplicate CodeQL language: {{ language }}.{% else %}{% set codeql_language_state.seen = codeql_language_state.seen + [language] %}{% endif %}
+    {% endfor %}
+    {% endif %}
+
+handed_off:
+  type: yaml
+  default: []
+  when: "{{ module == 'legacy' }}"
+  help: Areas now owned by ci-kit modules; legacy stops rendering their files.
+  validator: >-
+    {% set allowed_handed_off = ['validate'] %}
+    {% if handed_off is string or handed_off is mapping or handed_off is not sequence %}
+    handed_off must be a YAML list of area names.
+    {% else %}
+    {% set handed_off_state = namespace(seen=[]) %}
+    {% for area in handed_off %}
+    {% if area is not string %}Every handed_off entry must be a string.{% elif area not in allowed_handed_off %}Unknown handed_off area: {{ area }}.{% elif area in handed_off_state.seen %}Duplicate handed_off area: {{ area }}.{% else %}{% set handed_off_state.seen = handed_off_state.seen + [area] %}{% endif %}
     {% endfor %}
     {% endif %}
 

@@ -138,6 +138,8 @@ PILOT_CHECKS = {
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
+HANDOFF_CONTEXTS = {"validate": {"Shared template contract": "ci / gate"}}
+PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
 PILOT_TIMEOUTS = {
@@ -145,15 +147,18 @@ PILOT_TIMEOUTS = {
 }
 
 
-def pilot_contexts(repository: str, pr: int | None) -> tuple[str, ...]:
+def pilot_contexts(repository: str, pr: int | None, *, handed_off: tuple[str, ...] = ()) -> tuple[str, ...]:
     contexts = PILOT_CHECKS[repository]
+    for area in handed_off:
+        replacements = HANDOFF_CONTEXTS.get(area, {})
+        contexts = tuple(dict.fromkeys(replacements.get(context, context) for context in contexts))
     if pr is None:
         pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
         contexts = tuple(context for context in contexts if context not in pull_request_only)
     return contexts
 
 
-def current_snapshot(repository: str, pr: int | None) -> tuple[str, str, str]:
+def current_snapshot(repository: str, pr: int | None, branch: str = PILOT_BRANCH) -> tuple[str, str, str]:
     metadata = api(f"repos/{repository}")
     if not isinstance(metadata, dict) or metadata.get("visibility") != "public" or metadata.get("private") is not False:
         raise GateError(f"Pilot must be public: {repository}")
@@ -166,7 +171,7 @@ def current_snapshot(repository: str, pr: int | None) -> tuple[str, str, str]:
         if (not isinstance(pull, dict) or pull.get("state") != "open"
                 or pull.get("base", {}).get("ref") != metadata["default_branch"]
                 or pull.get("head", {}).get("repo", {}).get("full_name") != repository
-                or pull.get("head", {}).get("ref") != "automation/copier-template-update"):
+                or pull.get("head", {}).get("ref") != branch):
             raise GateError(f"Unexpected pilot PR identity: {repository}#{pr}")
         sha = pull.get("head", {}).get("sha")
         base_sha = pull.get("base", {}).get("sha")
@@ -186,8 +191,8 @@ def current_revision(repository: str, pr: int | None) -> str:
 
 
 def pilot_ready(repository: str, sha: str, contexts: tuple[str, ...], pr: int | None = None,
-                snapshot: tuple[str, str, str] | None = None) -> bool:
-    if pr is not None and current_snapshot(repository, pr) != snapshot:
+                snapshot: tuple[str, str, str] | None = None, branch: str = PILOT_BRANCH) -> bool:
+    if pr is not None and current_snapshot(repository, pr, branch) != snapshot:
         raise GateError(f"Pilot head/base/merge changed during CI wait: {repository}; update or rerun the PR")
     runs = pages(f"repos/{repository}/commits/{sha}/check-runs?filter=latest", "check_runs")
     statuses = pages(f"repos/{repository}/commits/{sha}/statuses")
@@ -235,12 +240,13 @@ def pilot_ready(repository: str, sha: str, contexts: tuple[str, ...], pr: int | 
 
 
 def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
-                 expected_snapshot: tuple[str, str, str] | None = None) -> str:
+                 expected_snapshot: tuple[str, str, str] | None = None, *,
+                 contexts: tuple[str, ...] | None = None, branch: str = PILOT_BRANCH) -> str:
     import base64
     import yaml
     from update_copier_fleet import normalize_template_source
 
-    snapshot = current_snapshot(repository, pr)
+    snapshot = current_snapshot(repository, pr, branch)
     if expected_snapshot is not None and snapshot != expected_snapshot:
         raise GateError(f"Pilot changed before fanout: {repository}; update or rerun the PR")
     sha = snapshot[0]
@@ -254,9 +260,14 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
     source = answers.get("_src_path")
     if not isinstance(source, str) or normalize_template_source(source) != "quokkify/ci-kit":
         raise GateError(f"Pilot {repository}@{sha} uses a different template source")
-    contexts = pilot_contexts(repository, pr)
-    wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot), timeout)
-    if current_snapshot(repository, pr) != snapshot:
+    if contexts is None:
+        handed_off = answers.get("handed_off")
+        if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
+            handed_off = []
+        contexts = pilot_contexts(repository, pr, handed_off=tuple(handed_off))
+    ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
+    wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
+    if current_snapshot(repository, pr, branch) != snapshot:
         raise GateError(f"Pilot head/base/merge changed while checking: {repository}; update or rerun the PR")
     return sha
 

@@ -13,6 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCENARIO = ROOT / "tests/scenarios/modules/core-java.yml"
+LEGACY_SCENARIO = ROOT / "tests/scenarios/allure-external.yml"
 TAG = "v99.0.0"
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "ci-kit",
@@ -56,6 +57,23 @@ def render(template: Path, dest: Path, module: str, answers: dict) -> None:
 
 def doctor(template: Path, repo: Path) -> subprocess.CompletedProcess[str]:
     return run([sys.executable, "-m", "ci_kit.cli", "doctor", "--repo", str(repo), "--template-src", str(template)])
+
+
+def legacy_repo(template: Path, dest: Path) -> None:
+    data = yaml.safe_load(LEGACY_SCENARIO.read_text())
+    data["toolkit_version"] = TAG
+    data_file = dest.parent / "legacy-data.yml"
+    data_file.write_text(yaml.safe_dump(data))
+    dest.mkdir(parents=True)
+    require(["copier", "copy", "--trust", "--defaults", "--vcs-ref", TAG, "--data-file", str(data_file), str(template), str(dest)])
+    for key in ("allure_external_workflow_path", "allure_categories_file"):
+        rel = data.get(key)
+        if rel and not (dest / rel).exists():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_text("[]\n" if rel.endswith(".json") else "name: Run tests\non: push\njobs: {}\n")
+    require(["git", "init", "-q"], dest)
+    require(["git", "add", "-A"], dest)
+    require(["git", "commit", "-q", "-m", "initial"], dest)
 
 
 def main() -> int:
@@ -108,6 +126,13 @@ def main() -> int:
             result = doctor(template, repo)
             output = result.stdout + result.stderr
             check(name, result.returncode == 1 and code in output, f"exit {result.returncode}\n{output}")
+
+        legacy = tmp / "legacy"
+        legacy_repo(template, legacy)
+        migrated = run([sys.executable, "-m", "ci_kit.cli", "migrate", "--module", "core", "--repo", str(legacy), "--to", TAG, "--template-src", str(template)])
+        check("legacy allure-external migrates to core", migrated.returncode == 0, migrated.stdout + migrated.stderr)
+        result = doctor(template, legacy)
+        check("migrated legacy repo passes doctor", result.returncode == 0, result.stdout + result.stderr)
 
     return 1 if failures else 0
 

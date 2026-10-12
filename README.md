@@ -90,6 +90,7 @@ Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/nod
 - **[Human guide: create, update, extend, and roll out projects](docs/human-guide.md)**
 - [Architecture and researched constraints](docs/architecture.md)
 - [Detailed usage, Copier, Release Please, and Renovate](docs/usage.md)
+- [Modules and migration](docs/modules.md)
 - [Versioning](docs/versioning.md)
 - [Security model](docs/security.md)
 - [Contributing](CONTRIBUTING.md)

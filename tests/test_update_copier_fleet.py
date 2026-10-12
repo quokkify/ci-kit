@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import os
@@ -23,6 +24,7 @@ assert SPEC and SPEC.loader
 fleet = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = fleet
 SPEC.loader.exec_module(fleet)
+ci_migrate = importlib.import_module("ci_kit.migrate")
 
 
 def cloned_answers(raw_answers: str):
@@ -820,7 +822,7 @@ class TemplateUpdateTests(TestCase):
                 del env
                 shutil.copytree(source, destination)
 
-            with mock.patch.object(fleet, "fetch_answers", return_value=answers), \
+            with mock.patch.object(fleet, "fetch_answers_files", return_value={"legacy": answers}), \
                  mock.patch.object(fleet, "clone_repository", side_effect=clone_fixture), \
                  mock.patch.object(fleet, "push_automation_branch") as push_mock, \
                  mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
@@ -1208,6 +1210,22 @@ class ProjectOwnedToolkitRefTests(TestCase):
                 workflow.read_text(encoding="utf-8"),
                 "      uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.19.2\n",
             )
+
+    def test_leaves_handed_off_module_owned_workflows_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            directory = self.workflows(repository)
+            caller = "      uses: quokkify/ci-kit/.github/workflows/validate.yml@v2.19.1\n"
+            (directory / "validate.yml").write_text(caller, encoding="utf-8")
+            (directory / "ci.yml").write_text(caller, encoding="utf-8")
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "_commit: v2.19.1\n_src_path: gh:quokkify/ci-kit\nhanded_off:\n  - validate\n", encoding="utf-8"
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v2.19.2")
+
+            self.assertEqual(changed, [".github/workflows/ci.yml"])
+            self.assertEqual((directory / "validate.yml").read_text(encoding="utf-8"), caller)
 
     def test_leaves_a_digest_pin_without_a_release_comment_alone(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -2056,7 +2074,7 @@ class TemplateInventoryTests(TestCase):
         self.assertIn("renovate=missing", console)
         self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
         self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
-        self.assertEqual(report["schema_version"], 4)
+        self.assertEqual(report["schema_version"], 5)
         self.assertEqual(report["configuration_mismatches"], 1)
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
         self.assertEqual(report["repositories"][0]["template"]["allure_report"], "enabled")
@@ -2107,7 +2125,7 @@ class GitStatusTests(TestCase):
 
 
 class RepositoryProcessingTests(TestCase):
-    @mock.patch.object(fleet, "fetch_answers", return_value=None)
+    @mock.patch.object(fleet, "fetch_answers_files", return_value={})
     def test_skips_repository_without_answers(self, _: mock.Mock) -> None:
         result = fleet.process_repository(
             fleet.Repository("quokkify/plain", "main"),
@@ -2122,8 +2140,8 @@ class RepositoryProcessingTests(TestCase):
 
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:someone/other-template\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:someone/other-template\n"},
     )
     def test_skips_foreign_template(self, _: mock.Mock) -> None:
         result = fleet.process_repository(
@@ -2145,8 +2163,8 @@ class RepositoryProcessingTests(TestCase):
     )
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:quokkify/ci-kit\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"},
     )
     def test_revalidates_template_source_from_cloned_revision(
         self,
@@ -2179,8 +2197,8 @@ class RepositoryProcessingTests(TestCase):
     )
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:quokkify/ci-kit\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"},
     )
     def test_preserves_inventory_when_copier_update_fails(
         self,
@@ -2206,8 +2224,8 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(fleet, "clone_repository")
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:quokkify/ci-kit\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"},
     )
     def test_dry_run_reports_changes_without_push(
         self,
@@ -2242,8 +2260,8 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(fleet, "clone_repository")
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:quokkify/ci-kit\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"},
     )
     def test_write_mode_pushes_branch_and_returns_pull_request(
         self,
@@ -2279,8 +2297,8 @@ class RepositoryProcessingTests(TestCase):
     @mock.patch.object(fleet, "clone_repository")
     @mock.patch.object(
         fleet,
-        "fetch_answers",
-        return_value="_src_path: gh:quokkify/ci-kit\n",
+        "fetch_answers_files",
+        return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"},
     )
     def test_up_to_date_repository_does_not_push(
         self,
@@ -2308,6 +2326,761 @@ class RepositoryProcessingTests(TestCase):
         update_mock.assert_called_once()
         push_mock.assert_not_called()
         pull_request_mock.assert_not_called()
+
+LEGACY_ANSWERS_TEXT = "_commit: v2.8.2\n_src_path: gh:quokkify/ci-kit\n"
+CORE_ANSWERS_TEXT = "_commit: v3.0.0\n_src_path: gh:quokkify/ci-kit\n"
+
+
+def fake_contents(listing, files, *, listing_error: str | None = None):
+    def fake_run(command, **_):
+        endpoint = next(arg for arg in command if arg.startswith("repos/"))
+        if endpoint.endswith("/contents/"):
+            if listing_error:
+                return subprocess.CompletedProcess(command, 1, "", listing_error)
+            return subprocess.CompletedProcess(command, 0, json.dumps(listing), "")
+        name = endpoint.rsplit("/", 1)[1]
+        return subprocess.CompletedProcess(command, 0, files[name], "")
+
+    return fake_run
+
+
+def entry(name: str, kind: str = "file") -> dict:
+    return {"name": name, "type": kind}
+
+
+class FetchAnswersFilesTests(TestCase):
+    def fetch(self, listing, files=None, **kwargs):
+        with mock.patch.object(fleet, "run", side_effect=fake_contents(listing, files or {}, **kwargs)):
+            return fleet.fetch_answers_files("quokkify/example", env={})
+
+    def test_collects_legacy_and_module_answers_from_the_root_listing(self) -> None:
+        files = {
+            ".copier-answers.yml": LEGACY_ANSWERS_TEXT,
+            ".copier-answers.core.yml": CORE_ANSWERS_TEXT,
+        }
+        listing = [
+            entry(".copier-answers.yml"),
+            entry(".copier-answers.core.yml"),
+            entry(".copier-answers.yaml"),
+            entry(".copier-answers.d", "dir"),
+            entry("README.md"),
+        ]
+        self.assertEqual(
+            self.fetch(listing, files),
+            {"legacy": LEGACY_ANSWERS_TEXT, "core": CORE_ANSWERS_TEXT},
+        )
+
+    def test_module_answers_names_match_the_ci_kit_discovery(self) -> None:
+        from ci_kit.plan import discover
+
+        names = [
+            ".copier-answers.yml", ".copier-answers.java.yml", ".copier-answers.Core.yml",
+            ".copier-answers.my_mod.yml", ".copier-answers.a.b.yml", ".copier-answers..yml",
+        ]
+        files = {name: CORE_ANSWERS_TEXT for name in names}
+        fetched = self.fetch([entry(name) for name in names], files)
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            for name in names:
+                (repo / name).write_text(CORE_ANSWERS_TEXT, encoding="utf-8")
+            discovered = set(discover(repo)[0])
+        self.assertEqual(set(fetched) - {fleet.LEGACY_MODULE}, discovered)
+        self.assertEqual(discovered, {"java", "Core", "my_mod"})
+
+    def test_near_miss_module_answers_are_reported_as_unknown_modules(self) -> None:
+        listing = [entry(".copier-answers.yml"), entry(".copier-answers.Core.yml")]
+        files = {".copier-answers.yml": LEGACY_ANSWERS_TEXT, ".copier-answers.Core.yml": CORE_ANSWERS_TEXT}
+        result, clone_mock = process(self.fetch(listing, files))
+        self.assertEqual((result.status, result.detail), ("unknown-module", "Core"))
+        clone_mock.assert_not_called()
+
+    def test_symlinked_module_answers_are_unsafe(self) -> None:
+        listing = [entry(".copier-answers.yml"), entry(".copier-answers.java.yml", "symlink")]
+        with self.assertRaises(fleet.UnsafeAnswersFileError):
+            self.fetch(listing, {".copier-answers.yml": LEGACY_ANSWERS_TEXT})
+
+    def test_directory_named_like_answers_is_unsafe(self) -> None:
+        with self.assertRaises(fleet.UnsafeAnswersFileError):
+            self.fetch([entry(".copier-answers.core.yml", "dir")])
+
+    def test_empty_or_missing_root_has_no_answers(self) -> None:
+        self.assertEqual(self.fetch([]), {})
+        self.assertEqual(self.fetch([], listing_error="HTTP 404: Not Found"), {})
+
+    def test_other_listing_errors_are_not_swallowed(self) -> None:
+        with self.assertRaises(fleet.FleetUpdateError):
+            self.fetch([], listing_error="HTTP 500: boom")
+
+
+def process(files, *, dry_run=True, template_ref="v3.1.0", workspace=None, **patches):
+    with mock.patch.object(fleet, "fetch_answers_files", return_value=files), \
+         mock.patch.object(fleet, "clone_repository", side_effect=patches.pop("clone", None)) as clone_mock, \
+         tempfile.TemporaryDirectory() as temporary:
+        result = fleet.process_repository(
+            fleet.Repository("quokkify/example", "main"),
+            expected_template="quokkify/ci-kit",
+            branch=fleet.DEFAULT_BRANCH,
+            dry_run=dry_run,
+            template_ref=template_ref,
+            env={},
+            workspace=Path(workspace or temporary),
+        )
+    return result, clone_mock
+
+
+class ModuleAnswersGuardTests(TestCase):
+    def test_foreign_module_template_is_reported_without_cloning(self) -> None:
+        for source in ("gh:someone/else", "gh:quokkify/ci-kit-evil", "https://github.com/quokkify/ci-kit/x", "gh:quokkify/ci-kit\n"):
+            with self.subTest(source=source):
+                files = {"core": f"_commit: v3.0.0\n_src_path: {json.dumps(source)}\n"}
+                result, clone_mock = process(files)
+                self.assertEqual(result.status, "foreign-module-template")
+                clone_mock.assert_not_called()
+
+    def test_missing_module_source_is_foreign(self) -> None:
+        result, _ = process({"core": "_commit: v3.0.0\n"})
+        self.assertEqual(result.status, "foreign-module-template")
+
+    def test_unknown_module_is_reported_without_cloning(self) -> None:
+        result, clone_mock = process({"legacy": LEGACY_ANSWERS_TEXT, "rust": CORE_ANSWERS_TEXT})
+        self.assertEqual(result.status, "unknown-module")
+        self.assertIn("rust", result.detail)
+        clone_mock.assert_not_called()
+
+    def test_unsafe_answers_file_is_reported_without_cloning(self) -> None:
+        with mock.patch.object(
+            fleet, "fetch_answers_files", side_effect=fleet.UnsafeAnswersFileError(".copier-answers.java.yml")
+        ), mock.patch.object(fleet, "clone_repository") as clone_mock:
+            result = fleet.process_repository(
+                fleet.Repository("quokkify/example", "main"),
+                expected_template="quokkify/ci-kit",
+                branch=fleet.DEFAULT_BRANCH,
+                dry_run=True,
+                template_ref="v3.1.0",
+                env={},
+                workspace=Path("/tmp"),
+            )
+        self.assertEqual(result.status, "unsafe-answers-file")
+        self.assertIn(".copier-answers.java.yml", result.detail)
+        clone_mock.assert_not_called()
+
+
+def materialize_files(files: dict[str, str]):
+    def materialize(_: object, destination: Path, *, env: dict[str, str]) -> None:
+        del env
+        destination.mkdir(parents=True, exist_ok=True)
+        for name, text in files.items():
+            (destination / name).write_text(text, encoding="utf-8")
+
+    return materialize
+
+
+ROWS = [{"module": "core", "from": "v3.0.0", "to": "v3.1.0", "doctor": "ok"}]
+
+
+class ModuleProcessingTests(TestCase):
+    def test_hybrid_repository_updates_legacy_then_modules(self) -> None:
+        files = {"legacy": LEGACY_ANSWERS_TEXT + "handed_off:\n  - ci\n", "core": CORE_ANSWERS_TEXT}
+        cloned = {".copier-answers.yml": files["legacy"], ".copier-answers.core.yml": CORE_ANSWERS_TEXT}
+        order: list[str] = []
+        with mock.patch.object(fleet, "update_template", side_effect=lambda *a, **k: order.append("legacy") or ["a.yml"]) as update_mock, \
+             mock.patch.object(fleet, "apply_module_updates", side_effect=lambda *a, **k: order.append("modules") or ROWS) as modules_mock, \
+             mock.patch.object(fleet, "changed_paths", return_value=["a.yml", "b.yml"]):
+            result, _ = process(files, clone=materialize_files(cloned))
+        self.assertEqual(order, ["legacy", "modules"])
+        self.assertEqual(modules_mock.call_args.args[1], "v3.1.0")
+        update_mock.assert_called_once()
+        self.assertEqual(result.status, "would-update")
+        self.assertEqual(result.detail, "a.yml, b.yml")
+        self.assertEqual(result.inventory.modules, ("core",))
+        self.assertEqual(result.inventory.state, "hybrid(ci)")
+        self.assertEqual(result.inventory.commit, "v2.8.2")
+
+    def test_modules_only_repository_skips_the_legacy_update(self) -> None:
+        cloned = {".copier-answers.core.yml": CORE_ANSWERS_TEXT, ".copier-answers.java.yml": CORE_ANSWERS_TEXT}
+        files = {"core": CORE_ANSWERS_TEXT, "java": CORE_ANSWERS_TEXT}
+        with mock.patch.object(fleet, "update_template") as update_mock, \
+             mock.patch.object(fleet, "apply_module_updates", return_value=ROWS), \
+             mock.patch.object(fleet, "changed_paths", return_value=[]):
+            result, _ = process(files, clone=materialize_files(cloned))
+        update_mock.assert_not_called()
+        self.assertEqual(result.status, "up-to-date")
+        self.assertEqual(result.inventory.state, "modules")
+        self.assertEqual(result.inventory.modules, ("core", "java"))
+        self.assertEqual(result.inventory.commit, "v3.0.0")
+
+    def test_pull_request_carries_the_module_table(self) -> None:
+        cloned = {".copier-answers.core.yml": CORE_ANSWERS_TEXT}
+        with mock.patch.object(fleet, "apply_module_updates", return_value=ROWS), \
+             mock.patch.object(fleet, "changed_paths", return_value=["x.yml"]), \
+             mock.patch.object(fleet, "push_automation_branch"), \
+             mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
+            result, _ = process({"core": CORE_ANSWERS_TEXT}, dry_run=False, clone=materialize_files(cloned))
+        self.assertEqual(result.status, "pull-request")
+        self.assertEqual(pr_mock.call_args.kwargs["modules"], ROWS)
+
+    def test_module_update_failure_opens_no_pull_request(self) -> None:
+        cloned = {".copier-answers.core.yml": CORE_ANSWERS_TEXT}
+        with mock.patch.object(fleet, "apply_module_updates", side_effect=fleet.FleetUpdateError("ci-kit update failed: CIK-UPDATE-001")), \
+             mock.patch.object(fleet, "push_automation_branch") as push_mock, \
+             mock.patch.object(fleet, "ensure_pull_request") as pr_mock:
+            with self.assertRaisesRegex(fleet.RepositoryProcessError, "CIK-UPDATE-001") as raised:
+                process({"core": CORE_ANSWERS_TEXT}, dry_run=False, clone=materialize_files(cloned))
+        push_mock.assert_not_called()
+        pr_mock.assert_not_called()
+        self.assertEqual(raised.exception.inventory.state, "modules")
+
+    def test_missing_template_ref_is_an_error_for_module_repositories(self) -> None:
+        cloned = {".copier-answers.core.yml": CORE_ANSWERS_TEXT}
+        with self.assertRaisesRegex(fleet.RepositoryProcessError, "resolved template ref"):
+            process({"core": CORE_ANSWERS_TEXT}, template_ref=None, clone=materialize_files(cloned))
+
+    def test_cloned_symlink_module_answers_are_unsafe(self) -> None:
+        def clone(_: object, destination: Path, *, env: dict[str, str]) -> None:
+            destination.mkdir(parents=True)
+            (destination / "elsewhere.yml").write_text(CORE_ANSWERS_TEXT, encoding="utf-8")
+            (destination / ".copier-answers.core.yml").symlink_to("elsewhere.yml")
+
+        result, _ = process({"core": CORE_ANSWERS_TEXT}, clone=clone)
+        self.assertEqual(result.status, "unsafe-answers-file")
+
+    def test_pure_legacy_repository_is_unchanged(self) -> None:
+        cloned = {".copier-answers.yml": LEGACY_ANSWERS_TEXT}
+        with mock.patch.object(fleet, "update_template", return_value=["a.yml"]), \
+             mock.patch.object(fleet, "apply_module_updates") as modules_mock:
+            result, _ = process({"legacy": LEGACY_ANSWERS_TEXT}, clone=materialize_files(cloned))
+        modules_mock.assert_not_called()
+        self.assertEqual((result.status, result.detail), ("would-update", "a.yml"))
+        self.assertEqual(result.inventory.modules, ())
+        self.assertEqual(result.inventory.state, "legacy")
+
+
+LEGACY_PULL_REQUEST_BODY = (
+    "## Summary\n\n"
+    "Automated `copier update` from the shared "
+    "[`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) template.\n\n"
+    "This keeps the organization baseline (validation, CodeQL, Gitleaks, "
+    "Release Please, and Renovate) synchronized while leaving merge approval to maintainers.\n\n"
+    "## Generated changes\n\n"
+    "- `a.yml`\n"
+    "- `b.yml`"
+    "\n\n## Verification\n\n"
+    "- `copier update --trust --defaults --conflict=rej --skip-tasks`\n"
+    "- Legacy components keep their `type`/`path`; the updater supplies stable `id`/`name` migration data.\n"
+    "- `git diff --cached --check`\n\n"
+    "Do not edit the automation branch directly; make project-specific changes after merging "
+    "or adjust the Copier answers/template.\n"
+)
+
+
+class PullRequestBodyTests(TestCase):
+    def create(self, **kwargs) -> str:
+        def fake_run(command, **_):
+            if command[:3] == ["gh", "pr", "create"]:
+                fake_run.body = command[command.index("--body") + 1]
+                return subprocess.CompletedProcess(command, 0, "https://example.invalid/pr\n", "")
+            return subprocess.CompletedProcess(command, 0, "[]", "")
+
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            fleet.ensure_pull_request(
+                fleet.Repository("quokkify/example", "main"),
+                branch="b", changed=["a.yml", "b.yml"], env={}, **kwargs,
+            )
+        return fake_run.body
+
+    def test_legacy_body_is_byte_identical(self) -> None:
+        self.assertEqual(self.create(), LEGACY_PULL_REQUEST_BODY)
+
+    def test_module_rows_are_rendered_as_a_table(self) -> None:
+        body = self.create(modules=ROWS)
+        self.assertIn("| module | old → new | doctor |\n| --- | --- | --- |\n| core | v3.0.0 → v3.1.0 | ok |", body)
+        self.assertTrue(body.startswith(LEGACY_PULL_REQUEST_BODY.split("## Verification")[0]))
+
+
+class ModuleUpdateRunnerTests(TestCase):
+    def fake(self, returncode: int, payload: dict):
+        def fake_run(command, **kwargs):
+            fake_run.command = command
+            fake_run.env = kwargs.get("env")
+            Path(command[command.index("--json") + 1]).write_text(json.dumps(payload), encoding="utf-8")
+            return subprocess.CompletedProcess(command, returncode, "", "")
+
+        return fake_run
+
+    def test_runs_the_cli_from_this_checkout_without_template_src(self) -> None:
+        payload = {"ref": "v3.1.0", "modules": [{"module": "core", "from": "v3.0.0", "to": "v3.1.0", "commit": "c" * 40}], "findings": []}
+        fake_run = self.fake(0, payload)
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            rows = fleet.run_ci_kit_update(Path("/repo"), "v3.1.0", env={"PYTHONPATH": "/other", "X": "1"})
+        self.assertEqual(rows, [{"module": "core", "from": "v3.0.0", "to": "v3.1.0", "doctor": "ok"}])
+        command = fake_run.command
+        self.assertEqual(command[:4], [sys.executable, "-m", "ci_kit.cli", "update"])
+        self.assertEqual(command[command.index("--repo") + 1], "/repo")
+        self.assertEqual(command[command.index("--to") + 1], "v3.1.0")
+        self.assertIn("--skip-legacy", command)
+        self.assertNotIn("--template-src", command)
+        tools = str(ROOT / "tools")
+        self.assertEqual(fake_run.env["PYTHONPATH"], tools + os.pathsep + "/other")
+        self.assertEqual(fake_run.env["X"], "1")
+
+    def test_python_path_is_only_the_checkout_when_unset(self) -> None:
+        fake_run = self.fake(0, {"modules": [], "findings": []})
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            fleet.run_ci_kit_update(Path("/repo"), "v3.1.0", env={})
+        self.assertEqual(fake_run.env["PYTHONPATH"], str(ROOT / "tools"))
+
+    def test_nonzero_exit_reports_finding_codes(self) -> None:
+        payload = {"ref": "v3.1.0", "modules": [], "findings": [{"code": "CIK-UPDATE-001", "module": "core", "message": "x", "path": None}, {"code": "CIK-DRIFT-001", "module": "java", "message": "y", "path": None}]}
+        with mock.patch.object(fleet, "run", side_effect=self.fake(1, payload)):
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "CIK-UPDATE-001, CIK-DRIFT-001"):
+                fleet.run_ci_kit_update(Path("/repo"), "v3.1.0", env={})
+
+    def test_nonzero_exit_without_report_is_still_an_error(self) -> None:
+        completed = subprocess.CompletedProcess([], 2, "", "boom")
+        with mock.patch.object(fleet, "run", return_value=completed):
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "ci-kit update failed"):
+                fleet.run_ci_kit_update(Path("/repo"), "v3.1.0", env={})
+
+
+class ApplyModuleUpdatesTests(TestCase):
+    def test_pending_changes_are_committed_first_then_squashed_back_to_the_working_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            git = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.invalid")
+            git("config", "user.name", "t")
+            (repo / "base.txt").write_text("1")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            (repo / "legacy.txt").write_text("legacy")
+
+            def fake_update(path: Path, ref: str, *, env: dict[str, str]):
+                self.assertEqual(git("status", "--porcelain"), "")
+                (path / "module.txt").write_text("module")
+                git("add", "-A")
+                git("commit", "-q", "-m", "module")
+                return ROWS
+
+            with mock.patch.object(fleet, "run_ci_kit_update", side_effect=fake_update):
+                rows = fleet.apply_module_updates(repo, "v3.1.0", env={})
+            self.assertEqual(rows, ROWS)
+            self.assertEqual(git("rev-parse", "HEAD"), base)
+            self.assertEqual(fleet.changed_paths(repo), ["legacy.txt", "module.txt"])
+
+    def test_failure_leaves_no_pull_request_state_behind(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+            subprocess.run(["git", "-c", "user.email=t@e.i", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "b"], cwd=repo, check=True)
+            with mock.patch.object(fleet, "run_ci_kit_update", side_effect=fleet.FleetUpdateError("ci-kit update failed: CIK-UPDATE-001")):
+                with self.assertRaises(fleet.FleetUpdateError):
+                    fleet.apply_module_updates(repo, "v3.1.0", env={})
+
+
+class HybridRealCopierUpdateTests(TestCase):
+    @skipUnless(shutil.which("copier"), "Copier is required for the hybrid update integration")
+    def test_migrated_repository_updates_legacy_and_core_without_conflicts(self) -> None:
+        sys.path.insert(0, str(ROOT / "tests"))
+        from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo
+        from ci_kit.plan import build_plan
+
+        template = lifecycle_template_repo()
+        repo = legacy_scenario_repo(template, "wave1-release")
+        migrated = ci_migrate.migrate(repo, "core", "v99.0.0", src_override=str(template))
+        self.assertEqual(migrated.findings, [])
+        canonical = "https://github.com/quokkify/ci-kit.git"
+        for name in (".copier-answers.yml", ".copier-answers.core.yml"):
+            path = repo / name
+            path.write_text(re.sub(r"^_src_path:.*$", f"_src_path: {canonical}", path.read_text(), flags=re.MULTILINE))
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "canonical source")
+        self.assertIn("validate.yml@v99.0.0", (repo / ".github/workflows/validate.yml").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(home),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.file://{template}/.insteadOf",
+                "GIT_CONFIG_VALUE_0": canonical,
+            })
+            fleet.update_template(repo, template_source=canonical, template_ref="v99.1.0", env=env)
+            rows = fleet.apply_module_updates(repo, "v99.1.0", env=env)
+        self.assertEqual([(row["module"], row["to"]) for row in rows], [("core", "v99.1.0")])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        self.assertIn("validate.yml@v99.1.0", (repo / ".github/workflows/validate.yml").read_text())
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.yml").read_text())["_commit"], "v99.1.0")
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.core.yml").read_text())["_commit"], "v99.1.0")
+        legacy_refs = [
+            path.name for path in (repo / ".github/workflows").glob("*.yml")
+            if path.name != "validate.yml" and "@v99.0.0" in path.read_text()
+        ]
+        self.assertEqual(legacy_refs, [])
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+
+
+class ModuleReportTests(TestCase):
+    def inventory(self, **kwargs):
+        return fleet.TemplateInventory(
+            commit="v3.0.0", target_commit="v3.1.0", components=("none",), baseline="2/2",
+            missing_baseline=(), docker="unknown", codeql="unknown", allure_report="unknown",
+            release_please="unknown", renovate="unknown", **kwargs,
+        )
+
+    def test_reports_carry_modules_and_state(self) -> None:
+        result = fleet.Result("quokkify/example", "would-update", "a.yml", self.inventory(modules=("core", "java"), state="hybrid(ci)"))
+        counts = {"would-update": 1}
+        report = json.loads(fleet.json_report([result], counts))
+        self.assertEqual(report["repositories"][0]["template"]["modules"], ["core", "java"])
+        self.assertEqual(report["repositories"][0]["template"]["state"], "hybrid(ci)")
+        markdown = fleet.markdown_report([result], counts)
+        self.assertIn("| Modules / state |", markdown)
+        self.assertIn("core, java / hybrid(ci) |", markdown)
+        self.assertIn("state=hybrid(ci) modules=core,java", "\n".join(fleet.console_lines(result)))
+
+    def test_new_statuses_have_markdown_labels_and_modules_state_has_no_baseline_gap(self) -> None:
+        result = fleet.Result("quokkify/example", "up-to-date", "", self.inventory(modules=("core",), state="modules"))
+        self.assertEqual(fleet.configuration_gap_count([result]), 0)
+        labels = {
+            "foreign-module-template": "Foreign module template",
+            "unknown-module": "Unknown module",
+            "unsafe-answers-file": "Unsafe answers file",
+        }
+        for status, label in labels.items():
+            self.assertIn(label, fleet.markdown_report([fleet.Result("quokkify/x", status)], {status: 1}))
+
+    def test_legacy_inventory_defaults(self) -> None:
+        inventory = fleet.inventory_from_answers(LEGACY_ANSWERS_TEXT, Path("/nonexistent"))
+        self.assertEqual((inventory.modules, inventory.state), ((), "legacy"))
+
+
+class MigrateModeTests(TestCase):
+    LEGACY = "_commit: v3.1.0\n_src_path: gh:quokkify/ci-kit\n"
+    FINDING = ci_migrate.Finding("CIK-MIGRATE-003", "core", ".github/workflows/validate.yml differs\n--- a\n+++ b", ".github/workflows/validate.yml")
+
+    def migrate(self, files, *, dry_run=True, clone=None, doctor=(0, "ok: modules (none)"), result=None, push_sha="b" * 40, existing=None, **patches):
+        migrated = result or ci_migrate.MigrateResult("core", "validate", "v3.1.0", ["validate / lint"], ["ci / gate"], ["a" * 40, "c" * 40])
+        calls: list[list[str]] = []
+
+        def fake_run(command, **_):
+            calls.append(list(command))
+            if command[:3] == ["gh", "pr", "list"]:
+                return subprocess.CompletedProcess(command, 0, json.dumps(existing or []), "")
+            if command[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(command, 0, "https://github.com/quokkify/example/pull/42\n", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(fleet, "fetch_answers_files", return_value=files), \
+             mock.patch.object(fleet, "clone_repository", side_effect=clone or materialize_files({".copier-answers.yml": files.get("legacy", "")})), \
+             mock.patch.object(fleet, "run_ci_kit_doctor", return_value=doctor) as doctor_mock, \
+             mock.patch.object(fleet, "run_ci_kit_migrate", return_value=migrated) as migrate_mock, \
+             mock.patch.object(fleet, "push_automation_branch", return_value=push_sha) as push_mock, \
+             mock.patch.object(fleet, "run", side_effect=fake_run), \
+             mock.patch.object(fleet, "gh_json", return_value=existing or []), \
+             mock.patch.object(fleet, "git_head", return_value=push_sha), \
+             mock.patch.object(fleet, "squash_to_base"), \
+             tempfile.TemporaryDirectory() as temporary:
+            outcome = fleet.migrate_repository(
+                fleet.Repository("quokkify/example", "main"),
+                module="core", target_ref="v3.1.0", dry_run=dry_run, env={}, workspace=Path(temporary),
+            )
+        return outcome, doctor_mock, migrate_mock, push_mock, calls
+
+    def test_no_legacy_answers_is_not_applicable(self) -> None:
+        outcome, doctor_mock, *_ = self.migrate({"core": CORE_ANSWERS_TEXT})
+        self.assertEqual(outcome.status, "not-applicable")
+        doctor_mock.assert_not_called()
+
+    def test_area_already_handed_off_is_not_applicable(self) -> None:
+        outcome, doctor_mock, *_ = self.migrate({"legacy": self.LEGACY + "handed_off:\n  - validate\n"})
+        self.assertEqual(outcome.status, "not-applicable")
+        doctor_mock.assert_not_called()
+
+    def test_installed_module_is_not_applicable(self) -> None:
+        outcome, *_ = self.migrate({"legacy": self.LEGACY, "core": CORE_ANSWERS_TEXT})
+        self.assertEqual(outcome.status, "not-applicable")
+
+    def test_language_components_are_not_applicable_without_cloning(self) -> None:
+        legacy = LEGACY_ANSWERS_TEXT + "components:\n  - type: python\n    path: .\n"
+        with mock.patch.object(fleet, "clone_repository") as clone_mock:
+            outcome, doctor_mock, migrate_mock, push_mock, calls = self.migrate({"legacy": legacy}, dry_run=False)
+        self.assertEqual((outcome.status, outcome.detail), ("not-applicable", "language components"))
+        for called in (clone_mock, doctor_mock, migrate_mock, push_mock):
+            called.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_migrate_refusal_for_unowned_jobs_is_not_applicable(self) -> None:
+        finding = ci_migrate.Finding("CIK-MIGRATE-005", "core", "job docker calls a reusable workflow; its check names cannot be derived; migrate after its owner module exists", ".github/workflows/validate.yml")
+        refused = ci_migrate.MigrateResult("core", "validate", "v3.1.0", findings=[finding])
+        outcome, _, _, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, result=refused)
+        self.assertEqual(outcome.status, "not-applicable")
+        self.assertIn("reusable workflow", outcome.detail)
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_legacy_commit_other_than_target_needs_update_first(self) -> None:
+        outcome, doctor_mock, migrate_mock, push_mock, _ = self.migrate({"legacy": LEGACY_ANSWERS_TEXT})
+        self.assertEqual(outcome.status, "needs-update-first")
+        self.assertIn("v2.8.2", outcome.detail)
+        doctor_mock.assert_not_called()
+        migrate_mock.assert_not_called()
+        push_mock.assert_not_called()
+
+    def test_foreign_legacy_template_is_reported(self) -> None:
+        outcome, *_ = self.migrate({"legacy": "_commit: v3.1.0\n_src_path: gh:someone/else\n"})
+        self.assertEqual(outcome.status, "foreign-template")
+
+    def test_doctor_failure_rejects_without_migrating_or_pushing(self) -> None:
+        doctor = (1, "CIK-DRIFT-001 core .github/x.yml: drift (docs/errors/CIK-DRIFT-001.md)\n")
+        outcome, _, migrate_mock, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, doctor=doctor)
+        self.assertEqual(outcome.status, "migrate-rejected")
+        self.assertEqual(outcome.detail, "CIK-DRIFT-001")
+        migrate_mock.assert_not_called()
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "pr", "create"]])
+
+    def test_migrate_findings_reject_and_keep_the_diff(self) -> None:
+        failed = ci_migrate.MigrateResult("core", "validate", "v3.1.0", findings=[self.FINDING])
+        outcome, _, _, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, result=failed)
+        self.assertEqual(outcome.status, "migrate-rejected")
+        self.assertEqual(outcome.detail, "CIK-MIGRATE-003")
+        self.assertIn("+++ b", outcome.migration["findings"][0]["message"])
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "pr", "create"]])
+
+    def test_dry_run_reports_would_migrate_without_pushing(self) -> None:
+        outcome, _, migrate_mock, push_mock, calls = self.migrate({"legacy": self.LEGACY})
+        self.assertEqual(outcome.status, "would-migrate")
+        migrate_mock.assert_called_once()
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_write_mode_pushes_one_commit_and_creates_then_edits_the_pull_request(self) -> None:
+        outcome, _, migrate_mock, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False)
+        self.assertEqual(outcome.status, "pull-request")
+        self.assertEqual(outcome.detail, "https://github.com/quokkify/example/pull/42")
+        self.assertEqual(migrate_mock.call_args.args[1:3], ("core", "v3.1.0"))
+        self.assertEqual(push_mock.call_args.kwargs["branch"], "ci-kit/migrate-core")
+        self.assertEqual(push_mock.call_args.kwargs["message"], "chore(ci-kit): hand off validate to core module")
+        create = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
+        self.assertEqual(create[create.index("--title") + 1], "chore(ci-kit): hand off validate to core module")
+        edit = next(c for c in calls if c[:3] == ["gh", "pr", "edit"])
+        self.assertEqual(edit[3], "https://github.com/quokkify/example/pull/42")
+        body = edit[edit.index("--body") + 1]
+        self.assertIn("python scripts/migration_checks.py --pr quokkify/example#42", body)
+        self.assertEqual(ci_migrate.parse_marker(body)["commits"], ["b" * 40])
+
+    def test_existing_pull_request_body_is_refreshed(self) -> None:
+        existing = [{"url": "https://github.com/quokkify/example/pull/7"}]
+        outcome, _, _, _, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, existing=existing)
+        self.assertEqual(outcome.detail, "https://github.com/quokkify/example/pull/7")
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "pr", "create"]])
+        edit = next(c for c in calls if c[:3] == ["gh", "pr", "edit"])
+        self.assertIn("quokkify/example#7", edit[edit.index("--body") + 1])
+
+    def test_custom_branch_is_used(self) -> None:
+        with mock.patch.object(fleet, "fetch_answers_files", return_value={"legacy": self.LEGACY}), \
+             mock.patch.object(fleet, "clone_repository", side_effect=materialize_files({".copier-answers.yml": self.LEGACY})), \
+             mock.patch.object(fleet, "run_ci_kit_doctor", return_value=(0, "")), \
+             mock.patch.object(fleet, "run_ci_kit_migrate", return_value=ci_migrate.MigrateResult("core", "validate", "v3.1.0")), \
+             mock.patch.object(fleet, "push_automation_branch", return_value="b" * 40) as push_mock, \
+             mock.patch.object(fleet, "ensure_migration_pull_request", return_value="u"), \
+             mock.patch.object(fleet, "git_head", return_value="b" * 40), \
+             mock.patch.object(fleet, "squash_to_base"), \
+             tempfile.TemporaryDirectory() as temporary:
+            fleet.migrate_repository(
+                fleet.Repository("quokkify/example", "main"), module="core", target_ref="v3.1.0",
+                dry_run=False, env={}, workspace=Path(temporary), branch="custom/branch",
+            )
+        self.assertEqual(push_mock.call_args.kwargs["branch"], "custom/branch")
+
+
+class MigrationPullRequestBodyTests(TestCase):
+    def body(self, **kwargs) -> str:
+        result = ci_migrate.MigrateResult("core", "validate", "v3.1.0", ["validate / lint"], ["ci / gate"], ["b" * 40])
+        return fleet.migration_pr_body(result, "quokkify/example", doctor="ok: modules core", **kwargs)
+
+    def test_body_sections_and_command(self) -> None:
+        body = self.body()
+        for text in (
+            "hand off validate to core",
+            "add core module",
+            "ok: modules core",
+            "validate / lint",
+            "ci / gate",
+            "python scripts/migration_checks.py --pr quokkify/example#<n>",
+            "git revert",
+            "--revert",
+        ):
+            self.assertIn(text, body)
+        filled = self.body(number=5)
+        self.assertIn("migration_checks.py --pr quokkify/example#5\n", filled)
+        self.assertNotIn("<n>", filled)
+
+    def test_marker_follows_text_and_json_parses(self) -> None:
+        body = self.body()
+        self.assertIn(ci_migrate.MARKER + "\n```json\n", body)
+        self.assertLess(body.index("git revert"), body.index(ci_migrate.MARKER))
+        payload = ci_migrate.parse_marker(body)
+        self.assertEqual(payload["module"], "core")
+        self.assertEqual(payload["checks_before"], ["validate / lint"])
+        self.assertEqual(payload["checks_after"], ["ci / gate"])
+        self.assertEqual(payload["commits"], ["b" * 40])
+        self.assertEqual(payload["findings"], [])
+
+
+class RunCiKitMigrateTests(TestCase):
+    def test_runs_the_cli_and_parses_the_result(self) -> None:
+        payload = {"module": "core", "area": "validate", "ref": "v3.1.0", "checks_before": ["a"], "checks_after": ["ci / gate"], "commits": ["c" * 40], "findings": []}
+
+        def fake_run(command, **kwargs):
+            fake_run.command, fake_run.env = command, kwargs.get("env")
+            Path(command[command.index("--json") + 1]).write_text(json.dumps(payload), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            result = fleet.run_ci_kit_migrate(Path("/repo"), "core", "v3.1.0", env={})
+        self.assertEqual(fake_run.command[:4], [sys.executable, "-m", "ci_kit.cli", "migrate"])
+        self.assertEqual(fake_run.command[fake_run.command.index("--module") + 1], "core")
+        self.assertEqual(fake_run.command[fake_run.command.index("--to") + 1], "v3.1.0")
+        self.assertEqual(fake_run.env["PYTHONPATH"], str(ROOT / "tools"))
+        self.assertEqual((result.checks_after, result.commits, result.findings), (["ci / gate"], ["c" * 40], []))
+
+    def test_findings_are_parsed(self) -> None:
+        payload = {"module": "core", "area": "validate", "ref": "v3.1.0", "checks_before": [], "checks_after": [], "commits": [], "findings": [{"code": "CIK-MIGRATE-003", "module": "core", "message": "d", "path": "p"}]}
+
+        def fake_run(command, **kwargs):
+            Path(command[command.index("--json") + 1]).write_text(json.dumps(payload), encoding="utf-8")
+            return subprocess.CompletedProcess(command, 1, "", "")
+
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            result = fleet.run_ci_kit_migrate(Path("/repo"), "core", "v3.1.0", env={})
+        self.assertEqual(result.findings[0].code, "CIK-MIGRATE-003")
+
+    def test_missing_report_is_an_error(self) -> None:
+        with mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 2, "", "boom")):
+            with self.assertRaisesRegex(fleet.FleetUpdateError, "ci-kit migrate failed"):
+                fleet.run_ci_kit_migrate(Path("/repo"), "core", "v3.1.0", env={})
+
+
+class RunCiKitDoctorTests(TestCase):
+    def test_runs_doctor_from_this_checkout(self) -> None:
+        def fake_run(command, **kwargs):
+            fake_run.command, fake_run.env = command, kwargs.get("env")
+            return subprocess.CompletedProcess(command, 1, "CIK-DRIFT-001 core -: x\n", "")
+
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            code, output = fleet.run_ci_kit_doctor(Path("/repo"), env={})
+        self.assertEqual(fake_run.command, [sys.executable, "-m", "ci_kit.cli", "doctor", "--repo", "/repo"])
+        self.assertEqual(fake_run.env["PYTHONPATH"], str(ROOT / "tools"))
+        self.assertEqual(code, 1)
+        self.assertEqual(fleet.finding_codes(output), ["CIK-DRIFT-001"])
+
+
+class SquashToBaseTests(TestCase):
+    def test_migration_commits_become_one_pending_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            git = lambda *args: subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+            git("init", "-q", "-b", "main")
+            git("config", "user.email", "t@example.invalid")
+            git("config", "user.name", "t")
+            (repo / "a").write_text("1")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            base = fleet.git_head(repo)
+            for name in ("b", "c"):
+                (repo / name).write_text(name)
+                git("add", "-A")
+                git("commit", "-q", "-m", name)
+            fleet.squash_to_base(repo, base)
+            self.assertEqual(fleet.git_head(repo), base)
+            self.assertEqual(fleet.changed_paths(repo), ["b", "c"])
+
+
+class MigrateReportTests(TestCase):
+    def rejected(self):
+        migration = {"findings": [{"code": "CIK-MIGRATE-003", "module": "core", "message": "x differs\n--- a\n+++ b", "path": "x"}]}
+        return fleet.Result("quokkify/example", "migrate-rejected", "CIK-MIGRATE-003", migration=migration)
+
+    def test_json_report_keeps_the_migration_diff(self) -> None:
+        report = json.loads(fleet.json_report([self.rejected()], {"migrate-rejected": 1}))
+        entry = report["repositories"][0]
+        self.assertEqual(entry["status"], "migrate-rejected")
+        self.assertEqual(entry["detail"], "CIK-MIGRATE-003")
+        self.assertIn("+++ b", entry["migration"]["findings"][0]["message"])
+
+    def test_json_report_omits_migration_when_absent(self) -> None:
+        report = json.loads(fleet.json_report([fleet.Result("quokkify/x", "up-to-date")], {}))
+        self.assertNotIn("migration", report["repositories"][0])
+
+    def test_markdown_lists_rejection_codes_and_new_statuses(self) -> None:
+        markdown = fleet.markdown_report([self.rejected()], {"migrate-rejected": 1})
+        self.assertIn("Migration rejected", markdown)
+        self.assertIn("CIK-MIGRATE-003", markdown.split("### Details", 1)[1])
+        for status, label in {"not-applicable": "Not applicable", "needs-update-first": "Needs update first", "would-migrate": "Would migrate"}.items():
+            self.assertIn(label, fleet.markdown_report([fleet.Result("quokkify/x", status)], {status: 1}))
+
+
+class MigrateCommandLineTests(TestCase):
+    ENV = {"GITHUB_TOKEN": "t", "GH_TOKEN": ""}
+
+    def run_main(self, argv, *, visibility="PRIVATE", outcome=None):
+        metadata = {"nameWithOwner": "quokkify/knowledge", "defaultBranchRef": {"name": "main"}, "isArchived": False, "isFork": False, "visibility": visibility}
+        outcome = outcome or fleet.Result("quokkify/knowledge", "would-migrate", "validate")
+        with mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.dict("os.environ", self.ENV, clear=False), \
+             mock.patch.object(fleet, "gh_json", return_value=metadata), \
+             mock.patch.object(fleet, "migrate_repository", return_value=outcome) as migrate_mock, \
+             mock.patch.object(fleet, "process_repository") as process_mock:
+            status = fleet.main(argv)
+        return status, migrate_mock, process_mock
+
+    def test_explicit_private_repository_is_migrated(self) -> None:
+        status, migrate_mock, process_mock = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0"])
+        self.assertEqual(status, 0)
+        process_mock.assert_not_called()
+        kwargs = migrate_mock.call_args.kwargs
+        self.assertEqual((kwargs["module"], kwargs["target_ref"], kwargs["dry_run"]), ("core", "v3.1.0", True))
+        self.assertEqual(kwargs["branch"], "ci-kit/migrate-core")
+
+    def test_explicit_private_repository_ignores_public_only(self) -> None:
+        status, migrate_mock, _ = self.run_main(["--dry-run", "--public-only", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0"])
+        self.assertEqual(status, 0)
+        migrate_mock.assert_called_once()
+
+    def test_branch_override_is_respected(self) -> None:
+        _, migrate_mock, _ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0", "--branch", "x/y"])
+        self.assertEqual(migrate_mock.call_args.kwargs["branch"], "x/y")
+
+    def test_rejection_fails_the_run_and_writes_the_report(self) -> None:
+        rejected = fleet.Result("quokkify/knowledge", "migrate-rejected", "CIK-MIGRATE-003", migration={"findings": []})
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / "r.json"
+            status, *_ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0", "--json-report", str(report)], outcome=rejected)
+            data = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual(status, 1)
+        self.assertEqual(data["repositories"][0]["migration"], {"findings": []})
+
+    def test_not_applicable_repository_does_not_fail_the_run(self) -> None:
+        skipped = fleet.Result("quokkify/knowledge", "not-applicable", "language components")
+        status, *_ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0"], outcome=skipped)
+        self.assertEqual(status, 0)
+
+    def test_module_without_area_is_a_usage_error(self) -> None:
+        stderr = StringIO()
+        with mock.patch.object(sys, "stderr", stderr):
+            status, migrate_mock, _ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "java", "--template-ref", "v3.1.0"])
+        self.assertEqual(status, 2)
+        self.assertIn("java owns no hand-off area", stderr.getvalue())
+        migrate_mock.assert_not_called()
+
+    def test_unknown_module_is_a_usage_error(self) -> None:
+        status, migrate_mock, _ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "nope", "--template-ref", "v3.1.0"])
+        self.assertEqual(status, 2)
+        migrate_mock.assert_not_called()
 
 
 class CommandLineTests(TestCase):

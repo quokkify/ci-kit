@@ -93,6 +93,8 @@ def normalize_answers(tree: dict[str, bytes], expect_module: str | None = None) 
         for line in raw.decode().splitlines(keepends=True):
             if line.startswith(("_commit:", "_src_path:")):
                 continue
+            if line.rstrip("\n") == "handed_off: []":
+                continue
             if line.startswith("module:"):
                 found_module = True
                 if expect_module is not None and line.strip() != f"module: {expect_module}":
@@ -158,3 +160,53 @@ def rendered_from(template: Path, *modules: str, ref: str = "HEAD") -> Path:
             check=True, capture_output=True, text=True,
         )
     return dest
+
+
+def component_less_scenarios() -> list[str]:
+    import yaml
+
+    names = []
+    for path in sorted((ROOT / "tests/scenarios").glob("*.yml")):
+        data = yaml.safe_load(path.read_text())
+        if isinstance(data, dict) and not data.get("components"):
+            names.append(path.stem)
+    return names
+
+
+def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0", overrides: dict | None = None) -> Path:
+    import yaml
+
+    data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
+    data["toolkit_version"] = ref
+    data.update(overrides or {})
+    data_file = mkdtemp("scenario-") / "data.yml"
+    data_file.write_text(yaml.safe_dump(data))
+    dest = mkdtemp("legacy-")
+    subprocess.run(
+        [shutil.which("copier"), "copy", "--trust", "--defaults", "--vcs-ref", ref,
+         "--data-file", str(data_file), str(template), str(dest)],
+        check=True, capture_output=True, text=True,
+    )
+    for key in ("allure_external_workflow_path", "allure_categories_file"):
+        rel = data.get(key)
+        if rel and not (dest / rel).exists():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_text("[]\n" if rel.endswith(".json") else "name: Run tests\non: push\njobs: {}\n")
+    git(dest, "init", "-q")
+    _commit_all(dest, "initial")
+    return dest
+
+
+MODULE_UPDATE_OPENER = "if compgen -G '.copier-answers.*.yml'"
+
+
+def strip_module_update_block(workflow: str) -> str:
+    lines = workflow.splitlines(keepends=True)
+    openers = [i for i, line in enumerate(lines) if line.lstrip().startswith(MODULE_UPDATE_OPENER)]
+    assert len(openers) == 1, f"expected exactly one module-update block, found {len(openers)}"
+    start = openers[0]
+    indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].rstrip("\n") == f"{indent}fi")
+    if end + 1 < len(lines) and not lines[end + 1].strip():
+        end += 1
+    return "".join(lines[:start] + lines[end + 1 :])

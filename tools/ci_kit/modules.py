@@ -6,9 +6,10 @@ from typing import NamedTuple
 class ModuleInfo(NamedTuple):
     requires: tuple[str, ...]
     job: str
+    language: bool = False
 
 
 MODULES: dict[str, ModuleInfo] = {
     "core": ModuleInfo((), "core-checks"),
-    "java": ModuleInfo(("core",), "java"),
+    "java": ModuleInfo(("core",), "java", True),
 }

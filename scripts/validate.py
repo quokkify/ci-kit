@@ -1855,6 +1855,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
         "allure-external": ["default", "github-actions"],
+        "wave1-release": ["default", "github-actions"],
+        "allure-component-less-default": ["default", "github-actions"],
         "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
@@ -2053,6 +2055,15 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                       and configured.get("skip-empty-artifacts") is True
                       and configured.get("categories-file") == ".github/allure/categories.json",
                       "allure-external: rendered source workflow or bounded artifact contract is incomplete")
+            elif scenario == "allure-component-less-default":
+                configured = caller["with"]
+                check(configured.get("artifact-mode") == "external"
+                      and configured.get("source-workflow") == "Validate"
+                      and configured.get("source-workflow-path") == ".github/workflows/validate.yml"
+                      and configured.get("artifact-prefix") == "allure-results-"
+                      and configured.get("minimum-artifacts") == 1
+                      and configured.get("maximum-artifacts") == 50,
+                      f"{scenario}: default external source artifact contract is incomplete")
             else:
                 for artifact_name in artifact_names:
                     check(artifact_name in validate_text, f"{scenario}: missing source workflow artifact for {artifact_name}")
