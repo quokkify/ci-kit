@@ -81,6 +81,28 @@ components:
     {% endif %}
     {% endfor %}
 
+java_components:
+  when: "{{ module == 'java' }}"
+  type: yaml
+  help: "Java components such as [{id: backend-java, name: Backend Java, path: backend, java_version: \"21\"}]. id is the stable GitHub Actions job identifier and name is its display name. java_version: 17, 21 or 25."
+  default: >-
+    {% if _commit is defined and java_components is defined %}{{ java_components }}{% else %}[{id: app-java, name: Application Java, path: ., java_version: "21"}]{% endif %}
+  validator: >-
+    {% if java_components is string or java_components is mapping or java_components is not sequence or not java_components %}java_components must be a non-empty YAML list of mappings.{% else %}
+    {% set java_state = namespace(ids=[]) %}
+    {% for component in java_components %}
+    {% if component is not mapping %}Every java component must be a mapping with id, name, path, and java_version.{% else %}
+    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
+    {% if component.id in ['plan', 'core-checks', 'java', 'gate'] %}Component id {{ component.id }} conflicts with a generated job id.{% endif %}
+    {% if component.id in java_state.ids %}Component ids must be unique: {{ component.id }}.{% endif %}
+    {% if component.id is string %}{% set java_state.ids = java_state.ids + [component.id] %}{% endif %}
+    {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
+    {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
+    {% if (component.java_version | string) not in ['17', '21', '25'] %}java_version must be one of 17, 21, 25.{% endif %}
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
 docker:
   when: "{{ module == 'legacy' }}"
   type: bool

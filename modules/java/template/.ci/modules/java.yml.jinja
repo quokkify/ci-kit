@@ -1,0 +1,8 @@
+schema_version: 1
+components:
+{%- for component in java_components %}
+  - id: {{ component.id | to_json }}
+    name: {{ component.name | to_json(ensure_ascii=False) }}
+    path: {{ component.path | to_json(ensure_ascii=False) }}
+    java_version: {{ component.java_version | string | to_json }}
+{%- endfor %}
