@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 import urllib.error
 import urllib.request
 import zipfile
@@ -258,8 +259,15 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
     if not isinstance(install_command, str):
         return errors
 
-    match = re.fullmatch(r"python -m pip install copier==(\d+\.\d+\.\d+)", install_command)
-    require(bool(match), "install-command must be a direct copier==X.Y.Z pin")
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    expected_pins = " ".join(project["project"]["dependencies"])
+    require(
+        install_command == f"python -m pip install {expected_pins}",
+        "install-command must pin exactly the ci_kit runtime dependencies from pyproject.toml "
+        f"(python -m pip install {expected_pins}); the fleet imports ci_kit",
+    )
+    match = re.search(r"(?:^|\s)copier==(\d+\.\d+\.\d+)(?:\s|$)", install_command)
+    require(bool(match), "install-command must pin copier==X.Y.Z")
     if not match:
         return errors
 
