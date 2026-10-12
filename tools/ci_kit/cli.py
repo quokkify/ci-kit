@@ -13,9 +13,21 @@ def _compact(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
+def _escape_data(value: str) -> str:
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(value: str) -> str:
+    return _escape_data(value).replace(":", "%3A").replace(",", "%2C")
+
+
+def _annotations() -> bool:
+    return os.environ.get("GITHUB_ACTIONS") == "true"
+
+
 def format_finding(finding: Finding) -> str:
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        return f"::error title={finding.code}::{finding.module}: {finding.message}"
+    if _annotations():
+        return f"::error title={_escape_property(finding.code)}::{_escape_data(f'{finding.module}: {finding.message}')}"
     return f"{finding.code} {finding.module} {finding.path or '-'}: {finding.message} (docs/errors/{finding.code}.md)"
 
 
@@ -30,7 +42,7 @@ def _plan(args: argparse.Namespace) -> int:
         for key, value in outputs.items():
             print(f"{key}={value}")
     for finding in plan.findings:
-        print(format_finding(finding), file=sys.stderr)
+        print(format_finding(finding), file=None if _annotations() else sys.stderr)
     return 1 if plan.findings else 0
 
 

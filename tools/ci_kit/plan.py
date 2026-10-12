@@ -74,6 +74,9 @@ def build_plan(repo: Path, *, drift: bool = True) -> Plan:
         rel = _rel(repo, decl_path)
         try:
             data = yaml.safe_load(decl_path.read_text())
+        except OSError as error:
+            findings.append(Finding("CIK-CORE-004", module, f"cannot read declaration: {error.strerror or error}", rel))
+            continue
         except (yaml.YAMLError, UnicodeDecodeError) as error:
             findings.append(Finding("CIK-CORE-004", module, f"cannot parse declaration: {error}".splitlines()[0], rel))
             continue

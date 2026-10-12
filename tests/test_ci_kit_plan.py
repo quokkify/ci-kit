@@ -57,6 +57,20 @@ class PlanTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(codes(build_plan(repo_with_java_decl(text), drift=False)), ["CIK-CORE-004"])
 
+    def test_directory_or_broken_symlink_declaration_is_cik_core_004(self):
+        for kind in ("dir", "symlink"):
+            with self.subTest(kind=kind):
+                repo = rendered_repo("core", "java")
+                target = repo / ".ci/modules/java.yml"
+                target.unlink()
+                if kind == "dir":
+                    target.mkdir()
+                else:
+                    target.symlink_to(repo / "missing.yml")
+                plan = build_plan(repo, drift=False)
+                self.assertEqual(codes(plan), ["CIK-CORE-004"])
+                self.assertIn("cannot read declaration", plan.findings[0].message)
+
     def test_schema_violation_is_cik_core_004(self):
         self.assertEqual(codes(build_plan(repo_with_java_decl("schema_version: 1\ncomponents: []\n"), drift=False)), ["CIK-CORE-004"])
 
@@ -73,7 +87,7 @@ class PlanTests(unittest.TestCase):
     def test_java_without_core_is_cik_core_003(self):
         self.assertEqual(codes(build_plan(rendered_repo("java"), drift=False)), ["CIK-CORE-003"])
 
-    def test_broken_core_yields_one_finding_for_core_only(self):
+    def test_broken_core_declaration_also_fails_java_requires(self):
         repo = rendered_repo("core", "java")
         (repo / ".ci/modules/core.yml").write_text("a: [")
         plan = build_plan(repo, drift=False)
@@ -97,6 +111,21 @@ class CliTests(unittest.TestCase):
         code, out, _ = self.run_cli("doctor", "--repo", str(repo), env={"GITHUB_ACTIONS": "true"})
         self.assertEqual(code, 1)
         self.assertTrue(out.startswith("::error title=CIK-CORE-002::java: "))
+
+    def test_annotation_escapes_percent_and_newlines(self):
+        from ci_kit.plan import Finding
+        from ci_kit.cli import format_finding
+
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            line = format_finding(Finding("CIK-CORE-004", "ja,va", "100%\nbad\r::error::x"))
+        self.assertEqual(line, "::error title=CIK-CORE-004::ja,va: 100%25%0Abad%0D::error::x")
+        self.assertNotIn("\n", line)
+
+    def test_plan_annotations_go_to_stdout(self):
+        repo = rendered_repo("java")
+        _, out, err = self.run_cli("plan", "--repo", str(repo), env={"GITHUB_ACTIONS": "true"})
+        self.assertIn("::error title=CIK-CORE-003::", out)
+        self.assertEqual(err, "")
 
     def test_plan_writes_compact_github_output(self):
         repo = rendered_repo("core", "java")
