@@ -37,11 +37,10 @@ class CheckNamesTests(unittest.TestCase):
         repo = legacy_scenario_repo(template(), "allure-external")
         self.assertEqual(legacy_check_names(repo / VALIDATE), ["Shared template contract"])
 
-    def test_component_jobs_follow_in_file_order(self):
+    def test_reusable_workflow_jobs_are_refused(self):
         repo = legacy_scenario_repo(template(), "java")
-        names = legacy_check_names(repo / VALIDATE)
-        self.assertEqual(names[0], "Shared template contract")
-        self.assertGreater(len(names), 1)
+        with self.assertRaisesRegex(ValueError, "reusable workflow"):
+            legacy_check_names(repo / VALIDATE)
 
     def test_job_id_used_when_name_missing(self):
         path = mkdtemp("names-") / "validate.yml"
@@ -105,6 +104,32 @@ class PreconditionTests(unittest.TestCase):
     def test_module_without_area_is_004(self):
         result = migrate(self.repo, "java", "v99.0.0", src_override=self.src)
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-004"])
+        self.assert_untouched()
+
+    def test_language_components_are_005(self):
+        repo = legacy_scenario_repo(template(), "python")
+        head = git(repo, "rev-parse", "HEAD")
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
+        self.assertIn("language components", result.findings[0].message)
+        self.assertEqual(result.commits, [])
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+
+    def test_reusable_workflow_job_without_components_is_005(self):
+        repo = legacy_scenario_repo(template(), "allure-external", overrides={"docker": True})
+        head = git(repo, "rev-parse", "HEAD")
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
+        self.assertIn("docker", result.findings[0].message)
+        self.assertEqual(result.commits, [])
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+
+    def test_missing_git_is_001(self):
+        with mock.patch.dict("os.environ", {"PATH": str(mkdtemp("nopath-"))}):
+            result = self.run_migrate()
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
+        self.assertIn("cannot run git", result.findings[0].message)
         self.assert_untouched()
 
     def test_missing_legacy_answers_is_002(self):

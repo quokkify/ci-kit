@@ -80,6 +80,8 @@ def legacy_check_names(validate_yml: Path) -> list[str]:
         return []
     names = []
     for job_id, job in jobs.items():
+        if isinstance(job, dict) and "uses" in job:
+            raise ValueError(f"job {job_id} calls a reusable workflow; its check names cannot be derived")
         name = job.get("name") if isinstance(job, dict) else None
         names.append(str(name) if name else str(job_id))
     return names
@@ -147,7 +149,10 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     if area_name is None:
         return fail("CIK-MIGRATE-004", f"module {module} owns no hand-off area")
     area = AREAS[area_name]
-    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True, check=False)
+    try:
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True, check=False)
+    except OSError as error:
+        return fail("CIK-MIGRATE-001", f"cannot run git: {error.strerror or error}")
     if status.returncode:
         return fail("CIK-MIGRATE-001", "not a git repository or git status failed")
     if status.stdout.strip():
@@ -155,6 +160,8 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     legacy, error = load_answers(repo)
     if legacy is None:
         return fail("CIK-MIGRATE-002", error or f"cannot read {ANSWERS}", ANSWERS)
+    if area_name == "validate" and legacy.get("components"):
+        return fail("CIK-MIGRATE-005", "repository has language components; migrate after language modules exist", ANSWERS)
     if str(legacy.get("_commit") or "") != to:
         return fail("CIK-MIGRATE-002", f"legacy _commit is {legacy.get('_commit')}, not {to}; run ci-kit update --module legacy --to {to} first", ANSWERS)
     handed = legacy.get("handed_off", [])
@@ -171,7 +178,10 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
         return result
 
     validate = repo / area.legacy_paths[0]
-    result.checks_before = legacy_check_names(validate) if validate.is_file() else []
+    try:
+        result.checks_before = legacy_check_names(validate) if validate.is_file() else []
+    except ValueError as error:
+        return fail("CIK-MIGRATE-005", f"{error}; migrate after its owner module exists", area.legacy_paths[0])
     head = _git(repo, "rev-parse", "HEAD")
     commits: list[str] = []
 

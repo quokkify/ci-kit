@@ -115,6 +115,10 @@ class LegacyChecksTests(TestCase):
         with self.assertRaises(module.Refusal):
             self.read(None)
 
+    def test_reusable_workflow_job_refused(self):
+        with self.assertRaisesRegex(module.Refusal, "docker.*reusable workflow"):
+            self.read(encoded("jobs:\n  a:\n    name: Alpha\n  docker:\n    uses: quokkify/ci-kit/.github/workflows/docker-build.yml@v1.0.0\n"))
+
     def test_job_names_and_endpoint(self):
         seen = []
 

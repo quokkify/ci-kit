@@ -75,7 +75,10 @@ def legacy_checks_at(repo: str, ref: str) -> list[str]:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "validate.yml"
         path.write_bytes(base64.b64decode(content))
-        names = legacy_check_names(path)
+        try:
+            names = legacy_check_names(path)
+        except ValueError as error:
+            raise Refusal(f"validate.yml at {ref}: {error}; refusing") from error
     if not names:
         raise Refusal(f"validate.yml at {ref} defines no jobs; refusing")
     return names

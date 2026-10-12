@@ -173,11 +173,12 @@ def component_less_scenarios() -> list[str]:
     return names
 
 
-def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0") -> Path:
+def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0", overrides: dict | None = None) -> Path:
     import yaml
 
     data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
     data["toolkit_version"] = ref
+    data.update(overrides or {})
     data_file = mkdtemp("scenario-") / "data.yml"
     data_file.write_text(yaml.safe_dump(data))
     dest = mkdtemp("legacy-")
