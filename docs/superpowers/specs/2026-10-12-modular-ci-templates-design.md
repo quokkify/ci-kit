@@ -58,21 +58,17 @@
 ```text
 copier.yml                      # вопрос module, _subdirectory: modules/{{ module }}/template
 modules/
-  core/
-    module.yml                  # name, schema_version, requires: [], paths
-    template/
-      {{ _copier_conf.answers_file }}.jinja
-      .ci/modules/core.yml.jinja
-      .github/workflows/validate.yml.jinja
-  java/
-    module.yml                  # requires: [core]
-    template/
-      {{ _copier_conf.answers_file }}.jinja
-      .ci/modules/java.yml.jinja
-schemas/
-  core.v1.json
-  java.v1.json
-tools/ci_kit/                   # CLI: plan, doctor
+  core/template/
+    {{ _copier_conf.answers_file }}.jinja
+    .ci/modules/core.yml.jinja
+    .github/workflows/validate.yml.jinja
+  java/template/
+    {{ _copier_conf.answers_file }}.jinja
+    .ci/modules/java.yml.jinja
+tools/ci_kit/                   # CLI: plan, doctor, gate, update, migrate
+  modules.py                    # registry: requires, job, language
+  schemas/core.v1.json          # shipped as package data (uvx ci-kit doctor)
+  schemas/java.v1.json
 docs/errors/CIK-*.md            # runbook на каждый код
 .github/workflows/
   validate.yml                  # reusable: plan → jobs → gate
@@ -80,6 +76,8 @@ docs/errors/CIK-*.md            # runbook на каждый код
 ```
 
 Вопросы конкретного модуля в `copier.yml` закрыты `when: "{{ module == 'java' }}"`. Существующий `template/` остаётся до миграции (spec #2).
+
+Отличия реализации от первоначального наброска: `module.yml` заменён реестром `tools/ci_kit/modules.py`, а владение путями выводится из того, что модуль реально рендерит (ручной список путей дублировал бы шаблон); схемы лежат внутри пакета, чтобы `uvx … ci-kit doctor` работал без checkout; `.ci/modules/core.yml` содержит только `schema_version`, ref ci-kit живёт только в `uses:` caller'а.
 
 ## 7. Пример потребителя (core + java)
 
@@ -175,6 +173,7 @@ Checkout потребителя и ci-kit в `.toolkit` на `job.workflow_sha` 
 | `CIK-CORE-001` | неизвестная или неподдерживаемая `schema_version` |
 | `CIK-CORE-002` | декларация без answers-файла или наоборот |
 | `CIK-CORE-003` | нарушен `requires` |
+| `CIK-CORE-004` | декларация не читается, не парсится или не проходит схему |
 | `CIK-CORE-010` | drift в template-owned файле |
 | `CIK-CORE-011` | два модуля владеют одним путём |
 | `CIK-CORE-020` | включённый модуль пропущен (skipped) |
@@ -185,6 +184,14 @@ Checkout потребителя и ci-kit в `.toolkit` на `job.workflow_sha` 
 | module | template @ | ci-kit @ | result | category | failing step     | code                  |
 | core   | v3.0.0     | v3.0.2   | ok     |          |                  |                       |
 | java   | v3.0.0     | v3.0.2   | fail   | template | drift: java.yml  | CIK-CORE-010 (runbook) |
+```
+
+Фактическая форма для находок `plan` (проверено на GitHub): строка `plan` несёт коды `plan` со ссылками на runbook; модули, пропущенные из-за упавшего `plan`, показывают `plan failed` без кода (одна находка на корневую причину); `CIK-CORE-020` остаётся только для пропуска включённого модуля при успешном `plan`.
+
+```text
+| plan | -      | 857e0db8ec36 | fail    | template |             | CIK-CORE-010 (runbook) |
+| core | v3.2.1 | 857e0db8ec36 | skipped |          | plan failed |                        |
+| java | v3.2.1 | 857e0db8ec36 | skipped |          | plan failed |                        |
 ```
 
 ### 9.4 `ci-kit doctor`
@@ -226,13 +233,13 @@ Spec #1 фиксирует только контракт колец (immutable �
 
 ### Технические вопросы, которые прототип обязан закрыть
 
-| Вопрос | Ожидание | Если не подтвердится |
-|---|---|---|
-| Шаблонизированный `_subdirectory` + `-a <file>` при `copier update` корректно разрешают старый `_commit` | да, по документации Copier | отдельный `copier.yml` на модуль невозможен в одном репо → пересмотр D1 |
-| `./.github/workflows/...` во вложенном reusable workflow резолвится в ci-kit на том же sha | да | ссылки `quokkify/ci-kit/...@<sha>`, проставляемые при релизе |
-| matrix + reusable `uses` + `if` дают читаемые имена checks | `ci / java (Backend Java) / …` | явные jobs на компонент через генерацию |
-| Лимит вложенности reusable workflows не превышен | caller → validate → java-ci | уплощение |
-| Drift-рендер укладывается примерно в 15 секунд | да | кэш копий шаблона или хеш-манифест |
+| Вопрос | Ожидание | Если не подтвердится | Результат (2026-10-12) |
+|---|---|---|---|
+| Шаблонизированный `_subdirectory` + `-a <file>` при `copier update` корректно разрешают старый `_commit` | да, по документации Copier | отдельный `copier.yml` на модуль невозможен в одном репо → пересмотр D1 | ✅ spike и lifecycle-тесты на реальном Copier (Copier не поддерживает даунгрейд: откат = `git revert`) |
+| `./.github/workflows/...` во вложенном reusable workflow резолвится в ci-kit на том же sha | да | ссылки `quokkify/ci-kit/...@<sha>`, проставляемые при релизе | ✅ `quokkify/ci-kit-sandbox-java`, caller `@v3.2.1` |
+| matrix + reusable `uses` + `if` дают читаемые имена checks | `ci / java (Backend Java) / …` | явные jobs на компонент через генерацию | ✅ `ci / plan`, `ci / core-checks`, `ci / java (Application Java) / ci`, `ci / gate` |
+| Лимит вложенности reusable workflows не превышен | caller → validate → java-ci | уплощение | ✅ |
+| Drift-рендер укладывается примерно в 15 секунд | да | кэш копий шаблона или хеш-манифест | ✅ `doctor` локально 1–4,5 с; job `ci / plan` целиком 21 с; весь прогон ~70 с |
 
 ## 12. Критерии go / no-go
 
@@ -244,6 +251,17 @@ Go, если выполнено всё:
 4. По gate summary причина понятна без открытия логов на трёх искусственных поломках: `template`, `toolkit`, `project`.
 
 No-go → fallback (подход C из RFC): один шаблон со строгим владением, drift-check и диагностикой из раздела 9, без модульного разделения.
+
+### Вердикт: **go** (2026-10-12)
+
+Проверено в `quokkify/ci-kit-sandbox-java` (core + java, caller `@v3.2.1`):
+
+1. ✅ Lifecycle-тесты на реальном Copier: update одного модуля меняет только его пути. На живом потребителе — при первом релизе, меняющем модуль `java`.
+2. ✅ Ручная правка `.ci/modules/java.yml` → `ci / plan` падает с drift (`CIK-CORE-010`), конфликта Copier нет.
+3. ✅ Caller перенаправлен на другой ref ci-kit без Copier → применился новый код ci-kit, drift не возник (нормализация ref).
+4. ✅ Gate summary без открытия логов: ошибка компиляции → `project | Maven test`; сломанный `Set up Java` в ci-kit → `toolkit | Set up Java` с SHA ci-kit; ручная правка → `plan | template | CIK-CORE-010` (после исправления: в первом прогоне код не попадал в таблицу, а модули ошибочно получали `CIK-CORE-020`).
+
+Дополнительно: `uvx --from git+https://github.com/quokkify/ci-kit@v3.2.1 ci-kit doctor` работает (~7 с с установкой). Canary-перевод `java-test-automation-template` заменён волной 1 spec #2.
 
 ## 13. Дальнейшие спецификации
 
