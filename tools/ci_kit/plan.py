@@ -110,19 +110,21 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
         from .drift import drift_findings
 
         findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override, module_owned))
+    module_owned.update(f".ci/modules/{module}.yml" for module in modules)
     legacy_path = repo / ".copier-answers.yml"
     if legacy_path.exists():
         from .handoff import AREAS
         from .legacy import handoff_findings, legacy_findings, load_answers
 
         legacy_answers, _ = load_answers(repo)
-        if not drift:
-            module_owned.update(f".ci/modules/{module}.yml" for module in modules)
-            handed = (legacy_answers or {}).get("handed_off")
-            for name in handed if isinstance(handed, list) else []:
-                if name in AREAS:
-                    module_owned.update(AREAS[name].legacy_paths)
-        findings.extend(handoff_findings(repo, legacy_answers, set(modules)))
+        handed = (legacy_answers or {}).get("handed_off", [])
+        if isinstance(handed, list) and all(isinstance(name, str) and name in AREAS for name in handed):
+            owned_areas = [AREAS[name] for name in handed]
+        else:
+            owned_areas = [area for area in AREAS.values() if area.module in loaded]
+        for area in owned_areas:
+            module_owned.update(area.legacy_paths)
+        findings.extend(handoff_findings(repo, legacy_answers, set(answers)))
         findings.extend(legacy_findings(repo, module_owned))
     matrices = {module: list(loaded[module].get("components", [])) for module in modules}
     return Plan(modules=modules, matrices=matrices, findings=findings, module_owned=module_owned)

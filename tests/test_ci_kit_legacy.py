@@ -28,6 +28,15 @@ def legacy_repo(scenario: str = "java.yml", handed_off: list | None = None, core
         if core:
             run_copier(shared_template_repo(), dest, "-a", ".copier-answers.core.yml", "-d", "module=core")
         _CACHE[key] = dest
+        supplied = {
+            "allure_external_workflow_path": "name: Run tests\non: push\njobs: {}\n",
+            "allure_categories_file": "[]\n",
+        }
+        for answer, content in supplied.items():
+            target = data.get(answer)
+            if data.get("allure_report") and target and not (dest / target).exists():
+                (dest / target).parent.mkdir(parents=True, exist_ok=True)
+                (dest / target).write_text(content)
     copy = mkdtemp("legacy-copy-") / "repo"
     shutil.copytree(_CACHE[key], copy)
     return copy
@@ -72,6 +81,32 @@ class HandoffTests(unittest.TestCase):
                 repo = legacy_repo(handed_off=["validate"], core=True)
                 edit_answers(repo, handed_off=value)
                 self.assertEqual(codes(repo), ["CIK-HANDOFF-003"])
+
+    def test_handoff_003_does_not_double_report_legacy_003_or_005(self):
+        for value in ("validate", ["bogus"]):
+            with self.subTest(value=value):
+                repo = legacy_repo(handed_off=["validate"], core=True)
+                edit_answers(repo, handed_off=value)
+                wf = repo / ".github/workflows/validate.yml"
+                wf.write_text(wf.read_text().replace("@v99.0.0", "@v1.2.3"))
+                self.assertEqual(codes(repo), ["CIK-HANDOFF-003"])
+                wf.write_text("a: [")
+                self.assertEqual(codes(repo), ["CIK-HANDOFF-003"])
+
+    def test_broken_module_declaration_still_counts_as_installed_for_handoff_001(self):
+        repo = legacy_repo(handed_off=["validate"], core=True)
+        (repo / ".ci/modules/core.yml").write_text("a: [")
+        self.assertEqual(codes(repo), ["CIK-CORE-004"])
+
+    def test_unrenderable_module_does_not_make_its_files_legacy_owned(self):
+        repo = legacy_repo(handed_off=["validate"], core=True)
+        answers = repo / ".copier-answers.core.yml"
+        answers.write_text(answers.read_text().replace("_commit: v99.0.0", "_commit: v0.0.0-missing"))
+        wf = repo / ".github/workflows/validate.yml"
+        wf.write_text(wf.read_text().replace("@v99.0.0", "@v1.2.3"))
+        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-010"])
+        wf.write_text("a: [")
+        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-010"])
 
     def test_module_only_repo_runs_no_legacy_checks(self):
         from module_test_support import rendered_repo
@@ -124,10 +159,39 @@ class LegacyTests(unittest.TestCase):
         self.assertNotIn("CIK-LEGACY-003", codes(repo, drift=True))
 
     def test_legacy_004_feature_without_files(self):
-        for rel in (".github/renovate.json",):
-            repo = legacy_repo()
-            (repo / rel).unlink()
-            self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+        repo = legacy_repo()
+        (repo / ".github/renovate.json").unlink()
+        self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+        repo = legacy_repo()
+        (repo / ".github/workflows/codeql.yml").unlink()
+        self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+
+    def test_legacy_004_external_artifact_bounds(self):
+        for low, high in ((5, 2), (0, 3), (1, 51), ("a", 3)):
+            with self.subTest(low=low, high=high):
+                repo = legacy_repo("allure-external.yml")
+                self.assertEqual(codes(repo), [])
+                edit_answers(repo, allure_external_artifact_min_count=low, allure_external_artifact_max_count=high)
+                self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+
+    def test_legacy_004_missing_categories_file(self):
+        repo = legacy_repo("allure-external.yml")
+        (repo / ".github/allure/categories.json").unlink()
+        self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+
+    def test_legacy_004_component_mode_without_components(self):
+        repo = legacy_repo("allure-external.yml")
+        edit_answers(repo, allure_source="component", components=[])
+        self.assertEqual(codes(repo), ["CIK-LEGACY-004"])
+
+    def test_every_legacy_scenario_render_is_clean(self):
+        scenarios = sorted(p.name for p in (ROOT / "tests/scenarios").glob("*.yml"))
+        self.assertTrue(scenarios)
+        for name in scenarios:
+            with self.subTest(scenario=name):
+                repo = legacy_repo(name)
+                override = str(shared_template_repo())
+                self.assertEqual(build_plan(repo, drift=True, src_override=override).findings, [])
 
     def test_legacy_004_allure_rules(self):
         repo = legacy_repo("allure-polyglot.yml")
