@@ -166,6 +166,50 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 else:
                     self.assertIn("Already up to date", (temporary / "summary.md").read_text(encoding="utf-8"))
 
+    def test_module_update_step_is_guarded_and_ordered(self) -> None:
+        script = self.script
+        guard = script.index("compgen -G '.copier-answers.*.yml'")
+        legacy = script.index('"${command[@]}" .')
+        install = script.index('python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"')
+        update = script.index('ci-kit update --repo . --to "$ref" --skip-legacy')
+        reset = script.index('git reset --soft "$base"')
+        stage = script.index("git add --all\n          if git diff --cached --quiet".replace("          ", ""))
+        self.assertLess(legacy, guard)
+        self.assertLess(guard, install)
+        self.assertLess(install, update)
+        self.assertLess(update, reset)
+        self.assertLess(reset, stage)
+
+    def test_module_update_uses_temp_commit_identity_and_no_swallowed_failure(self) -> None:
+        self.assertIn('base="$(git rev-parse HEAD)"', self.script)
+        self.assertIn("-c user.name=", self.script)
+        self.assertIn("-c user.email=", self.script)
+        section = self.script[self.script.index("compgen -G"):self.script.index('git reset --soft "$base"')]
+        self.assertNotIn("|| true", section)
+
+    def test_module_update_has_no_expression_interpolation_in_run(self) -> None:
+        content = WORKFLOW.read_text(encoding="utf-8")
+        run_block = content.split("        run: |\n", 1)[1]
+        stripped = run_block.replace("{% raw %}${#rejected[@]}{% endraw %}", "")
+        self.assertNotIn("${{", stripped)
+        self.assertNotIn("{{", stripped)
+
+    def test_pure_legacy_checkout_skips_module_update(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, _ = self.make_checkout(temporary)
+            result = self.execute(
+                checkout,
+                temporary,
+                {"tagName": "v2.21.5", "publishedAt": "2026-09-01T00:00:00Z", "isDraft": False, "isPrerelease": False},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("ci-kit", result.stdout.replace("Updating to ci-kit", ""))
+            self.assertEqual(
+                run_git("--git-dir", str(temporary / "remote.git"), "rev-list", "--count", "automation/copier-template-update", cwd=temporary),
+                "2",
+            )
+
     def test_unreleased_or_mismatched_release_ref_stops_before_copier(self) -> None:
         cases = [
             ("v2.21.5", {"tagName": "v2.21.4", "publishedAt": "2026-09-01T00:00:00Z", "isDraft": False, "isPrerelease": False}),
