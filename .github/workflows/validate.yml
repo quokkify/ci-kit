@@ -23,7 +23,7 @@ jobs:
       - name: Check out toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: quokkify/ci-kit
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .toolkit
           persist-credentials: false
@@ -95,7 +95,7 @@ jobs:
       - name: Check out toolkit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: quokkify/ci-kit
+          repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .toolkit
           persist-credentials: false
@@ -109,7 +109,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" --paginate > jobs.tmp; then
+          if gh api --paginate --jq '.jobs[]' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" | jq -s . > jobs.tmp; then
             mv jobs.tmp jobs.json
           fi
       - name: Evaluate gate
@@ -120,4 +120,4 @@ jobs:
         run: |
           args=()
           if [[ -f jobs.json ]]; then args+=(--jobs-file jobs.json); fi
-          ci-kit gate --enabled "$ENABLED" --needs "$NEEDS" "${args[@]}" --ref "$TOOLKIT_REF" --summary "$GITHUB_STEP_SUMMARY"
+          ci-kit gate --enabled "${ENABLED:-[]}" --needs "$NEEDS" "${args[@]}" --ref "$TOOLKIT_REF" --summary "$GITHUB_STEP_SUMMARY"

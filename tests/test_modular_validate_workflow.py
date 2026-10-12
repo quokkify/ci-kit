@@ -45,7 +45,18 @@ class ModularValidateWorkflowTests(unittest.TestCase):
             toolkit = [s for s in steps if s.get("with", {}).get("path") == ".toolkit"]
             self.assertEqual(len(toolkit), 1, name)
             self.assertEqual(toolkit[0]["with"]["ref"], "${{ job.workflow_sha }}")
-            self.assertEqual(toolkit[0]["with"]["repository"], "quokkify/ci-kit")
+            self.assertEqual(toolkit[0]["with"]["repository"], "${{ job.workflow_repository }}")
+
+    def test_gate_tolerates_empty_plan_output(self):
+        steps = self.wf["jobs"]["gate"]["steps"]
+        run = next(s["run"] for s in steps if s.get("name") == "Evaluate gate")
+        self.assertIn('--enabled "${ENABLED:-[]}"', run)
+
+    def test_gate_jobs_file_is_single_json_list(self):
+        steps = self.wf["jobs"]["gate"]["steps"]
+        run = next(s["run"] for s in steps if s.get("name") == "Fetch job results")
+        self.assertIn("--paginate --jq '.jobs[]'", run)
+        self.assertIn("jq -s . > jobs.tmp", run)
 
     def test_non_reusable_jobs_have_timeouts(self):
         for name, job in self.wf["jobs"].items():
