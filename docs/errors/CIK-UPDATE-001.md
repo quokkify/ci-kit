@@ -14,6 +14,8 @@ Resolve the listed `.rej` files by hand, delete them, commit, then re-run `ci-ki
 ci-kit update --repo . --to v3.2.0
 ```
 
+Commits made for earlier modules remain after a stop, and the final plan check is skipped. The command refuses to start on a dirty working tree ("working tree is not clean"); commit or stash first.
+
 ## Example
 
 A local edit to `.ci/modules/java.yml` conflicts with the template change and Copier writes `.ci/modules/java.yml.rej`.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,11 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
+from unittest import mock
+
 from ci_kit.cli import main
+from ci_kit.modules import MODULES
+from ci_kit.plan import build_plan
 from ci_kit.update import ModuleUpdate, copier_update_command, run_update, update_order
 from module_test_support import ROOT, git, lifecycle_template_repo, mkdtemp, rendered_from
 
@@ -61,10 +66,12 @@ def subjects(repo: Path) -> list[str]:
 class OrderTests(unittest.TestCase):
     def test_order_legacy_core_languages_others(self):
         p = Path("x")
-        self.assertEqual(
-            update_order({"java": p, "legacy": p, "core": p, "zeta": p, "node": p}),
-            ["legacy", "core", "java", "node", "zeta"],
-        )
+        info = MODULES["java"]
+        with mock.patch.dict(MODULES, {"node": info, "zed": info._replace(language=False)}):
+            self.assertEqual(
+                update_order({"java": p, "legacy": p, "core": p, "zeta": p, "node": p, "zed": p}),
+                ["legacy", "core", "java", "node", "zed", "zeta"],
+            )
 
 
 class CommandTests(unittest.TestCase):
@@ -74,8 +81,10 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("--trust", cmd)
         self.assertEqual(cmd[cmd.index("--vcs-ref") + 1], "v1")
         self.assertEqual(cmd[cmd.index("-d") + 1], "toolkit_version=v1")
-        self.assertLess(cmd.index("--"), len(cmd))
-        self.assertIn("--trust", copier_update_command(".copier-answers.yml", "v1", trust=True, data={}))
+        self.assertEqual(cmd[-2:], ["--", "."])
+        legacy = copier_update_command(".copier-answers.yml", "v1", trust=True, data={"toolkit_version": "v1"})
+        self.assertIn("--trust", legacy)
+        self.assertEqual(legacy[legacy.index("-d") + 1], "toolkit_version=v1")
 
     def test_option_like_ref_refused(self):
         with self.assertRaises(ValueError):
@@ -126,6 +135,23 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(findings[0].module, "java")
         self.assertIn(".rej", findings[0].message)
         self.assertEqual([u.module for u in updates], ["core"])
+        self.assertEqual(subjects(repo)[0], "chore(ci-kit): update core to v99.1.0")
+        self.assertIn("?? .ci/modules/java.yml.rej", git(repo, "status", "--porcelain", "-uall").splitlines())
+        self.assertEqual(git(repo, "diff", "--cached", "--name-only"), "")
+
+    def test_dirty_tree_refused(self):
+        repo = modules_repo("core")
+        (repo / "stray.txt").write_text("x")
+        updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
+        self.assertEqual([f.code for f in findings], ["CIK-UPDATE-001"])
+        self.assertIn("working tree is not clean", findings[0].message)
+        self.assertEqual(updates, [])
+
+    def test_unknown_module_is_cik_update_001(self):
+        repo = modules_repo("core")
+        updates, findings = run_update(repo, "v99.1.0", modules=["nope"], src_override=self.src)
+        self.assertEqual([f.code for f in findings], ["CIK-UPDATE-001"])
+        self.assertIn("no answers file for module nope", findings[0].message)
 
     def test_untrusted_source_is_cik_update_001(self):
         repo = modules_repo("core")
@@ -148,25 +174,18 @@ class UpdateTests(unittest.TestCase):
         updates, _ = run_update(repo, "v99.1.0", modules=["legacy"], src_override=self.src)
         self.assertEqual([u.module for u in updates], ["legacy"])
         self.assertEqual(subjects(repo)[0], "chore(ci-kit): update legacy to v99.1.0")
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.yml").read_text())["toolkit_version"], "v99.1.0")
+        self.assertNotIn("CIK-LEGACY-002", [f.code for f in build_plan(repo, src_override=self.src).findings])
 
     def test_commit_identity_fallback(self):
         repo = modules_repo("core")
         for key in ("user.name", "user.email"):
             subprocess.run(["git", "config", "--local", "--unset", key], cwd=repo, capture_output=True)
-        env_home = mkdtemp("home-")
-        import os
-
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        env["HOME"] = str(env_home)
+        env["HOME"] = str(mkdtemp("home-"))
         env["GIT_CONFIG_NOSYSTEM"] = "1"
-        old = os.environ.copy()
-        try:
-            os.environ.clear()
-            os.environ.update(env)
+        with mock.patch.dict(os.environ, env, clear=True):
             run_update(repo, "v99.1.0", src_override=self.src)
-        finally:
-            os.environ.clear()
-            os.environ.update(old)
         self.assertEqual(git(repo, "log", "-1", "--format=%ae"), "ci-kit@users.noreply.github.com")
 
 

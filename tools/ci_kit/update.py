@@ -7,11 +7,11 @@ from pathlib import Path
 import yaml
 
 from .drift import RENDER_TIMEOUT, TRUSTED_SRC_RE, _copier
+from .modules import MODULES
 from .plan import Finding, build_plan, discover
 
 LEGACY = "legacy"
 LEGACY_ANSWERS = ".copier-answers.yml"
-LANGUAGE_MODULES = ("java", "node", "python", "go", "rust", "dotnet", "kotlin")
 FALLBACK_IDENTITY = ["-c", "user.name=ci-kit", "-c", "user.email=ci-kit@users.noreply.github.com"]
 
 
@@ -26,8 +26,8 @@ class ModuleUpdate:
 def update_order(answers: dict[str, Path]) -> list[str]:
     names = sorted(answers)
     rest = [name for name in names if name not in (LEGACY, "core")]
-    languages = [name for name in rest if name in LANGUAGE_MODULES]
-    others = [name for name in rest if name not in LANGUAGE_MODULES]
+    languages = [name for name in rest if name in MODULES and MODULES[name].language]
+    others = [name for name in rest if not (name in MODULES and MODULES[name].language)]
     head = [name for name in (LEGACY, "core") if name in answers]
     return head + languages + others
 
@@ -95,9 +95,14 @@ def run_update(
     answers = _answers_files(repo)
     if skip_legacy:
         answers.pop(LEGACY, None)
+    for name in modules or []:
+        if name not in answers:
+            return [], [Finding("CIK-UPDATE-001", name, f"no answers file for module {name}")]
     if modules is not None:
         answers = {name: path for name, path in answers.items() if name in modules}
     order = update_order(answers)
+    if order and _git(repo, "status", "--porcelain", check=False):
+        return [], [Finding("CIK-UPDATE-001", order[0], "working tree is not clean")]
     updates: list[ModuleUpdate] = []
     for module in order:
         path = answers[module]
@@ -105,7 +110,7 @@ def run_update(
         src = str(current.get("_src_path") or "")
         if src_override is None and not TRUSTED_SRC_RE.fullmatch(src):
             return updates, [Finding("CIK-UPDATE-001", module, f"untrusted template source: {src}", path.name)]
-        data = {"toolkit_version": to} if module == "core" else {}
+        data = {"toolkit_version": to}
         try:
             command = copier_update_command(path.name, to, trust=module == LEGACY, data=data)
             result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT)
