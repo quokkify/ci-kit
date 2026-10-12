@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from .gate import evaluate, render_summary
 from .plan import Finding, build_plan
 
 
@@ -55,6 +56,57 @@ def _doctor(args: argparse.Namespace) -> int:
     return 1 if plan.findings else 0
 
 
+def _load_json(text: str, label: str) -> object:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"{label} is not valid JSON: {error}") from error
+
+
+def _load_jobs(path: str | None) -> list[dict] | None:
+    if not path:
+        return None
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict):
+        data = data.get("jobs")
+    if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+        return None
+    return data
+
+
+def _gate(args: argparse.Namespace) -> int:
+    try:
+        enabled = _load_json(args.enabled, "--enabled")
+        needs = _load_json(args.needs, "--needs")
+    except ValueError as error:
+        print(f"ci-kit gate: {error}", file=sys.stderr)
+        return 1
+    if not isinstance(enabled, list) or not all(isinstance(item, str) for item in enabled):
+        print("ci-kit gate: --enabled must be a JSON array of strings", file=sys.stderr)
+        return 1
+    if not isinstance(needs, dict):
+        print("ci-kit gate: --needs must be a JSON object", file=sys.stderr)
+        return 1
+    ok, rows = evaluate(enabled, needs, _load_jobs(args.jobs_file), args.ref)
+    table = render_summary(rows)
+    print(table, end="")
+    if args.summary:
+        with open(args.summary, "a", encoding="utf-8") as handle:
+            handle.write(table)
+    for row in rows:
+        if row.result != "ok":
+            detail = f"{row.module}: {row.result}" + (f" ({row.category}" + (f", step {row.failing_step!r}" if row.failing_step else "") + ")" if row.category else "")
+            if _annotations():
+                title = f" title={_escape_property(row.code)}" if row.code else ""
+                print(f"::error{title}::{_escape_data(detail)}")
+            else:
+                print(f"{row.code or 'gate'} {detail}", file=sys.stderr)
+    return 0 if ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ci-kit")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -67,6 +119,13 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--repo", required=True)
     doctor.add_argument("--template-src")
     doctor.set_defaults(func=_doctor)
+    gate = sub.add_parser("gate")
+    gate.add_argument("--enabled", required=True)
+    gate.add_argument("--needs", required=True)
+    gate.add_argument("--jobs-file")
+    gate.add_argument("--ref", required=True)
+    gate.add_argument("--summary")
+    gate.set_defaults(func=_gate)
     args = parser.parse_args(argv)
     return args.func(args)
 
