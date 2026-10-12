@@ -30,7 +30,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.drift import TRUSTED_SRC_RE
+from ci_kit.handoff import area_for_module
+from ci_kit.migrate import MigrateResult, render_marker
 from ci_kit.modules import MODULES
+from ci_kit.plan import Finding
 
 ANSWERS_FILE = ".copier-answers.yml"
 LEGACY_MODULE = "legacy"
@@ -86,6 +89,7 @@ class Result:
     detail: str = ""
     inventory: "TemplateInventory | None" = None
     health: dict[str, Any] | None = None
+    migration: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -985,6 +989,10 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "foreign-module-template": "↗️ Foreign module template",
         "unknown-module": "❔ Unknown module",
         "unsafe-answers-file": "⚠️ Unsafe answers file",
+        "not-applicable": "— Not applicable",
+        "needs-update-first": "⏳ Needs update first",
+        "migrate-rejected": "🚫 Migration rejected",
+        "would-migrate": "🟡 Would migrate",
     }
     for result in results:
         inventory = result.inventory
@@ -1021,7 +1029,7 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
     problem_results = [
         result
         for result in results
-        if result.status in {"would-update", "failed"} or inventory_has_mismatch(result.inventory)
+        if result.status in {"would-update", "failed", "migrate-rejected"} or inventory_has_mismatch(result.inventory)
     ]
     if problem_results:
         lines.extend(["", "### Details", ""])
@@ -1029,6 +1037,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             lines.append(f"#### `{markdown_escape(result.repository)}`")
             if result.detail:
                 lines.append(f"- {markdown_escape(result.detail)}")
+            for finding in (result.migration or {}).get("findings", []):
+                lines.append(f"- `{markdown_escape(str(finding.get('code')))}` {markdown_escape(str(finding.get('message')).splitlines()[0] if finding.get('message') else '')}")
             inventory = result.inventory
             if inventory and inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}":
                 lines.append(f"- Baseline files present: {inventory.baseline}")
@@ -1100,6 +1110,8 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             }
         if result.health is not None:
             item["health"] = result.health
+        if result.migration is not None:
+            item["migration"] = result.migration
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
@@ -1577,7 +1589,8 @@ def push_automation_branch(
     *,
     branch: str,
     env: dict[str, str],
-) -> None:
+    message: str = PR_TITLE,
+) -> str:
     run(["git", "switch", "-C", branch], cwd=repository_path, env=env)
     run(["git", "config", "user.name", "quokkify-copier[bot]"], cwd=repository_path)
     run(
@@ -1586,7 +1599,7 @@ def push_automation_branch(
     )
     run(["git", "add", "--all"], cwd=repository_path)
     run(["git", "diff", "--cached", "--check"], cwd=repository_path)
-    run(["git", "commit", "-m", PR_TITLE], cwd=repository_path)
+    run(["git", "commit", "-m", message], cwd=repository_path)
 
     remote = run(
         [*authenticated_git(), "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
@@ -1597,10 +1610,11 @@ def push_automation_branch(
     if remote:
         remote_sha = remote.split()[0]
         if remote_has_same_change(repository, repository_path, remote_sha, env=env):
-            return
+            return remote_sha
         push.append(f"--force-with-lease=refs/heads/{branch}:{remote_sha}")
     push.extend(["origin", f"HEAD:refs/heads/{branch}"])
     run(push, cwd=repository_path, env=env)
+    return git_head(repository_path)
 
 
 def remote_has_same_change(
@@ -1691,13 +1705,21 @@ def run_ci_kit_update(repository_path: Path, template_ref: str, *, env: dict[str
 
 def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[str, str]) -> list[dict[str, str]]:
     identity = ["-c", "user.name=quokkify-copier[bot]", "-c", "user.email=quokkify-copier[bot]@users.noreply.github.com"]
-    base = run(["git", "rev-parse", "HEAD"], cwd=repository_path).stdout.strip()
+    base = git_head(repository_path)
     run(["git", "add", "--all"], cwd=repository_path)
     if run(["git", "status", "--porcelain"], cwd=repository_path).stdout.strip():
         run(["git", *identity, "commit", "-q", "-m", "chore(template): pending legacy update"], cwd=repository_path)
     rows = run_ci_kit_update(repository_path, template_ref, env=env)
-    run(["git", "reset", "--soft", base], cwd=repository_path)
+    squash_to_base(repository_path, base)
     return rows
+
+
+def git_head(repository_path: Path) -> str:
+    return run(["git", "rev-parse", "HEAD"], cwd=repository_path).stdout.strip()
+
+
+def squash_to_base(repository_path: Path, base: str) -> None:
+    run(["git", "reset", "--soft", base], cwd=repository_path)
 
 
 def ensure_pull_request(
@@ -1865,6 +1887,193 @@ def process_repository(
         raise RepositoryProcessError(str(exc), inventory) from exc
 
 
+FINDING_CODE_PATTERN = re.compile(r"CIK-[A-Z]+-\d{3}")
+
+
+def finding_codes(output: str) -> list[str]:
+    return list(dict.fromkeys(FINDING_CODE_PATTERN.findall(output)))
+
+
+def run_ci_kit_doctor(repository_path: Path, *, env: dict[str, str]) -> tuple[int, str]:
+    completed = run(
+        [sys.executable, "-m", "ci_kit.cli", "doctor", "--repo", str(repository_path)],
+        env=ci_kit_environment(env),
+        check=False,
+    )
+    return completed.returncode, completed.stdout.strip() or completed.stderr.strip()
+
+
+def run_ci_kit_migrate(repository_path: Path, module: str, target_ref: str, *, env: dict[str, str]) -> MigrateResult:
+    with tempfile.TemporaryDirectory(prefix="ci-kit-migrate-") as temporary:
+        report_path = Path(temporary) / "migrate.json"
+        completed = run(
+            [
+                sys.executable,
+                "-m",
+                "ci_kit.cli",
+                "migrate",
+                "--module",
+                module,
+                "--repo",
+                str(repository_path),
+                "--to",
+                target_ref,
+                "--json",
+                str(report_path),
+            ],
+            env=ci_kit_environment(env),
+            check=False,
+        )
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = None
+    if not isinstance(payload, dict):
+        raise FleetUpdateError(f"ci-kit migrate failed: exit {completed.returncode}")
+    return MigrateResult(
+        module=str(payload.get("module", module)),
+        area=str(payload.get("area", "")),
+        ref=str(payload.get("ref", target_ref)),
+        checks_before=[str(item) for item in payload.get("checks_before", [])],
+        checks_after=[str(item) for item in payload.get("checks_after", [])],
+        commits=[str(item) for item in payload.get("commits", [])],
+        findings=[
+            Finding(str(item.get("code")), str(item.get("module")), str(item.get("message")), item.get("path"))
+            for item in payload.get("findings", [])
+            if isinstance(item, dict)
+        ],
+    )
+
+
+def migration_title(result: MigrateResult) -> str:
+    return f"chore(ci-kit): hand off {result.area} to {result.module} module"
+
+
+def migration_pr_body(
+    result: MigrateResult,
+    repository: str,
+    *,
+    doctor: str = "",
+    number: int | str = "<n>",
+) -> str:
+    checks_before = ", ".join(f"`{name}`" for name in result.checks_before) or "none"
+    checks_after = ", ".join(f"`{name}`" for name in result.checks_after) or "none"
+    return (
+        "## Summary\n\n"
+        f"Hands the `{result.area}` area off from the legacy template to the `{result.module}` module "
+        f"of [`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) at `{result.ref}`.\n\n"
+        "## Commits\n\n"
+        f"The pushed commit squashes two migration steps:\n\n"
+        f"- hand off {result.area} to {result.module}\n"
+        f"- add {result.module} module\n\n"
+        + "".join(f"Head: `{sha}`\n" for sha in result.commits)
+        + "\n## Doctor\n\n```text\n"
+        + (doctor or "ok")
+        + "\n```\n\n"
+        "## Required checks\n\n"
+        f"{checks_before} → {checks_after}\n\n"
+        "Switch the branch ruleset before merging, once the checks are green:\n\n"
+        "```console\n"
+        f"python scripts/migration_checks.py --pr {repository}#{number}\n"
+        "```\n\n"
+        "## Rollback\n\n"
+        "Revert the squashed commit with `git revert <sha>` and restore the required checks with "
+        f"`python scripts/migration_checks.py --pr {repository}#{number} --revert`.\n\n"
+        + render_marker(result)
+        + "\n"
+    )
+
+
+def ensure_migration_pull_request(
+    repository: Repository,
+    *,
+    branch: str,
+    result: MigrateResult,
+    doctor: str,
+    env: dict[str, str],
+) -> str:
+    name = repository.name_with_owner
+    existing = gh_json(
+        ["pr", "list", "--repo", name, "--state", "open", "--head", branch, "--json", "url"],
+        env=env,
+    )
+    if existing:
+        url = existing[0]["url"]
+    else:
+        url = run(
+            [
+                "gh", "pr", "create", "--repo", name, "--base", repository.default_branch,
+                "--head", branch, "--title", migration_title(result),
+                "--body", migration_pr_body(result, name, doctor=doctor),
+            ],
+            env=env,
+        ).stdout.strip()
+    number = url.rstrip("/").rsplit("/", 1)[-1]
+    run(
+        ["gh", "pr", "edit", url, "--repo", name, "--body", migration_pr_body(result, name, doctor=doctor, number=number)],
+        env=env,
+    )
+    return url
+
+
+def migrate_repository(
+    repository: Repository,
+    *,
+    module: str,
+    target_ref: str,
+    dry_run: bool,
+    env: dict[str, str],
+    workspace: Path,
+    branch: str | None = None,
+    expected_template: str = DEFAULT_TEMPLATE_REPOSITORY,
+) -> Result:
+    name = repository.name_with_owner
+    area = area_for_module(module)
+    if area is None:
+        raise FleetUpdateError(f"module {module} owns no hand-off area")
+    branch = branch or f"ci-kit/migrate-{module}"
+    try:
+        files = fetch_answers_files(name, env=env)
+    except UnsafeAnswersFileError as exc:
+        return Result(name, "unsafe-answers-file", str(exc))
+    raw_answers = files.get(LEGACY_MODULE)
+    if raw_answers is None or module in files or area in legacy_handed_off(raw_answers):
+        return Result(name, "not-applicable")
+    source = normalize_template_source(parse_template_source(raw_answers))
+    if source != normalize_template_source(expected_template):
+        return Result(name, "foreign-template", source or "unrecognized source")
+    applied = parse_answers(raw_answers).get("_commit")
+    if applied != target_ref:
+        return Result(name, "needs-update-first", f"legacy _commit is {applied}, target is {target_ref}")
+
+    destination = workspace / name.replace("/", "--")
+    clone_repository(repository, destination, env=env)
+    code, doctor_output = run_ci_kit_doctor(destination, env=env)
+    if code:
+        codes = finding_codes(doctor_output) or [f"exit {code}"]
+        return Result(name, "migrate-rejected", ", ".join(codes), migration={"doctor": doctor_output, "findings": []})
+    base = git_head(destination)
+    migrated = run_ci_kit_migrate(destination, module, target_ref, env=env)
+    if migrated.findings:
+        findings = [
+            {"code": item.code, "module": item.module, "message": item.message, "path": item.path}
+            for item in migrated.findings
+        ]
+        return Result(
+            name,
+            "migrate-rejected",
+            ", ".join(dict.fromkeys(item["code"] for item in findings)),
+            migration={"findings": findings},
+        )
+    if dry_run:
+        return Result(name, "would-migrate", area)
+    squash_to_base(destination, base)
+    head = push_automation_branch(repository, destination, branch=branch, env=env, message=migration_title(migrated))
+    migrated.commits = [head]
+    url = ensure_migration_pull_request(repository, branch=branch, result=migrated, doctor=doctor_output, env=env)
+    return Result(name, "pull-request", url)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org", default="quokkify")
@@ -1882,6 +2091,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Serve only public repositories; organization discovery is filtered and an explicit --repo that is not public fails.",
     )
+    parser.add_argument("--migrate", metavar="MODULE", help="Hand the module's legacy area off and open a PR on ci-kit/migrate-MODULE instead of updating.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -1905,6 +2115,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
+
+    if args.migrate and args.migrate not in MODULES:
+        print(f"unknown module for --migrate: {args.migrate}", file=sys.stderr)
+        return 2
+    branch = f"ci-kit/migrate-{args.migrate}" if args.migrate and args.branch == DEFAULT_BRANCH else args.branch
 
     health_module = None
     health_exceptions: dict[str, dict[str, str]] = {}
@@ -1947,7 +2162,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
                 default_ref = metadata.get("defaultBranchRef")
                 full_name = metadata.get("nameWithOwner")
-                if args.public_only and not is_public(metadata):
+                if args.public_only and not args.migrate and not is_public(metadata):
                     raise FleetUpdateError(PRIVATE_REPOSITORY_ERROR)
                 if metadata.get("isArchived") or metadata.get("isFork"):
                     result = Result(requested_name, "excluded", "archived or fork")
@@ -1994,15 +2209,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 results.append(Result(repository.name_with_owner, "excluded"))
                 continue
             try:
-                result = process_repository(
-                    repository,
-                    expected_template=args.template_repository,
-                    branch=args.branch,
-                    dry_run=args.dry_run,
-                    template_ref=template_ref,
-                    env=env,
-                    workspace=workspace,
-                )
+                if args.migrate:
+                    result = migrate_repository(
+                        repository,
+                        module=args.migrate,
+                        target_ref=template_ref,
+                        dry_run=args.dry_run,
+                        env=env,
+                        workspace=workspace,
+                        branch=branch,
+                        expected_template=args.template_repository,
+                    )
+                else:
+                    result = process_repository(
+                        repository,
+                        expected_template=args.template_repository,
+                        branch=branch,
+                        dry_run=args.dry_run,
+                        template_ref=template_ref,
+                        env=env,
+                        workspace=workspace,
+                    )
             except RepositoryProcessError as exc:
                 failures += 1
                 result = Result(
@@ -2017,7 +2244,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if health_module is not None and result.inventory is not None:
                 result = replace(result, health=health_module.collect_health(
                     repository.name_with_owner, repository.default_branch, template_ref,
-                    args.branch, lambda endpoint: gh_json(["api", "--method", "GET", endpoint], env=env),
+                    branch, lambda endpoint: gh_json(["api", "--method", "GET", endpoint], env=env),
                     health_exceptions.get(repository.name_with_owner),
                 ))
             results.append(result)
@@ -2038,7 +2265,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json_report:
         args.json_report.parent.mkdir(parents=True, exist_ok=True)
         args.json_report.write_text(json_report(results, counts), encoding="utf-8")
-    if failures:
+    if failures or counts.get("migrate-rejected", 0):
         return 1
     if args.dry_run and counts.get("would-update", 0):
         print("template drift detected; run write mode from a CODEOWNER session", file=sys.stderr)

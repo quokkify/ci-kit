@@ -62,3 +62,27 @@ Reading checks on private repositories may require Checks/Contents read access;
 reading classic protection may require additional administration read access.
 The reporter never asks for write permissions or changes protection to obtain
 evidence. A narrower token simply produces an unknown observation.
+
+## Migrate mode
+
+```console
+python scripts/update_copier_fleet.py --dry-run --repo quokkify/knowledge --migrate core
+```
+
+`--migrate MODULE` replaces the update flow: per repository it runs `ci-kit doctor`,
+then `ci-kit migrate` on a clone and opens one squashed commit on
+`ci-kit/migrate-MODULE` (override with `--branch`). Statuses: `not-applicable`
+(no legacy answers, module installed, or area already handed off),
+`needs-update-first` (legacy `_commit` differs from the resolved target ref),
+`migrate-rejected`, `would-migrate` (dry run) and `pull-request`. An explicit
+`--repo` is processed even when private; organization runs keep their filtering.
+
+`migrate-rejected` opens no branch, commit or PR and makes the run exit 1. Its
+`detail` lists the `CIK-*` codes; the JSON report adds
+`repositories[].migration` with `findings` (`code`, `module`, `message`, `path`;
+the `message` of `CIK-MIGRATE-003` carries the diff) and, for a failed doctor
+run, `doctor` (its output). The schema version is unchanged.
+
+The PR body ends with the `<!-- ci-kit-migrate -->` marker and a json block whose
+`commits` is the pushed head SHA; the `migration_checks.py --pr` command is filled
+with the real PR number by editing the body after creation.
