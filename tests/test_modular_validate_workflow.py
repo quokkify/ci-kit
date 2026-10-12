@@ -56,7 +56,9 @@ class ModularValidateWorkflowTests(unittest.TestCase):
         steps = self.wf["jobs"]["gate"]["steps"]
         run = next(s["run"] for s in steps if s.get("name") == "Fetch job results")
         self.assertIn("--paginate --jq '.jobs[]'", run)
-        self.assertIn("jq -s . > jobs.tmp", run)
+        self.assertIn("> jobs.raw; then", run)
+        self.assertIn("jq -s . jobs.raw > jobs.tmp && mv jobs.tmp jobs.json", run)
+        self.assertNotRegex(run, r"gh api[^\n]*\|")
 
     def test_non_reusable_jobs_have_timeouts(self):
         for name, job in self.wf["jobs"].items():
