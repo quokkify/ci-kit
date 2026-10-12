@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -113,7 +115,8 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
     def test_yaml_dependency_is_in_test_setup_not_generated_update_workflow(self) -> None:
         self.assertNotIn("pip install --disable-pip-version-check --quiet PyYAML==6.0.3", self.script)
         validation_workflow = (ROOT / ".github/workflows/validate-toolkit.yml").read_text(encoding="utf-8")
-        self.assertIn("python -m pip install PyYAML==6.0.3 copier==9.18.2", validation_workflow)
+        pins = {re.split(r"==", pin)[0]: pin for pin in tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]}
+        self.assertIn(f"python -m pip install {pins['PyYAML']} {pins['copier']}", validation_workflow)
 
     def test_generated_workflow_checks_helper_drift_even_for_same_ref(self) -> None:
         # The check follows Copier unconditionally rather than relying on the

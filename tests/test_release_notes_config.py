@@ -124,11 +124,13 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 source,
                 ignore=shutil.ignore_patterns(".git", "__pycache__"),
             )
-            if version_match and tuple(map(int, version_match.groups())) < (9, 18, 2):
-                copier_config = source / "copier.yml"
+            copier_config = source / "copier.yml"
+            min_match = re.search(r'_min_copier_version: "(\d+)\.(\d+)\.(\d+)"', copier_config.read_text(encoding="utf-8"))
+            assert min_match is not None
+            if version_match and tuple(map(int, version_match.groups())) < tuple(map(int, min_match.groups())):
                 copier_config.write_text(
                     copier_config.read_text(encoding="utf-8").replace(
-                        '_min_copier_version: "9.18.2"',
+                        min_match.group(0),
                         f'_min_copier_version: "{version_match.group(0)}"',
                         1,
                     ),
