@@ -3,10 +3,12 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
@@ -78,6 +80,42 @@ class GateTests(unittest.TestCase):
         ok, rows = evaluate([], needs(plan="failure", core="skipped", java="skipped"), [], REF)
         self.assertFalse(ok)
         self.assertEqual((row(rows, "plan").category, row(rows, "plan").code), ("template", ""))
+
+    def test_plan_failure_lists_codes_and_modules_not_blamed(self):
+        ok, rows = evaluate(["core", "java"], needs(plan="failure", core="skipped", java="skipped"), [], REF, plan_codes=["CIK-CORE-010", "CIK-CORE-003"])
+        self.assertFalse(ok)
+        self.assertEqual(row(rows, "plan").code, "CIK-CORE-010,CIK-CORE-003")
+        self.assertEqual(row(rows, "plan").category, "template")
+        for module in ("core", "java"):
+            found = row(rows, module)
+            self.assertEqual((found.result, found.category, found.failing_step, found.code), ("skipped", "", "plan failed", ""))
+        table = render_summary(rows)
+        self.assertIn(f"[CIK-CORE-010](https://github.com/quokkify/ci-kit/blob/{REF}/docs/errors/CIK-CORE-010.md), [CIK-CORE-003](", table)
+        self.assertNotIn("CIK-CORE-020", table)
+        self.assertIn("| core | - | 0123456789ab | skipped |  | plan failed |  |", table)
+
+    def test_plan_failure_without_codes_has_empty_code_cell(self):
+        _, rows = evaluate(["core"], needs(plan="failure", core="skipped"), [], REF)
+        self.assertEqual(row(rows, "plan").code, "")
+
+    def test_plan_failure_still_reports_failed_module(self):
+        _, rows = evaluate(["core"], needs(plan="cancelled", core="failure"), [], REF)
+        self.assertEqual(row(rows, "core").result, "fail")
+
+    def test_skipped_with_plan_success_keeps_cik_core_020_and_ignores_plan_codes(self):
+        _, rows = evaluate(["java"], needs(java="skipped"), [], REF, plan_codes=["CIK-CORE-010"])
+        self.assertEqual(row(rows, "java").code, "CIK-CORE-020")
+
+    def test_template_commits_rendered_for_modules_only(self):
+        _, rows = evaluate(["core", "java"], needs(plan="failure", core="skipped", java="success"), [], REF, template_commits={"core": "abcdef1234567890", "java": "fedcba"})
+        table = render_summary(rows)
+        self.assertIn("| plan | - | 0123456789ab |", table)
+        self.assertIn("| core | abcdef1234567890 | 0123456789ab |", table)
+        self.assertIn("| java | fedcba | 0123456789ab |", table)
+        _, rows = evaluate(["core"], needs(all="success"), [], REF, template_commits={"core": "abc"})
+        self.assertIn("| core | abc |", render_summary(rows))
+        _, rows = evaluate(["core"], needs(all="success"), [], REF)
+        self.assertIn("| core | - |", render_summary(rows))
 
     def test_no_jobs_api_still_decides_and_marks_unknown(self):
         ok, rows = evaluate(["core", "java"], needs(java="failure"), None, REF)
@@ -162,6 +200,34 @@ class GateCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 1)
             self.assertIn("--summary", err)
+
+    def test_malformed_plan_codes_and_template_commits_fail_closed(self):
+        base = ("--enabled", "[]", "--needs", "{}", "--ref", REF)
+        for flag, value, message in (
+            ("--plan-codes", "[", "--plan-codes is not valid JSON"),
+            ("--plan-codes", '{"a":1}', "--plan-codes must be a JSON array of strings"),
+            ("--plan-codes", "[1]", "--plan-codes must be a JSON array of strings"),
+            ("--template-commits", "{", "--template-commits is not valid JSON"),
+            ("--template-commits", "[]", "--template-commits must be a JSON object of strings"),
+            ("--template-commits", '{"core":1}', "--template-commits must be a JSON object of strings"),
+        ):
+            code, _, err = self.run_gate(*base, flag, value)
+            self.assertEqual(code, 1, (flag, value))
+            self.assertIn(message, err)
+
+    def test_plan_failure_cli_output_and_annotations(self):
+        args = ("--enabled", '["core","java"]', "--needs", json.dumps(needs(plan="failure", core="skipped", java="skipped")), "--ref", REF,
+                "--plan-codes", '["CIK-CORE-010"]', "--template-commits", '{"core":"c0ffee"}')
+        code, out, err = self.run_gate(*args)
+        self.assertEqual(code, 1)
+        self.assertIn("| core | c0ffee |", out)
+        self.assertIn("CIK-CORE-010 plan: fail", err)
+        self.assertNotIn("CIK-CORE-020", out + err)
+        with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
+            code, out, _ = self.run_gate(*args)
+        self.assertNotIn("CIK-CORE-020", out)
+        self.assertIn("::error title=CIK-CORE-010::plan: fail", out)
+        self.assertIn("::error::core: skipped (step 'plan failed')", out)
 
     def test_success_exits_zero(self):
         code, _, _ = self.run_gate("--enabled", '["core"]', "--needs", json.dumps(needs(all="success")), "--ref", REF)

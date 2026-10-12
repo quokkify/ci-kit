@@ -52,6 +52,20 @@ class ModularValidateWorkflowTests(unittest.TestCase):
         run = next(s["run"] for s in steps if s.get("name") == "Evaluate gate")
         self.assertIn('--enabled "${ENABLED:-[]}"', run)
 
+    def test_plan_exposes_codes_and_commits_outputs(self):
+        outputs = self.wf["jobs"]["plan"]["outputs"]
+        self.assertEqual(outputs["codes"], "${{ steps.plan.outputs.codes }}")
+        self.assertEqual(outputs["commits"], "${{ steps.plan.outputs.commits }}")
+
+    def test_gate_passes_plan_codes_and_commits_via_env(self):
+        step = next(s for s in self.wf["jobs"]["gate"]["steps"] if s.get("name") == "Evaluate gate")
+        self.assertEqual(step["env"]["PLAN_CODES"], "${{ needs.plan.outputs.codes }}")
+        self.assertEqual(step["env"]["TEMPLATE_COMMITS"], "${{ needs.plan.outputs.commits }}")
+        self.assertIn('--plan-codes "${PLAN_CODES:-[]}"', step["run"])
+        self.assertIn('--template-commits "${TEMPLATE_COMMITS:-$empty_object}"', step["run"])
+        self.assertIn("empty_object='{}'", step["run"])
+        self.assertNotIn("${{", step["run"])
+
     def test_gate_jobs_file_is_single_json_list(self):
         steps = self.wf["jobs"]["gate"]["steps"]
         run = next(s["run"] for s in steps if s.get("name") == "Fetch job results")

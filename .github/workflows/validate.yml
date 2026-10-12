@@ -14,6 +14,8 @@ jobs:
     outputs:
       modules: ${{ steps.plan.outputs.modules }}
       java: ${{ steps.plan.outputs.java }}
+      codes: ${{ steps.plan.outputs.codes }}
+      commits: ${{ steps.plan.outputs.commits }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,9 +119,12 @@ jobs:
       - name: Evaluate gate
         env:
           ENABLED: ${{ needs.plan.outputs.modules }}
+          PLAN_CODES: ${{ needs.plan.outputs.codes }}
+          TEMPLATE_COMMITS: ${{ needs.plan.outputs.commits }}
           NEEDS: ${{ toJSON(needs) }}
           TOOLKIT_REF: ${{ job.workflow_sha }}
         run: |
+          empty_object='{}'
           args=()
           if [[ -f jobs.json ]]; then args+=(--jobs-file jobs.json); fi
-          ci-kit gate --enabled "${ENABLED:-[]}" --needs "$NEEDS" "${args[@]}" --ref "$TOOLKIT_REF" --summary "$GITHUB_STEP_SUMMARY"
+          ci-kit gate --enabled "${ENABLED:-[]}" --needs "$NEEDS" "${args[@]}" --plan-codes "${PLAN_CODES:-[]}" --template-commits "${TEMPLATE_COMMITS:-$empty_object}" --ref "$TOOLKIT_REF" --summary "$GITHUB_STEP_SUMMARY"

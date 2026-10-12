@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .gate import evaluate, render_summary
-from .plan import Finding, build_plan
+from .plan import Finding, build_plan, discover
 
 
 def _compact(value: object) -> str:
@@ -32,10 +32,27 @@ def format_finding(finding: Finding) -> str:
     return f"{finding.code} {finding.module} {finding.path or '-'}: {finding.message} (docs/errors/{finding.code}.md)"
 
 
+def _template_commits(repo: Path) -> dict[str, str]:
+    import yaml
+
+    commits: dict[str, str] = {}
+    for module, path in discover(repo)[0].items():
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        commit = data.get("_commit") if isinstance(data, dict) else None
+        if isinstance(commit, str) and commit:
+            commits[module] = commit
+    return commits
+
+
 def _plan(args: argparse.Namespace) -> int:
     plan = build_plan(Path(args.repo), src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules), "java": _compact(plan.matrices.get("java", []))}
     if args.github_output:
+        outputs["codes"] = _compact(list(dict.fromkeys(finding.code for finding in plan.findings)))
+        outputs["commits"] = _compact(_template_commits(Path(args.repo)))
         with open(args.github_output, "a", encoding="utf-8") as handle:
             for key, value in outputs.items():
                 handle.write(f"{key}={value}\n")
@@ -124,7 +141,19 @@ def _gate(args: argparse.Namespace) -> int:
     if not isinstance(needs, dict):
         print("ci-kit gate: --needs must be a JSON object", file=sys.stderr)
         return 1
-    ok, rows = evaluate(enabled, needs, _load_jobs(args.jobs_file), args.ref)
+    try:
+        plan_codes = _load_json(args.plan_codes, "--plan-codes")
+        commits = _load_json(args.template_commits, "--template-commits")
+    except ValueError as error:
+        print(f"ci-kit gate: {error}", file=sys.stderr)
+        return 1
+    if not isinstance(plan_codes, list) or not all(isinstance(item, str) for item in plan_codes):
+        print("ci-kit gate: --plan-codes must be a JSON array of strings", file=sys.stderr)
+        return 1
+    if not isinstance(commits, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in commits.items()):
+        print("ci-kit gate: --template-commits must be a JSON object of strings", file=sys.stderr)
+        return 1
+    ok, rows = evaluate(enabled, needs, _load_jobs(args.jobs_file), args.ref, plan_codes=plan_codes, template_commits=commits)
     table = render_summary(rows)
     print(table, end="")
     if args.summary:
@@ -137,11 +166,11 @@ def _gate(args: argparse.Namespace) -> int:
     for row in rows:
         if row.result != "ok":
             detail = f"{row.module}: {row.result}"
-            if row.category:
-                detail += f" ({row.category}"
-                if row.failing_step:
-                    detail += f", step {row.failing_step!r}"
-                detail += ")"
+            parts = [row.category] if row.category else []
+            if row.failing_step:
+                parts.append(f"step {row.failing_step!r}")
+            if parts:
+                detail += f" ({', '.join(parts)})"
             if _annotations():
                 title = f" title={_escape_property(row.code)}" if row.code else ""
                 print(f"::error{title}::{_escape_data(detail)}")
@@ -183,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     gate.add_argument("--jobs-file")
     gate.add_argument("--ref", required=True)
     gate.add_argument("--summary")
+    gate.add_argument("--plan-codes", default="[]")
+    gate.add_argument("--template-commits", default="{}")
     gate.set_defaults(func=_gate)
     args = parser.parse_args(argv)
     return args.func(args)
