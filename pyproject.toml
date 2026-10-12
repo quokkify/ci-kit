@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ci-kit"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "PyYAML==6.0.3",
+    "jsonschema==4.26.0",
+    "copier==9.18.2",
+]
+
+[project.scripts]
+ci-kit = "ci_kit.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "tools"}
+packages = ["ci_kit"]
+
+[tool.setuptools.package-data]
+ci_kit = ["schemas/*.json"]

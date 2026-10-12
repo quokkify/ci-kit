@@ -442,6 +442,7 @@ def validate_toolkit_workflow_errors(
             "python",
             "node",
             "java",
+            "modules",
             "validation-complete",
         },
         "must define detect-runner, lint, gitleaks, language, and aggregate jobs",
@@ -489,6 +490,11 @@ def validate_toolkit_workflow_errors(
         "java": {
             "setups": {"actions/setup-java", "actions/setup-python"},
             "command": "bash scripts/validate_java_fixture.sh",
+            "needs": {"detect-runner", "lint"},
+        },
+        "modules": {
+            "setups": {"actions/setup-python"},
+            "command": "python scripts/validate_modules_fixture.py",
             "needs": {"detect-runner", "lint"},
         },
     }
@@ -646,7 +652,7 @@ def validate_toolkit_workflow_errors(
         needs = aggregate.get("needs")
         require(
             isinstance(needs, list)
-            and set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java"},
+            and set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"},
             "validate aggregate must depend on every required stage",
         )
         require(
@@ -659,7 +665,7 @@ def validate_toolkit_workflow_errors(
             "validate aggregate must use a fixed fallback runner",
         )
         aggregate_text = json.dumps(aggregate)
-        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java"):
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"):
             require(
                 f"needs.{stage}.result" in aggregate_text,
                 f"validate aggregate must fail closed on {stage}",
@@ -685,7 +691,7 @@ def runner_selection_allows_self_hosted(
 
 def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
     """Model the aggregate job's requirement that every stage succeeds."""
-    required = {"detect-runner", "lint", "gitleaks", "python", "node", "java"}
+    required = {"detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"}
     return set(results) == required and all(result == "success" for result in results.values())
 
 
@@ -769,7 +775,7 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
 
     successful_results = {
         stage: "success"
-        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java")
+        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java", "modules")
     }
     if not validation_aggregate_succeeds(successful_results):
         errors.append(f"{path.relative_to(ROOT)}: aggregate positive probe rejected success")

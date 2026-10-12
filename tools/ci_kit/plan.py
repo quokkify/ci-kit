@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field
+from importlib import resources
+from pathlib import Path
+
+import jsonschema
+import yaml
+
+from .modules import MODULES
+
+ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
+
+
+@dataclass(frozen=True)
+class Finding:
+    code: str
+    module: str
+    message: str
+    path: str | None = None
+
+
+@dataclass
+class Plan:
+    modules: list[str] = field(default_factory=list)
+    matrices: dict[str, list[dict]] = field(default_factory=dict)
+    findings: list[Finding] = field(default_factory=list)
+
+
+def discover(repo: Path) -> tuple[dict[str, Path], dict[str, Path]]:
+    repo = Path(repo)
+    answers: dict[str, Path] = {}
+    for path in sorted(repo.glob(".copier-answers.*.yml")):
+        match = ANSWERS_RE.match(path.name)
+        if match:
+            answers[match.group(1)] = path
+    declarations: dict[str, Path] = {}
+    for path in sorted((repo / ".ci" / "modules").glob("*.yml")):
+        declarations[path.stem] = path
+    return answers, declarations
+
+
+def _schema(module: str, version: int) -> dict | None:
+    resource = resources.files("ci_kit").joinpath("schemas", f"{module}.v{version}.json")
+    if not resource.is_file():
+        return None
+    return json.loads(resource.read_text())
+
+
+def _rel(repo: Path, path: Path) -> str:
+    return path.relative_to(repo).as_posix()
+
+
+def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
+    repo = Path(repo)
+    answers, declarations = discover(repo)
+    findings: list[Finding] = []
+    loaded: dict[str, dict] = {}
+
+    for module in sorted(set(answers) | set(declarations)):
+        if module not in MODULES:
+            path = answers.get(module) or declarations[module]
+            findings.append(Finding("CIK-CORE-001", module, f"module {module} is not supported by this ci-kit", _rel(repo, path)))
+            continue
+        if module not in declarations:
+            findings.append(Finding("CIK-CORE-002", module, f".ci/modules/{module}.yml is missing for {answers[module].name}", f".ci/modules/{module}.yml"))
+            continue
+        if module not in answers:
+            findings.append(Finding("CIK-CORE-002", module, f".copier-answers.{module}.yml is missing for .ci/modules/{module}.yml", f".copier-answers.{module}.yml"))
+            continue
+        decl_path = declarations[module]
+        rel = _rel(repo, decl_path)
+        try:
+            data = yaml.safe_load(decl_path.read_text())
+        except OSError as error:
+            findings.append(Finding("CIK-CORE-004", module, f"cannot read declaration: {error.strerror or error}", rel))
+            continue
+        except (yaml.YAMLError, UnicodeDecodeError) as error:
+            findings.append(Finding("CIK-CORE-004", module, f"cannot parse declaration: {error}".splitlines()[0], rel))
+            continue
+        if not isinstance(data, dict):
+            findings.append(Finding("CIK-CORE-004", module, "declaration must be a YAML mapping", rel))
+            continue
+        version = data.get("schema_version")
+        schema = _schema(module, version) if isinstance(version, int) and not isinstance(version, bool) else None
+        if schema is None:
+            if "schema_version" not in data or not isinstance(version, int) or isinstance(version, bool):
+                findings.append(Finding("CIK-CORE-004", module, "schema_version must be an integer", rel))
+            else:
+                findings.append(Finding("CIK-CORE-001", module, f"schema_version {version} is not supported for module {module}", rel))
+            continue
+        errors = sorted(jsonschema.Draft202012Validator(schema).iter_errors(data), key=lambda e: list(e.path))
+        if errors:
+            where = "/".join(str(p) for p in errors[0].path) or "<root>"
+            findings.append(Finding("CIK-CORE-004", module, f"schema violation at {where}: {errors[0].message}", rel))
+            continue
+        loaded[module] = data
+
+    for module in sorted(loaded):
+        for required in MODULES[module].requires:
+            if required not in loaded:
+                findings.append(Finding("CIK-CORE-003", module, f"module {module} requires module {required}", f".ci/modules/{module}.yml"))
+
+    modules = sorted(loaded)
+    if drift and modules:
+        from .drift import drift_findings
+
+        findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override))
+    matrices = {module: list(loaded[module].get("components", [])) for module in modules}
+    return Plan(modules=modules, matrices=matrices, findings=findings)

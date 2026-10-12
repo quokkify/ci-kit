@@ -1,0 +1,125 @@
+name: Validate
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      modules: ${{ steps.plan.outputs.modules }}
+      java: ${{ steps.plan.outputs.java }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install ci-kit
+        run: python -m pip install ./.toolkit
+      - name: Plan modules
+        id: plan
+        run: ci-kit plan --repo . --github-output "$GITHUB_OUTPUT"
+
+  core-checks:
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.modules), 'core')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo actionlint_checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep -F " actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint_checksums.txt | sha256sum -c -
+          tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 actionlint "$RUNNER_TEMP/bin/actionlint"
+      - name: Lint workflows
+        run: |
+          "$RUNNER_TEMP/bin/actionlint" .github/workflows/*.yml
+      - name: Check committed diff whitespace
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || "$BASE_SHA" =~ ^0+$ ]]; then
+            git diff-tree --check --root "$HEAD_SHA"
+          else
+            git diff --check "$BASE_SHA..$HEAD_SHA"
+          fi
+
+  java:
+    name: java (${{ matrix.component.name }})
+    needs: plan
+    if: needs.plan.outputs.java != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.plan.outputs.java) }}
+    uses: ./.github/workflows/java-ci.yml
+    with:
+      working-directory: ${{ matrix.component.path }}
+      java-version: ${{ matrix.component.java_version }}
+
+  gate:
+    needs: [plan, core-checks, java]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out toolkit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install ci-kit
+        run: python -m pip install ./.toolkit
+      - name: Fetch job results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api --paginate --jq '.jobs[]' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > jobs.raw; then
+            if jq -s . jobs.raw > jobs.tmp; then
+              mv jobs.tmp jobs.json
+            fi
+          fi
+      - name: Evaluate gate
+        env:
+          ENABLED: ${{ needs.plan.outputs.modules }}
+          NEEDS: ${{ toJSON(needs) }}
+          TOOLKIT_REF: ${{ job.workflow_sha }}
+        run: |
+          args=()
+          if [[ -f jobs.json ]]; then args+=(--jobs-file jobs.json); fi
+          ci-kit gate --enabled "${ENABLED:-[]}" --needs "$NEEDS" "${args[@]}" --ref "$TOOLKIT_REF" --summary "$GITHUB_STEP_SUMMARY"
