@@ -14,6 +14,8 @@ Bring legacy to the target ref first, then migrate.
 ci-kit update --repo . --module legacy --to v3.2.0
 ```
 
+In the fleet, the normal (non-`--migrate`) update run does the same.
+
 ## Example
 
 Legacy `_commit` is `v3.1.0` and the command is run with `--to v3.2.0`.
