@@ -29,7 +29,7 @@ class MigrationLifecycleTests(unittest.TestCase):
         cls.scenarios = component_less_scenarios()
 
     def test_scenarios_are_discovered(self):
-        for name in ("allure-external", "wave1-release", "wave1-allure-default"):
+        for name in ("allure-external", "wave1-release", "allure-component-less-default"):
             self.assertIn(name, self.scenarios)
         self.assertNotIn("java", self.scenarios)
 

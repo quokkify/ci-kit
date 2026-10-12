@@ -1,4 +1,4 @@
-project_name: fixture-wave1-allure-default
+project_name: fixture-allure-component-less-default
 toolkit_version: v1.0.0
 components: []
 docker: false
