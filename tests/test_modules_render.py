@@ -92,6 +92,9 @@ class ModuleRenderTests(unittest.TestCase):
             self.caller(toolkit_version="v99.0.0"),
         )
 
+    def test_caller_keeps_workflow_name_validate(self) -> None:
+        self.assertEqual(yaml.safe_load(self.caller(toolkit_version="v99.0.0"))["name"], "Validate")
+
     def test_caller_passes_actionlint(self) -> None:
         dest = self.render("core", "toolkit_version=v99.0.0")
         result = subprocess.run(["actionlint", ".github/workflows/validate.yml"], cwd=dest, capture_output=True, text=True)

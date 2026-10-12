@@ -78,12 +78,16 @@ def _rejects(repo: Path) -> list[str]:
 
 
 def _commit(repo: Path, module: str, to: str) -> str | None:
+    return commit_all(repo, f"chore(ci-kit): update {module} to {to}")
+
+
+def commit_all(repo: Path, message: str) -> str | None:
     _git(repo, "add", "-A")
     if not _git(repo, "status", "--porcelain"):
         return None
     configured = bool(_git(repo, "config", "user.email", check=False))
     identity = [] if configured else FALLBACK_IDENTITY
-    _git(repo, *identity, "commit", "-q", "-m", f"chore(ci-kit): update {module} to {to}")
+    _git(repo, *identity, "commit", "-q", "-m", message)
     return _git(repo, "rev-parse", "HEAD")
 
 

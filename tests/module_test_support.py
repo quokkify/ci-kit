@@ -160,3 +160,37 @@ def rendered_from(template: Path, *modules: str, ref: str = "HEAD") -> Path:
             check=True, capture_output=True, text=True,
         )
     return dest
+
+
+def component_less_scenarios() -> list[str]:
+    import yaml
+
+    names = []
+    for path in sorted((ROOT / "tests/scenarios").glob("*.yml")):
+        data = yaml.safe_load(path.read_text())
+        if isinstance(data, dict) and not data.get("components"):
+            names.append(path.stem)
+    return names
+
+
+def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0") -> Path:
+    import yaml
+
+    data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
+    data["toolkit_version"] = ref
+    data_file = mkdtemp("scenario-") / "data.yml"
+    data_file.write_text(yaml.safe_dump(data))
+    dest = mkdtemp("legacy-")
+    subprocess.run(
+        [shutil.which("copier"), "copy", "--trust", "--defaults", "--vcs-ref", ref,
+         "--data-file", str(data_file), str(template), str(dest)],
+        check=True, capture_output=True, text=True,
+    )
+    for key in ("allure_external_workflow_path", "allure_categories_file"):
+        rel = data.get(key)
+        if rel and not (dest / rel).exists():
+            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+            (dest / rel).write_text("[]\n" if rel.endswith(".json") else "name: Run tests\non: push\njobs: {}\n")
+    git(dest, "init", "-q")
+    _commit_all(dest, "initial")
+    return dest

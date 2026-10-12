@@ -77,6 +77,19 @@ def _update(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def _migrate(args: argparse.Namespace) -> int:
+    from .migrate import migrate, result_payload
+
+    result = migrate(Path(args.repo), args.module, args.to, src_override=args.template_src)
+    for sha in result.commits:
+        print(f"{result.module}: {result.area} {sha}")
+    for finding in result.findings:
+        print(format_finding(finding))
+    if args.json:
+        Path(args.json).write_text(json.dumps(result_payload(result), indent=2) + "\n", encoding="utf-8")
+    return 1 if result.findings else 0
+
+
 def _load_json(text: str, label: str) -> object:
     try:
         return json.loads(text)
@@ -157,6 +170,13 @@ def main(argv: list[str] | None = None) -> int:
     update.add_argument("--template-src")
     update.add_argument("--json")
     update.set_defaults(func=_update)
+    migrate = sub.add_parser("migrate")
+    migrate.add_argument("--module", required=True)
+    migrate.add_argument("--repo", required=True)
+    migrate.add_argument("--to", required=True)
+    migrate.add_argument("--template-src")
+    migrate.add_argument("--json")
+    migrate.set_defaults(func=_migrate)
     gate = sub.add_parser("gate")
     gate.add_argument("--enabled", required=True)
     gate.add_argument("--needs", required=True)

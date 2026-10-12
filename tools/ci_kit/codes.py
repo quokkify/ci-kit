@@ -16,5 +16,9 @@ CODES: dict[str, str] = {
     "CIK-LEGACY-003": "Legacy workflow references a different toolkit ref",
     "CIK-LEGACY-004": "Enabled legacy feature lacks its generated files",
     "CIK-LEGACY-005": "Legacy-owned JSON or YAML file does not parse",
+    "CIK-MIGRATE-001": "Migration refused: working tree is not clean",
+    "CIK-MIGRATE-002": "Migration refused: legacy answers do not match the target ref",
+    "CIK-MIGRATE-003": "Migration refused: handed-off files differ from the legacy render",
+    "CIK-MIGRATE-004": "Migration refused: module already installed or area already handed off",
     "CIK-UPDATE-001": "Module update failed or left conflicts",
 }
