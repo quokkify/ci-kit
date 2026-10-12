@@ -53,7 +53,7 @@ def _rel(repo: Path, path: Path) -> str:
     return path.relative_to(repo).as_posix()
 
 
-def build_plan(repo: Path, *, drift: bool = True) -> Plan:
+def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
     repo = Path(repo)
     answers, declarations = discover(repo)
     findings: list[Finding] = []
@@ -104,5 +104,9 @@ def build_plan(repo: Path, *, drift: bool = True) -> Plan:
                 findings.append(Finding("CIK-CORE-003", module, f"module {module} requires module {required}", f".ci/modules/{module}.yml"))
 
     modules = sorted(loaded)
+    if drift and modules:
+        from .drift import drift_findings
+
+        findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override))
     matrices = {module: list(loaded[module].get("components", [])) for module in modules}
     return Plan(modules=modules, matrices=matrices, findings=findings)

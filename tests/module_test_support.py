@@ -108,3 +108,39 @@ def rendered_repo(*modules: str) -> Path:
     for module in modules:
         run_copier(template, dest, "-a", f".copier-answers.{module}.yml", "-d", f"module={module}")
     return dest
+
+
+def _commit_all(repo: Path, message: str) -> None:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", message)
+
+
+def lifecycle_template_repo() -> Path:
+    repo = make_template_repo(Path(tempfile.mkdtemp(prefix="ci-kit-lifecycle-")))
+    decl = repo / "modules/java/template/.ci/modules/java.yml.jinja"
+    decl.write_text(decl.read_text() + "\n# rendered by ci-kit v99.1.0\n")
+    _commit_all(repo, "java: annotate declaration")
+    git(repo, "tag", "v99.1.0")
+    return repo
+
+
+def overlap_template_repo() -> Path:
+    repo = make_template_repo(Path(tempfile.mkdtemp(prefix="ci-kit-overlap-")))
+    core = repo / "modules/core/template/.ci/modules/core.yml.jinja"
+    (repo / "modules/java/template/.ci/modules/core.yml.jinja").write_text(core.read_text())
+    _commit_all(repo, "java: also render core declaration")
+    git(repo, "tag", "-f", "v99.0.0")
+    return repo
+
+
+def rendered_from(template: Path, *modules: str, ref: str = "HEAD") -> Path:
+    dest = Path(tempfile.mkdtemp(prefix="rendered-")).resolve()
+    for module in modules:
+        subprocess.run(
+            [
+                shutil.which("copier"), "copy", "--trust", "--defaults", "--vcs-ref", ref,
+                "-a", f".copier-answers.{module}.yml", "-d", f"module={module}", str(template), str(dest),
+            ],
+            check=True, capture_output=True, text=True,
+        )
+    return dest

@@ -32,7 +32,7 @@ def format_finding(finding: Finding) -> str:
 
 
 def _plan(args: argparse.Namespace) -> int:
-    plan = build_plan(Path(args.repo))
+    plan = build_plan(Path(args.repo), src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules), "java": _compact(plan.matrices.get("java", []))}
     if args.github_output:
         with open(args.github_output, "a", encoding="utf-8") as handle:
@@ -47,7 +47,7 @@ def _plan(args: argparse.Namespace) -> int:
 
 
 def _doctor(args: argparse.Namespace) -> int:
-    plan = build_plan(Path(args.repo))
+    plan = build_plan(Path(args.repo), src_override=args.template_src)
     for finding in plan.findings:
         print(format_finding(finding))
     if not plan.findings:
@@ -61,9 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     plan = sub.add_parser("plan")
     plan.add_argument("--repo", required=True)
     plan.add_argument("--github-output")
+    plan.add_argument("--template-src")
     plan.set_defaults(func=_plan)
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--repo", required=True)
+    doctor.add_argument("--template-src")
     doctor.set_defaults(func=_doctor)
     args = parser.parse_args(argv)
     return args.func(args)
