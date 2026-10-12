@@ -42,7 +42,7 @@ def render_module(answers_path: Path, dest: Path, src_override: str | None = Non
     if not commit or not src:
         raise RenderError(f"cannot render module at {commit}: answers lack _commit or _src_path")
     commit, src = str(commit), str(src)
-    if src_override is None and not TRUSTED_SRC_RE.match(src):
+    if src_override is None and not TRUSTED_SRC_RE.fullmatch(src):
         raise RenderError(f"untrusted template source: {src}")
     if commit.startswith("-") or src.startswith("-"):
         raise RenderError(f"cannot render module at {commit}: option-like commit or source")

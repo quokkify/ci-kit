@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -86,13 +87,20 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(codes(findings), ["CIK-CORE-010"])
         self.assertIn("untrusted template source: https://evil.example/quokkify/ci-kit", findings[0].message)
 
+    def test_trailing_newline_src_path_is_untrusted(self):
+        answers = self.answers["java"]
+        answers.write_text(answers.read_text().replace(f"_src_path: {self.src}", '_src_path: "https://github.com/quokkify/ci-kit\\n"'))
+        findings = drift_findings(self.repo, {"java": answers})
+        self.assertEqual(codes(findings), ["CIK-CORE-010"])
+        self.assertIn("untrusted template source", findings[0].message)
+
     def test_trusted_github_sources_are_accepted_by_pattern(self):
         from ci_kit.drift import TRUSTED_SRC_RE
 
         for src in ("https://github.com/quokkify/ci-kit", "https://github.com/quokkify/ci-kit.git", "gh:quokkify/ci-kit", "git@github.com:quokkify/ci-kit.git"):
-            self.assertTrue(TRUSTED_SRC_RE.match(src), src)
-        for src in ("https://github.com/quokkify/ci-kit-evil", "https://github.com/evil/ci-kit", "/tmp/ci-kit"):
-            self.assertFalse(TRUSTED_SRC_RE.match(src), src)
+            self.assertTrue(TRUSTED_SRC_RE.fullmatch(src), src)
+        for src in ("https://github.com/quokkify/ci-kit-evil", "https://github.com/evil/ci-kit", "/tmp/ci-kit", "https://github.com/quokkify/ci-kit\n"):
+            self.assertFalse(TRUSTED_SRC_RE.fullmatch(src), src)
 
     def test_option_like_commit_is_cik_core_010(self):
         answers = self.answers["java"]
@@ -113,7 +121,7 @@ class DriftTests(unittest.TestCase):
             seen.append(cmd)
             return real(cmd, *args, **kwargs)
 
-        with mock.patch("ci_kit.drift.subprocess.run", spy), __import__("tempfile").TemporaryDirectory() as tmp:
+        with mock.patch("ci_kit.drift.subprocess.run", spy), tempfile.TemporaryDirectory() as tmp:
             render_module(self.answers["java"], Path(tmp) / "r", self.src)
         self.assertNotIn("--trust", seen[0])
         self.assertEqual(seen[0][-3], "--")
