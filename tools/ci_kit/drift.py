@@ -85,7 +85,7 @@ def _diff(path: str, expected: str, actual: str) -> str:
     return "\n".join(lines[:DIFF_LINES])
 
 
-def drift_findings(repo: Path, answers: dict[str, Path], src_override: str | None = None) -> list[Finding]:
+def drift_findings(repo: Path, answers: dict[str, Path], src_override: str | None = None, owned: set[str] | None = None) -> list[Finding]:
     repo = Path(repo)
     findings: list[Finding] = []
     renders: dict[str, dict[str, bytes]] = {}
@@ -100,6 +100,8 @@ def drift_findings(repo: Path, answers: dict[str, Path], src_override: str | Non
     for module, files in renders.items():
         for path in files:
             owners.setdefault(path, []).append(module)
+    if owned is not None:
+        owned.update(owners)
     contested = {path for path, mods in owners.items() if len(mods) > 1}
     for path in sorted(contested):
         mods = owners[path]

@@ -27,6 +27,7 @@ class Plan:
     modules: list[str] = field(default_factory=list)
     matrices: dict[str, list[dict]] = field(default_factory=dict)
     findings: list[Finding] = field(default_factory=list)
+    module_owned: set[str] = field(default_factory=set)
 
 
 def discover(repo: Path) -> tuple[dict[str, Path], dict[str, Path]]:
@@ -104,9 +105,24 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
                 findings.append(Finding("CIK-CORE-003", module, f"module {module} requires module {required}", f".ci/modules/{module}.yml"))
 
     modules = sorted(loaded)
+    module_owned: set[str] = set()
     if drift and modules:
         from .drift import drift_findings
 
-        findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override))
+        findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override, module_owned))
+    legacy_path = repo / ".copier-answers.yml"
+    if legacy_path.exists():
+        from .handoff import AREAS
+        from .legacy import handoff_findings, legacy_findings, load_answers
+
+        legacy_answers, _ = load_answers(repo)
+        if not drift:
+            module_owned.update(f".ci/modules/{module}.yml" for module in modules)
+            handed = (legacy_answers or {}).get("handed_off")
+            for name in handed if isinstance(handed, list) else []:
+                if name in AREAS:
+                    module_owned.update(AREAS[name].legacy_paths)
+        findings.extend(handoff_findings(repo, legacy_answers, set(modules)))
+        findings.extend(legacy_findings(repo, module_owned))
     matrices = {module: list(loaded[module].get("components", [])) for module in modules}
-    return Plan(modules=modules, matrices=matrices, findings=findings)
+    return Plan(modules=modules, matrices=matrices, findings=findings, module_owned=module_owned)
