@@ -10,9 +10,14 @@ python scripts/update_copier_fleet.py --org quokkify --dry-run --include-health 
 
 This flag does not change updates, branch protection, PR creation or exit-code
 policy. The default invocation makes no additional health API calls. Health
-is reporting evidence, not rollout approval. JSON schema version 4 preserves
-all previous inventory and summary keys and adds `repositories[].health` when
-requested. The recorded `template.commit` remains the updater's inventory;
+is reporting evidence, not rollout approval. JSON schema version 5 preserves
+all previous inventory and summary keys, adds `repositories[].health` when
+requested, and adds `repositories[].template.modules` (module names from the
+repository's `.copier-answers.<module>.yml` files) and `.state` (`legacy`,
+`hybrid(<handed-off areas>)` or `modules`). Markdown and health tables gain a
+"Modules / state" column. Repositories whose module answers are untrusted get
+the statuses `foreign-module-template`, `unknown-module` or
+`unsafe-answers-file` and are not processed. The recorded `template.commit` remains the updater's inventory;
 `health.applied_template_version` comes from the actual default-branch answers
 file read at `health.default_sha`. PR creation or a successful PR check does not
 mean a template version has been adopted.

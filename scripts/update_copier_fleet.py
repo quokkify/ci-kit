@@ -27,7 +27,15 @@ from typing import Any, Callable, Sequence
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+from ci_kit.drift import TRUSTED_SRC_RE
+from ci_kit.modules import MODULES
+
 ANSWERS_FILE = ".copier-answers.yml"
+LEGACY_MODULE = "legacy"
+ANSWERS_NAME_PATTERN = re.compile(r"^\.copier-answers(\.[a-z][a-z0-9-]*)?\.yml$")
+CI_KIT_TOOLS = Path(__file__).resolve().parents[1] / "tools"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
@@ -61,6 +69,10 @@ class RepositoryProcessError(FleetUpdateError):
         self.inventory = inventory
 
 
+class UnsafeAnswersFileError(FleetUpdateError):
+    """An answers file is not a regular file."""
+
+
 @dataclass(frozen=True)
 class Repository:
     name_with_owner: str
@@ -88,6 +100,8 @@ class TemplateInventory:
     allure_report: str
     release_please: str
     renovate: str
+    modules: tuple[str, ...] = ()
+    state: str = "legacy"
 
 
 BASELINE_PATHS = (
@@ -275,24 +289,44 @@ def discover_repositories(
     return sorted(repositories, key=lambda repository: repository.name_with_owner.casefold())
 
 
-def fetch_answers(repository: str, *, env: dict[str, str]) -> str | None:
-    completed = run(
-        [
-            "gh",
-            "api",
-            f"repos/{repository}/contents/{ANSWERS_FILE}",
-            "-H",
-            "Accept: application/vnd.github.raw+json",
-        ],
-        env=env,
-        check=False,
-    )
-    if completed.returncode == 0:
-        return completed.stdout
-    if "404" in completed.stderr or "Not Found" in completed.stderr:
-        return None
-    detail = completed.stderr.strip() or completed.stdout.strip()
-    raise FleetUpdateError(f"cannot read {repository}/{ANSWERS_FILE}: {detail}")
+def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, str]:
+    listing = run(["gh", "api", f"repos/{repository}/contents/"], env=env, check=False)
+    if listing.returncode:
+        if "404" in listing.stderr or "Not Found" in listing.stderr:
+            return {}
+        detail = listing.stderr.strip() or listing.stdout.strip()
+        raise FleetUpdateError(f"cannot list {repository}: {detail}")
+    try:
+        entries = json.loads(listing.stdout)
+    except json.JSONDecodeError as exc:
+        raise FleetUpdateError(f"gh returned invalid JSON listing {repository}") from exc
+    if not isinstance(entries, list):
+        raise FleetUpdateError(f"unexpected contents listing for {repository}")
+    files: dict[str, str] = {}
+    for entry in entries:
+        name = entry.get("name") if isinstance(entry, dict) else None
+        match = ANSWERS_NAME_PATTERN.fullmatch(name) if isinstance(name, str) else None
+        if not match:
+            continue
+        module = match.group(1)[1:] if match.group(1) else LEGACY_MODULE
+        if entry.get("type") != "file" or (match.group(1) and module == LEGACY_MODULE):
+            raise UnsafeAnswersFileError(name)
+        completed = run(
+            [
+                "gh",
+                "api",
+                f"repos/{repository}/contents/{name}",
+                "-H",
+                "Accept: application/vnd.github.raw+json",
+            ],
+            env=env,
+            check=False,
+        )
+        if completed.returncode:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise FleetUpdateError(f"cannot read {repository}/{name}: {detail}")
+        files[module] = completed.stdout
+    return files
 
 
 def normalize_template_source(source: str) -> str | None:
@@ -822,8 +856,36 @@ def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateI
     )
 
 
+def legacy_handed_off(raw_answers: str) -> list[str]:
+    handed = parse_answers(raw_answers).get("handed_off")
+    return [area for area in handed if isinstance(area, str)] if isinstance(handed, list) else []
+
+
+def modules_inventory(commit: str, modules: Sequence[str], repository_path: Path) -> TemplateInventory:
+    missing_baseline = tuple(
+        path
+        for path in BASELINE_PATHS
+        if not is_regular_file(repository_path / path, repository_root=repository_path)
+    )
+    components = inferred_components(repository_path) or ("none",)
+    return TemplateInventory(
+        commit=commit,
+        target_commit=None,
+        components=tuple(components),
+        baseline=f"{len(BASELINE_PATHS) - len(missing_baseline)}/{len(BASELINE_PATHS)}",
+        missing_baseline=missing_baseline,
+        docker="unknown",
+        codeql="unknown",
+        allure_report="unknown",
+        release_please="unknown",
+        renovate="unknown",
+        modules=tuple(modules),
+        state="modules",
+    )
+
+
 def inventory_has_mismatch(inventory: TemplateInventory | None) -> bool:
-    if inventory is None:
+    if inventory is None or inventory.state == "modules":
         return False
     return (
         inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}"
@@ -856,7 +918,9 @@ def console_lines(result: Result) -> list[str]:
             f"codeql={FEATURE_LABELS[inventory.codeql]} "
             f"allure={FEATURE_LABELS[inventory.allure_report]} "
             f"release-please={FEATURE_LABELS[inventory.release_please]} "
-            f"renovate={FEATURE_LABELS[inventory.renovate]}"
+            f"renovate={FEATURE_LABELS[inventory.renovate]} "
+            f"state={sanitize_text(inventory.state)} "
+            f"modules={sanitize_text(','.join(inventory.modules))}"
         )
     return lines
 
@@ -907,8 +971,8 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "",
         f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
         "",
-        "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate | Modules / state |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     status_labels = {
         "up-to-date": "✅ Current",
@@ -918,6 +982,9 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         "foreign-template": "↗️ Foreign template",
         "excluded": "⏭️ Excluded",
         "failed": "❌ Failed",
+        "foreign-module-template": "↗️ Foreign module template",
+        "unknown-module": "❔ Unknown module",
+        "unsafe-answers-file": "⚠️ Unsafe answers file",
     }
     for result in results:
         inventory = result.inventory
@@ -934,9 +1001,10 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 MARKDOWN_FEATURE_LABELS[inventory.allure_report],
                 MARKDOWN_FEATURE_LABELS[inventory.release_please],
                 MARKDOWN_FEATURE_LABELS[inventory.renovate],
+                f"{', '.join(inventory.modules) or '—'} / {inventory.state}",
             )
         else:
-            cells = ("—", "—", "—", "—", "—", "—", "—", "—")
+            cells = ("—", "—", "—", "—", "—", "—", "—", "—", "—")
         lines.append(
             "| "
             + " | ".join(
@@ -979,7 +1047,7 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             lines.append("")
     health_results = [result for result in results if result.health is not None]
     if health_results:
-        lines.extend(["", "### Adoption and branch health", "", "This read-only snapshot is independent of PR creation and template rendering.", "", "| Repository | Applied → target | Default revision / CI | Automation PR / CI | Active required checks | Exception |", "| --- | --- | --- | --- | --- | --- |"])
+        lines.extend(["", "### Adoption and branch health", "", "This read-only snapshot is independent of PR creation and template rendering.", "", "| Repository | Applied → target | Default revision / CI | Automation PR / CI | Active required checks | Exception | Modules / state |", "| --- | --- | --- | --- | --- | --- | --- |"])
         for result in health_results:
             health = result.health or {}
             pr = health.get("pull_request")
@@ -991,7 +1059,7 @@ def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
             checks = ", ".join(str(item.get("context")) + (f" (app {item['integration_id']})" if item.get("integration_id") is not None else "") for item in policy.get("checks", []))
             exception = health.get("exception")
             exception_text = f"{exception.get('status')}: {exception.get('reason')} · expires {exception.get('expires_on')}" if exception else "none"
-            cells = [result.repository, f"{health.get('applied_template_version')} → {health.get('target_template_version')} ({health.get('adoption')})", f"{health.get('default_sha')} · {health.get('default_ci', {}).get('status', 'unknown')}", pr_text, f"{policy.get('status', 'unknown')}: {checks or 'none observed'}", exception_text]
+            cells = [result.repository, f"{health.get('applied_template_version')} → {health.get('target_template_version')} ({health.get('adoption')})", f"{health.get('default_sha')} · {health.get('default_ci', {}).get('status', 'unknown')}", pr_text, f"{policy.get('status', 'unknown')}: {checks or 'none observed'}", exception_text, f"{', '.join(result.inventory.modules) or '—'} / {result.inventory.state}" if result.inventory else "—"]
             lines.append("| " + " | ".join(health_markdown_escape(str(value)) for value in cells) + " |")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1027,13 +1095,15 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
                 "allure_report": result.inventory.allure_report,
                 "release_please": result.inventory.release_please,
                 "renovate": result.inventory.renovate,
+                "modules": list(result.inventory.modules),
+                "state": result.inventory.state,
             }
         if result.health is not None:
             item["health"] = result.health
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
-        "schema_version": 4,
+        "schema_version": 5,
         "summary": counts,
         "configuration_gaps": gaps,
         "configuration_mismatches": gaps,
@@ -1555,12 +1625,88 @@ def remote_has_same_change(
     return remote.get("commit", {}).get("tree", {}).get("sha") == local_tree and parents == [local_parent]
 
 
+def module_table(rows: Sequence[dict[str, str]]) -> str:
+    if not rows:
+        return ""
+    lines = ["| module | old → new | doctor |", "| --- | --- | --- |"]
+    lines.extend(
+        f"| {markdown_escape(row['module'])} | {markdown_escape(row['from'] or 'unknown')} → "
+        f"{markdown_escape(row['to'])} | {markdown_escape(row['doctor'])} |"
+        for row in rows
+    )
+    return "\n\n## Module updates\n\n" + "\n".join(lines)
+
+
+def ci_kit_environment(env: dict[str, str]) -> dict[str, str]:
+    merged = dict(env)
+    existing = merged.get("PYTHONPATH")
+    merged["PYTHONPATH"] = str(CI_KIT_TOOLS) + (os.pathsep + existing if existing else "")
+    return merged
+
+
+def run_ci_kit_update(repository_path: Path, template_ref: str, *, env: dict[str, str]) -> list[dict[str, str]]:
+    with tempfile.TemporaryDirectory(prefix="ci-kit-update-") as temporary:
+        report_path = Path(temporary) / "update.json"
+        completed = run(
+            [
+                sys.executable,
+                "-m",
+                "ci_kit.cli",
+                "update",
+                "--repo",
+                str(repository_path),
+                "--to",
+                template_ref,
+                "--skip-legacy",
+                "--json",
+                str(report_path),
+            ],
+            env=ci_kit_environment(env),
+            check=False,
+        )
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = {}
+    findings = report.get("findings") if isinstance(report, dict) else None
+    codes = [
+        finding["code"]
+        for finding in findings or []
+        if isinstance(finding, dict) and isinstance(finding.get("code"), str)
+    ]
+    if completed.returncode:
+        reason = ", ".join(codes) or f"exit {completed.returncode}"
+        raise FleetUpdateError(f"ci-kit update failed: {reason}")
+    return [
+        {
+            "module": str(row.get("module")),
+            "from": str(row.get("from") or ""),
+            "to": str(row.get("to")),
+            "doctor": "ok",
+        }
+        for row in report.get("modules", [])
+        if isinstance(row, dict)
+    ]
+
+
+def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[str, str]) -> list[dict[str, str]]:
+    identity = ["-c", "user.name=quokkify-copier[bot]", "-c", "user.email=quokkify-copier[bot]@users.noreply.github.com"]
+    base = run(["git", "rev-parse", "HEAD"], cwd=repository_path).stdout.strip()
+    run(["git", "add", "--all"], cwd=repository_path)
+    if run(["git", "status", "--porcelain"], cwd=repository_path).stdout.strip():
+        run(["git", *identity, "commit", "-q", "-m", "chore(template): pending legacy update"], cwd=repository_path)
+    rows = run_ci_kit_update(repository_path, template_ref, env=env)
+    run(["git", "reset", "--soft", base], cwd=repository_path)
+    return rows
+
+
 def ensure_pull_request(
     repository: Repository,
     *,
     branch: str,
     changed: Sequence[str],
     env: dict[str, str],
+    modules: Sequence[dict[str, str]] = (),
 ) -> str:
     existing = gh_json(
         [
@@ -1588,6 +1734,7 @@ def ensure_pull_request(
         "Release Please, and Renovate) synchronized while leaving merge approval to maintainers.\n\n"
         "## Generated changes\n\n"
         + "\n".join(f"- `{path}`" for path in changed)
+        + module_table(modules)
         + "\n\n## Verification\n\n"
         "- `copier update --trust --defaults --conflict=rej --skip-tasks`\n"
         "- Legacy components keep their `type`/`path`; the updater supplies stable `id`/`name` migration data.\n"
@@ -1626,47 +1773,94 @@ def process_repository(
     env: dict[str, str],
     workspace: Path,
 ) -> Result:
-    raw_answers = fetch_answers(repository.name_with_owner, env=env)
-    if raw_answers is None:
-        return Result(repository.name_with_owner, "not-managed")
-
-    source = normalize_template_source(parse_template_source(raw_answers))
-    normalized_expected = normalize_template_source(expected_template)
-    if normalized_expected is None or source != normalized_expected:
-        return Result(repository.name_with_owner, "foreign-template", source or "unrecognized source")
-
-    destination = workspace / repository.name_with_owner.replace("/", "--")
-    clone_repository(repository, destination, env=env)
-    cloned_answers_path = destination / ANSWERS_FILE
-    if not is_regular_file(cloned_answers_path, repository_root=destination):
-        raise FleetUpdateError(f"cloned {ANSWERS_FILE} must be a regular file")
-    cloned_answers = cloned_answers_path.read_text(encoding="utf-8")
-    cloned_source = normalize_template_source(parse_template_source(cloned_answers))
-    if cloned_source != normalized_expected:
-        raise FleetUpdateError("cloned repository changed to a different template during audit")
-    inventory = inventory_from_answers(cloned_answers, destination)
+    name = repository.name_with_owner
     try:
-        paths = update_template(
+        files = fetch_answers_files(name, env=env)
+    except UnsafeAnswersFileError as exc:
+        return Result(name, "unsafe-answers-file", str(exc))
+    if not files:
+        return Result(name, "not-managed")
+
+    module_files = {module: text for module, text in files.items() if module != LEGACY_MODULE}
+    for module in sorted(module_files):
+        if module not in MODULES:
+            return Result(name, "unknown-module", module)
+    for module, text in sorted(module_files.items()):
+        module_source = parse_answers(text).get("_src_path")
+        if not isinstance(module_source, str) or not TRUSTED_SRC_RE.fullmatch(module_source):
+            return Result(name, "foreign-module-template", f"{module}: {module_source if isinstance(module_source, str) else 'missing _src_path'}")
+
+    normalized_expected = normalize_template_source(expected_template)
+    raw_answers = files.get(LEGACY_MODULE)
+    if raw_answers is not None:
+        source = normalize_template_source(parse_template_source(raw_answers))
+        if normalized_expected is None or source != normalized_expected:
+            return Result(name, "foreign-template", source or "unrecognized source")
+
+    destination = workspace / name.replace("/", "--")
+    clone_repository(repository, destination, env=env)
+    for module in module_files:
+        if not is_regular_file(destination / f".copier-answers.{module}.yml", repository_root=destination):
+            return Result(name, "unsafe-answers-file", f".copier-answers.{module}.yml")
+    modules = tuple(sorted(module_files))
+
+    if raw_answers is not None:
+        cloned_answers_path = destination / ANSWERS_FILE
+        if not is_regular_file(cloned_answers_path, repository_root=destination):
+            raise FleetUpdateError(f"cloned {ANSWERS_FILE} must be a regular file")
+        cloned_answers = cloned_answers_path.read_text(encoding="utf-8")
+        cloned_source = normalize_template_source(parse_template_source(cloned_answers))
+        if cloned_source != normalized_expected:
+            raise FleetUpdateError("cloned repository changed to a different template during audit")
+        inventory = inventory_from_answers(cloned_answers, destination)
+        if modules:
+            areas = ",".join(legacy_handed_off(cloned_answers))
+            inventory = replace(inventory, modules=modules, state=f"hybrid({areas})")
+    else:
+        primary = "core" if "core" in modules else modules[0]
+        primary_answers = parse_answers((destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8"))
+        primary_commit = primary_answers.get("_commit")
+        inventory = modules_inventory(
+            primary_commit.strip() if isinstance(primary_commit, str) and primary_commit.strip() else "unknown",
+            modules,
             destination,
-            template_source=expected_template,
-            template_ref=template_ref,
-            env=env,
-            repository=repository,
         )
-        updated_answers_path = destination / ANSWERS_FILE
-        if is_regular_file(updated_answers_path, repository_root=destination):
-            updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
-            updated_commit = updated_answers.get("_commit")
-            if isinstance(updated_commit, str) and updated_commit.strip():
-                inventory = replace(inventory, target_commit=updated_commit.strip())
+    try:
+        paths: list[str] = []
+        if raw_answers is not None:
+            paths = update_template(
+                destination,
+                template_source=expected_template,
+                template_ref=template_ref,
+                env=env,
+                repository=repository,
+            )
+            updated_answers_path = destination / ANSWERS_FILE
+            if is_regular_file(updated_answers_path, repository_root=destination):
+                updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
+                updated_commit = updated_answers.get("_commit")
+                if isinstance(updated_commit, str) and updated_commit.strip():
+                    inventory = replace(inventory, target_commit=updated_commit.strip())
+        rows: list[dict[str, str]] = []
+        if modules:
+            if not template_ref:
+                raise FleetUpdateError("module update requires a resolved template ref")
+            rows = apply_module_updates(destination, template_ref, env=env)
+            paths = changed_paths(destination)
+            if raw_answers is None:
+                target = parse_answers(
+                    (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
+                ).get("_commit")
+                if isinstance(target, str) and target.strip():
+                    inventory = replace(inventory, target_commit=target.strip())
         if not paths:
-            return Result(repository.name_with_owner, "up-to-date", inventory=inventory)
+            return Result(name, "up-to-date", inventory=inventory)
         if dry_run:
-            return Result(repository.name_with_owner, "would-update", ", ".join(paths), inventory)
+            return Result(name, "would-update", ", ".join(paths), inventory)
 
         push_automation_branch(repository, destination, branch=branch, env=env)
-        url = ensure_pull_request(repository, branch=branch, changed=paths, env=env)
-        return Result(repository.name_with_owner, "pull-request", url, inventory)
+        url = ensure_pull_request(repository, branch=branch, changed=paths, env=env, **({"modules": rows} if rows else {}))
+        return Result(name, "pull-request", url, inventory)
     except Exception as exc:
         raise RepositoryProcessError(str(exc), inventory) from exc
 

@@ -266,7 +266,7 @@ class HealthTests(TestCase):
         result = api.collect({"reason": "| injected\n# <script>`[evil](url)", "expires_on": "2026-10-01"})
         item = fleet.Result("acme/demo", "pull-request", "PR created", health=result)
         parsed = json.loads(fleet.json_report([item], {"pull-request": 1}))
-        self.assertEqual(parsed["schema_version"], 4)
+        self.assertEqual(parsed["schema_version"], 5)
         self.assertEqual(parsed["repositories"][0]["status"], "pull-request")
         self.assertEqual(parsed["repositories"][0]["health"], result)
         markdown = fleet.markdown_report([item], {"pull-request": 1})
