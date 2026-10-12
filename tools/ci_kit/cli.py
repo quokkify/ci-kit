@@ -56,6 +56,27 @@ def _doctor(args: argparse.Namespace) -> int:
     return 1 if plan.findings else 0
 
 
+def _update(args: argparse.Namespace) -> int:
+    from .update import run_update
+
+    updates, findings = run_update(
+        Path(args.repo), args.to, modules=args.module or None,
+        skip_legacy=args.skip_legacy, src_override=args.template_src,
+    )
+    for update in updates:
+        print(f"{update.module}: {update.from_ref} -> {update.to_ref} {update.commit or '(unchanged)'}")
+    for finding in findings:
+        print(format_finding(finding))
+    if args.json:
+        payload = {
+            "ref": args.to,
+            "modules": [{"module": u.module, "from": u.from_ref, "to": u.to_ref, "commit": u.commit} for u in updates],
+            "findings": [{"code": f.code, "module": f.module, "message": f.message, "path": f.path} for f in findings],
+        }
+        Path(args.json).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return 1 if findings else 0
+
+
 def _load_json(text: str, label: str) -> object:
     try:
         return json.loads(text)
@@ -128,6 +149,14 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--repo", required=True)
     doctor.add_argument("--template-src")
     doctor.set_defaults(func=_doctor)
+    update = sub.add_parser("update")
+    update.add_argument("--repo", required=True)
+    update.add_argument("--to", required=True)
+    update.add_argument("--module", action="append")
+    update.add_argument("--skip-legacy", action="store_true")
+    update.add_argument("--template-src")
+    update.add_argument("--json")
+    update.set_defaults(func=_update)
     gate = sub.add_parser("gate")
     gate.add_argument("--enabled", required=True)
     gate.add_argument("--needs", required=True)

@@ -16,4 +16,5 @@ CODES: dict[str, str] = {
     "CIK-LEGACY-003": "Legacy workflow references a different toolkit ref",
     "CIK-LEGACY-004": "Enabled legacy feature lacks its generated files",
     "CIK-LEGACY-005": "Legacy-owned JSON or YAML file does not parse",
+    "CIK-UPDATE-001": "Module update failed or left conflicts",
 }
