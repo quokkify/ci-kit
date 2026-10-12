@@ -5,8 +5,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t",
@@ -72,12 +70,22 @@ def render_tree(repo: Path, scenario: Path | None = None, data: dict | None = No
         shutil.rmtree(dest, ignore_errors=True)
 
 
-def normalize_answers(tree: dict[str, bytes]) -> dict[str, bytes]:
+def normalize_answers(tree: dict[str, bytes], expect_module: str | None = None) -> dict[str, bytes]:
     out = dict(tree)
     raw = out.get(".copier-answers.yml")
     if raw is not None:
-        answers = yaml.safe_load(raw) or {}
-        for key in (*VOLATILE_ANSWER_KEYS, "module"):
-            answers.pop(key, None)
-        out[".copier-answers.yml"] = yaml.safe_dump(answers, sort_keys=True).encode()
+        kept = []
+        found_module = False
+        for line in raw.decode().splitlines(keepends=True):
+            if line.startswith(("_commit:", "_src_path:")):
+                continue
+            if line.startswith("module:"):
+                found_module = True
+                if expect_module is not None and line.strip() != f"module: {expect_module}":
+                    raise AssertionError(f"unexpected answers line: {line!r}")
+                continue
+            kept.append(line)
+        if expect_module is not None and not found_module:
+            raise AssertionError("module answer missing from answers file")
+        out[".copier-answers.yml"] = "".join(kept).encode()
     return out

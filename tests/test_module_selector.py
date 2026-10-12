@@ -34,7 +34,7 @@ class LegacyCompatTests(unittest.TestCase):
             with self.subTest(scenario=scenario.name):
                 self.assertEqual(
                     normalize_answers(render_tree(self.baseline, scenario, PIN)),
-                    normalize_answers(render_tree(self.candidate, scenario, PIN)),
+                    normalize_answers(render_tree(self.candidate, scenario, PIN), "legacy"),
                 )
 
     def test_module_answer_defaults_to_legacy(self) -> None:
