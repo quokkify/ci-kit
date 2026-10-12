@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.2.0](https://github.com/quokkify/ci-kit/compare/v3.1.1...v3.2.0) (2026-10-12)
+
+
+### ✨ Features
+
+* migrate consumers from legacy validate to modules (spec [#2](https://github.com/quokkify/ci-kit/issues/2), wave 1) ([#408](https://github.com/quokkify/ci-kit/issues/408)) ([f19b552](https://github.com/quokkify/ci-kit/commit/f19b5527b4d7c8c17ac31e51e97d48e07ba58971))
+* modular CI prototype (core + java) ([#407](https://github.com/quokkify/ci-kit/issues/407)) ([f034d59](https://github.com/quokkify/ci-kit/commit/f034d5992aefbb8e7eca9a37d21e750ea869da31))
+
+
+### 🐛 Bug Fixes
+
+* **tests:** drop git-history baseline from legacy compat test ([#409](https://github.com/quokkify/ci-kit/issues/409)) ([33cdd8f](https://github.com/quokkify/ci-kit/commit/33cdd8f404b35664fca45ffe88a228cd883eb226))
+
+
+### 📦 Dependencies
+
+* **github-actions:** update python to 3.15 ([#404](https://github.com/quokkify/ci-kit/issues/404)) ([d4bd93d](https://github.com/quokkify/ci-kit/commit/d4bd93d1fa7e4d8478d7ea4ee18d444c81c6e02c))
+* **renovate:** update renovate to v44.145.1 ([#394](https://github.com/quokkify/ci-kit/issues/394)) ([d775833](https://github.com/quokkify/ci-kit/commit/d775833b5b7f70268c7c265778d998fd69db5347))
+* **renovate:** update renovate to v44.148.3 ([#397](https://github.com/quokkify/ci-kit/issues/397)) ([ead540a](https://github.com/quokkify/ci-kit/commit/ead540a9054c4c27aac20963f0a8d29d5b5ccc6e))
+* **renovate:** update renovate to v44.148.4 ([#398](https://github.com/quokkify/ci-kit/issues/398)) ([c6182cf](https://github.com/quokkify/ci-kit/commit/c6182cf294153eb7c124f53a36d3170bf1b2590c))
+* **renovate:** update renovate to v44.149.0 ([#399](https://github.com/quokkify/ci-kit/issues/399)) ([f49d78d](https://github.com/quokkify/ci-kit/commit/f49d78dbdaf127f93f26404a62b0c19bcb5e6682))
+* **renovate:** update renovate to v44.149.1 ([#400](https://github.com/quokkify/ci-kit/issues/400)) ([904d9d8](https://github.com/quokkify/ci-kit/commit/904d9d89f718064a134fe297a5f6d61859355f61))
+* **renovate:** update renovate to v44.149.2 ([#401](https://github.com/quokkify/ci-kit/issues/401)) ([2d773c4](https://github.com/quokkify/ci-kit/commit/2d773c47448140733f97f2e2d4938d11c418faeb))
+* **renovate:** update renovate to v44.149.3 ([#403](https://github.com/quokkify/ci-kit/issues/403)) ([ab599ac](https://github.com/quokkify/ci-kit/commit/ab599ac1cbc858485e20dbe8891c0ece947e752c))
+* **uv:** update uv to v0.12.24 ([#402](https://github.com/quokkify/ci-kit/issues/402)) ([783822d](https://github.com/quokkify/ci-kit/commit/783822dd8e596829dc673e2d5dd25686c3825dab))
+* **uv:** update uv to v0.13.0 ([#405](https://github.com/quokkify/ci-kit/issues/405)) ([02b62a6](https://github.com/quokkify/ci-kit/commit/02b62a693c60c3982e9b1fa62a93c25dce5c6b2a))
+
 ## [3.1.1](https://github.com/quokkify/ci-kit/compare/v3.1.0...v3.1.1) (2026-10-08)
 
 
