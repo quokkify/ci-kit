@@ -1211,6 +1211,22 @@ class ProjectOwnedToolkitRefTests(TestCase):
                 "      uses: quokkify/ci-kit/.github/workflows/node-ci.yml@v2.19.2\n",
             )
 
+    def test_leaves_handed_off_module_owned_workflows_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            directory = self.workflows(repository)
+            caller = "      uses: quokkify/ci-kit/.github/workflows/validate.yml@v2.19.1\n"
+            (directory / "validate.yml").write_text(caller, encoding="utf-8")
+            (directory / "ci.yml").write_text(caller, encoding="utf-8")
+            (repository / fleet.ANSWERS_FILE).write_text(
+                "_commit: v2.19.1\n_src_path: gh:quokkify/ci-kit\nhanded_off:\n  - validate\n", encoding="utf-8"
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v2.19.2")
+
+            self.assertEqual(changed, [".github/workflows/ci.yml"])
+            self.assertEqual((directory / "validate.yml").read_text(encoding="utf-8"), caller)
+
     def test_leaves_a_digest_pin_without_a_release_comment_alone(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
@@ -2638,6 +2654,48 @@ class ApplyModuleUpdatesTests(TestCase):
             with mock.patch.object(fleet, "run_ci_kit_update", side_effect=fleet.FleetUpdateError("ci-kit update failed: CIK-UPDATE-001")):
                 with self.assertRaises(fleet.FleetUpdateError):
                     fleet.apply_module_updates(repo, "v3.1.0", env={})
+
+
+class HybridRealCopierUpdateTests(TestCase):
+    @skipUnless(shutil.which("copier"), "Copier is required for the hybrid update integration")
+    def test_migrated_repository_updates_legacy_and_core_without_conflicts(self) -> None:
+        sys.path.insert(0, str(ROOT / "tests"))
+        from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo
+        from ci_kit.plan import build_plan
+
+        template = lifecycle_template_repo()
+        repo = legacy_scenario_repo(template, "wave1-release")
+        migrated = ci_migrate.migrate(repo, "core", "v99.0.0", src_override=str(template))
+        self.assertEqual(migrated.findings, [])
+        canonical = "https://github.com/quokkify/ci-kit.git"
+        for name in (".copier-answers.yml", ".copier-answers.core.yml"):
+            path = repo / name
+            path.write_text(re.sub(r"^_src_path:.*$", f"_src_path: {canonical}", path.read_text(), flags=re.MULTILINE))
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "canonical source")
+        self.assertIn("validate.yml@v99.0.0", (repo / ".github/workflows/validate.yml").read_text())
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(home),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.file://{template}/.insteadOf",
+                "GIT_CONFIG_VALUE_0": canonical,
+            })
+            fleet.update_template(repo, template_source=canonical, template_ref="v99.1.0", env=env)
+            rows = fleet.apply_module_updates(repo, "v99.1.0", env=env)
+        self.assertEqual([(row["module"], row["to"]) for row in rows], [("core", "v99.1.0")])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        self.assertIn("validate.yml@v99.1.0", (repo / ".github/workflows/validate.yml").read_text())
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.yml").read_text())["_commit"], "v99.1.0")
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.core.yml").read_text())["_commit"], "v99.1.0")
+        legacy_refs = [
+            path.name for path in (repo / ".github/workflows").glob("*.yml")
+            if path.name != "validate.yml" and "@v99.0.0" in path.read_text()
+        ]
+        self.assertEqual(legacy_refs, [])
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
 
 
 class ModuleReportTests(TestCase):

@@ -30,7 +30,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.drift import TRUSTED_SRC_RE
-from ci_kit.handoff import area_for_module
+from ci_kit.handoff import AREAS, area_for_module
 from ci_kit.migrate import MigrateResult, render_marker
 from ci_kit.modules import MODULES
 from ci_kit.plan import Finding
@@ -1538,6 +1538,18 @@ RENAMED_TOOLKIT_REFERENCE = re.compile(
 )
 
 
+def module_owned_paths(repository_path: Path) -> set[str]:
+    answers_path = repository_path / ANSWERS_FILE
+    if not answers_path.is_file():
+        return set()
+    return {
+        path
+        for area in legacy_handed_off(answers_path.read_text(encoding="utf-8"))
+        if area in AREAS
+        for path in AREAS[area].legacy_paths
+    }
+
+
 def bump_project_owned_toolkit_refs(
     repository_path: Path,
     template_ref: str,
@@ -1551,6 +1563,9 @@ def bump_project_owned_toolkit_refs(
     reference to match the recorded toolkit_version. Leaving those behind fails the
     consumer's own validation immediately after an otherwise correct update, so the bump
     has to be part of the same commit.
+
+    Files of a handed-off area belong to their module, whose own update moves them;
+    rewriting them here would make that update conflict.
 
     Exact vMAJOR.MINOR.PATCH tags are rewritten to the new tag. A digest pin carrying a
     release comment, which is what Renovate writes, is rewritten to the new tag's commit
@@ -1566,8 +1581,11 @@ def bump_project_owned_toolkit_refs(
     """
     changed: list[str] = []
     commit: str | None = None
+    module_owned = module_owned_paths(repository_path)
     workflows = repository_path / ".github" / "workflows"
     for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
+        if workflow.relative_to(repository_path).as_posix() in module_owned:
+            continue
         original = workflow.read_text(encoding="utf-8")
         updated = RENAMED_TOOLKIT_REFERENCE.sub(lambda match: RENAMED_TEMPLATE_REPOSITORIES[match.group(1)] + "/", original)
         updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", updated)
