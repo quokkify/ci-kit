@@ -29,7 +29,8 @@ class MigrationLifecycleTests(unittest.TestCase):
         cls.scenarios = component_less_scenarios()
 
     def test_scenarios_are_discovered(self):
-        self.assertIn("allure-external", self.scenarios)
+        for name in ("allure-external", "wave1-release", "wave1-allure-default"):
+            self.assertIn(name, self.scenarios)
         self.assertNotIn("java", self.scenarios)
 
     def test_migrate_then_update_is_clean(self):

@@ -1,0 +1,11 @@
+project_name: fixture-wave1-allure-default
+toolkit_version: v1.0.0
+components: []
+docker: false
+codeql: true
+gitleaks: true
+allure_report: true
+release_please: true
+release_mode: single
+renovate: true
+renovate_config_repository: quokkify/renovate-presets

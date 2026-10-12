@@ -101,6 +101,8 @@ def _run(command: list[str], repo: Path) -> str | None:
         result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT)
     except subprocess.TimeoutExpired:
         return f"copier timed out after {RENDER_TIMEOUT}s"
+    except OSError as error:
+        return f"cannot run {command[0]}: {error.strerror or error}"
     if result.returncode:
         lines = (result.stderr or result.stdout).strip().splitlines()
         return lines[-1] if lines else "no output"
@@ -145,7 +147,10 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     if area_name is None:
         return fail("CIK-MIGRATE-004", f"module {module} owns no hand-off area")
     area = AREAS[area_name]
-    if _git(repo, "status", "--porcelain", check=False):
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True, check=False)
+    if status.returncode:
+        return fail("CIK-MIGRATE-001", "not a git repository or git status failed")
+    if status.stdout.strip():
         return fail("CIK-MIGRATE-001", "working tree is not clean")
     legacy, error = load_answers(repo)
     if legacy is None:
@@ -172,7 +177,7 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
 
     def abort(message: str) -> MigrateResult:
         _rollback(repo, head)
-        return fail("CIK-UPDATE-001", message)
+        return fail("CIK-UPDATE-001", f"{message}; rolled back to {head[:7]}")
 
     try:
         flow = "[" + ", ".join([*handed, area_name]) + "]"

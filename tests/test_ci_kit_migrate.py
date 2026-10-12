@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
-from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, legacy_check_names, migrate, parse_marker, render_marker
+from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
 from ci_kit.plan import Finding, build_plan
 from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo, mkdtemp
 
@@ -146,7 +146,27 @@ class MigrateTests(unittest.TestCase):
     def test_option_like_ref_refused(self):
         result = migrate(self.repo, "core", "--evil", src_override=self.src)
         self.assertEqual(result.commits, [])
-        self.assertTrue(result.findings)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-002"])
+
+    def test_copy_command_refuses_option_like_ref(self):
+        with self.assertRaises(ValueError):
+            copier_copy_command("core", "--evil", "src")
+        with self.assertRaises(ValueError):
+            copier_copy_command("core", "v1", "--src")
+        self.assertEqual(copier_copy_command("core", "v1", "src")[-3:], ["--", "src", "."])
+
+    def test_missing_copier_rolls_back(self):
+        head = git(self.repo, "rev-parse", "HEAD")
+        with mock.patch("ci_kit.migrate.copier_copy_command", return_value=["/nonexistent/copier"]):
+            result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-UPDATE-001"])
+        self.assertIn(f"rolled back to {head[:7]}", result.findings[0].message)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+
+    def test_non_git_directory_is_001(self):
+        result = migrate(mkdtemp("nogit-"), "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
 
 
 class MarkerTests(unittest.TestCase):

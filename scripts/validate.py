@@ -1855,6 +1855,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
         "allure-pages": ["default", "github-actions", "python"],
         "allure-external": ["default", "github-actions"],
+        "wave1-release": ["default", "github-actions"],
+        "wave1-allure-default": ["default", "github-actions"],
         "docker": ["default", "github-actions", "python", "docker"],
     }
     for scenario, expected_presets in expected_scenario_presets.items():
