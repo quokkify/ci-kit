@@ -195,18 +195,3 @@ def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0", ov
     git(dest, "init", "-q")
     _commit_all(dest, "initial")
     return dest
-
-
-MODULE_UPDATE_OPENER = "if compgen -G '.copier-answers.*.yml'"
-
-
-def strip_module_update_block(workflow: str) -> str:
-    lines = workflow.splitlines(keepends=True)
-    openers = [i for i, line in enumerate(lines) if line.lstrip().startswith(MODULE_UPDATE_OPENER)]
-    assert len(openers) == 1, f"expected exactly one module-update block, found {len(openers)}"
-    start = openers[0]
-    indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
-    end = next(i for i in range(start + 1, len(lines)) if lines[i].rstrip("\n") == f"{indent}fi")
-    if end + 1 < len(lines) and not lines[end + 1].strip():
-        end += 1
-    return "".join(lines[:start] + lines[end + 1 :])
