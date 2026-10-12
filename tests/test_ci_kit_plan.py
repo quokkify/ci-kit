@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
 from ci_kit.plan import build_plan, discover
-from module_test_support import rendered_repo
+from module_test_support import rendered_repo, shared_template_repo
 
 
 def codes(plan) -> list[str]:
@@ -103,12 +103,12 @@ class CliTests(unittest.TestCase):
 
     def test_doctor_exit_code_and_annotation_format(self):
         repo = rendered_repo("core", "java")
-        self.assertEqual(self.run_cli("doctor", "--repo", str(repo))[0], 0)
+        self.assertEqual(self.run_cli("doctor", "--repo", str(repo), "--template-src", str(shared_template_repo()))[0], 0)
         (repo / ".ci/modules/java.yml").unlink()
-        code, out, _ = self.run_cli("doctor", "--repo", str(repo), env={"GITHUB_ACTIONS": ""})
+        code, out, _ = self.run_cli("doctor", "--repo", str(repo), "--template-src", str(shared_template_repo()), env={"GITHUB_ACTIONS": ""})
         self.assertEqual(code, 1)
         self.assertRegex(out, r"^CIK-CORE-002 java \.ci/modules/java\.yml: .+ \(docs/errors/CIK-CORE-002\.md\)$")
-        code, out, _ = self.run_cli("doctor", "--repo", str(repo), env={"GITHUB_ACTIONS": "true"})
+        code, out, _ = self.run_cli("doctor", "--repo", str(repo), "--template-src", str(shared_template_repo()), env={"GITHUB_ACTIONS": "true"})
         self.assertEqual(code, 1)
         self.assertTrue(out.startswith("::error title=CIK-CORE-002::java: "))
 
@@ -131,7 +131,7 @@ class CliTests(unittest.TestCase):
         repo = rendered_repo("core", "java")
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "out"
-            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--github-output", str(target))
+            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
             lines = target.read_text().splitlines()
         self.assertEqual(code, 0)
         self.assertEqual(lines[0], 'modules=["core","java"]')

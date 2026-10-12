@@ -12,7 +12,9 @@ import yaml
 
 from .plan import Finding
 
-REF_RE = re.compile(r"(quokkify/ci-kit/[^@\s]+)@\S+")
+REF_RE = re.compile(r"(quokkify/ci-kit/[^@\s]+)@[\w.\-/]+")
+TRUSTED_SRC_RE = re.compile(r"^(https://github\.com/|gh:|git@github\.com:)quokkify/ci-kit(\.git)?$")
+RENDER_TIMEOUT = 300
 DIFF_LINES = 40
 
 
@@ -31,26 +33,35 @@ def render_module(answers_path: Path, dest: Path, src_override: str | None = Non
     try:
         answers = yaml.safe_load(answers_path.read_text())
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
-        raise RenderError(f"cannot render module at None: {str(error).splitlines()[0] if str(error) else 'unreadable answers'}") from error
+        reason = str(getattr(error, "strerror", None) or error).splitlines()
+        raise RenderError(f"cannot read answers file: {reason[0] if reason else type(error).__name__}") from error
     if not isinstance(answers, dict):
-        raise RenderError("cannot render module at None: answers file must be a YAML mapping")
+        raise RenderError("cannot read answers file: answers file must be a YAML mapping")
     commit = answers.get("_commit")
     src = src_override or answers.get("_src_path")
     if not commit or not src:
         raise RenderError(f"cannot render module at {commit}: answers lack _commit or _src_path")
+    commit, src = str(commit), str(src)
+    if src_override is None and not TRUSTED_SRC_RE.match(src):
+        raise RenderError(f"untrusted template source: {src}")
+    if commit.startswith("-") or src.startswith("-"):
+        raise RenderError(f"cannot render module at {commit}: option-like commit or source")
     data = {key: value for key, value in answers.items() if not str(key).startswith("_")}
     dest.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         data_file = Path(tmp) / "data.yml"
         data_file.write_text(yaml.safe_dump(data))
-        result = subprocess.run(
-            [
-                *_copier(), "copy", "--trust", "--defaults", "--quiet",
-                "--vcs-ref", str(commit), "--data-file", str(data_file),
-                "-a", answers_path.name, str(src), str(dest),
-            ],
-            capture_output=True, text=True,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    *_copier(), "copy", "--defaults", "--quiet",
+                    "--vcs-ref", commit, "--data-file", str(data_file),
+                    "-a", answers_path.name, "--", src, str(dest),
+                ],
+                capture_output=True, text=True, timeout=RENDER_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            raise RenderError(f"cannot render module at {commit}: copier timed out after {RENDER_TIMEOUT}s") from None
     if result.returncode:
         lines = (result.stderr or result.stdout).strip().splitlines()
         raise RenderError(f"cannot render module at {commit}: {lines[0] if lines else 'copier failed'}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import shutil
 import subprocess
 import tempfile
@@ -13,6 +14,19 @@ GIT_ENV = {
     "GIT_COMMITTER_EMAIL": "t@example.com",
 }
 VOLATILE_ANSWER_KEYS = ("_commit", "_src_path")
+_TEMP_DIRS: list[Path] = []
+
+
+def mkdtemp(prefix: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix=prefix)).resolve()
+    _TEMP_DIRS.append(path)
+    return path
+
+
+@atexit.register
+def _cleanup_temp_dirs() -> None:
+    for path in _TEMP_DIRS:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -49,7 +63,7 @@ def run_copier(repo: Path, dest: Path, *args: str) -> Path:
 
 
 def render(repo: Path, scenario: Path | None = None, data: dict | None = None) -> Path:
-    dest = Path(tempfile.mkdtemp(prefix="render-")).resolve()
+    dest = mkdtemp("render-")
     args: list[str] = []
     if scenario is not None:
         args += ["--data-file", str(scenario)]
@@ -97,13 +111,13 @@ _TEMPLATE_REPO: Path | None = None
 def shared_template_repo() -> Path:
     global _TEMPLATE_REPO
     if _TEMPLATE_REPO is None:
-        tmp = Path(tempfile.mkdtemp(prefix="ci-kit-template-")).resolve()
+        tmp = mkdtemp("ci-kit-template-")
         _TEMPLATE_REPO = make_template_repo(tmp)
     return _TEMPLATE_REPO
 
 
 def rendered_repo(*modules: str) -> Path:
-    dest = Path(tempfile.mkdtemp(prefix="rendered-")).resolve()
+    dest = mkdtemp("rendered-")
     template = shared_template_repo()
     for module in modules:
         run_copier(template, dest, "-a", f".copier-answers.{module}.yml", "-d", f"module={module}")
@@ -116,7 +130,7 @@ def _commit_all(repo: Path, message: str) -> None:
 
 
 def lifecycle_template_repo() -> Path:
-    repo = make_template_repo(Path(tempfile.mkdtemp(prefix="ci-kit-lifecycle-")))
+    repo = make_template_repo(mkdtemp("ci-kit-lifecycle-"))
     decl = repo / "modules/java/template/.ci/modules/java.yml.jinja"
     decl.write_text(decl.read_text() + "\n# rendered by ci-kit v99.1.0\n")
     _commit_all(repo, "java: annotate declaration")
@@ -125,7 +139,7 @@ def lifecycle_template_repo() -> Path:
 
 
 def overlap_template_repo() -> Path:
-    repo = make_template_repo(Path(tempfile.mkdtemp(prefix="ci-kit-overlap-")))
+    repo = make_template_repo(mkdtemp("ci-kit-overlap-"))
     core = repo / "modules/core/template/.ci/modules/core.yml.jinja"
     (repo / "modules/java/template/.ci/modules/core.yml.jinja").write_text(core.read_text())
     _commit_all(repo, "java: also render core declaration")
@@ -134,7 +148,7 @@ def overlap_template_repo() -> Path:
 
 
 def rendered_from(template: Path, *modules: str, ref: str = "HEAD") -> Path:
-    dest = Path(tempfile.mkdtemp(prefix="rendered-")).resolve()
+    dest = mkdtemp("rendered-")
     for module in modules:
         subprocess.run(
             [

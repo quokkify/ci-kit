@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -7,7 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from ci_kit.drift import drift_findings
+from unittest import mock
+
+from ci_kit.drift import drift_findings, render_module
 from ci_kit.plan import build_plan, discover
 from module_test_support import overlap_template_repo, rendered_from, rendered_repo, shared_template_repo
 
@@ -75,6 +78,68 @@ class DriftTests(unittest.TestCase):
         findings = self.drift()
         self.assertEqual(codes(findings), ["CIK-CORE-010"])
         self.assertTrue(findings[0].message.startswith("cannot render module at v0.0.0-missing: "))
+
+    def test_untrusted_src_path_is_cik_core_010(self):
+        answers = self.answers["java"]
+        answers.write_text(answers.read_text().replace(self.src, "https://evil.example/quokkify/ci-kit"))
+        findings = drift_findings(self.repo, {"java": answers})
+        self.assertEqual(codes(findings), ["CIK-CORE-010"])
+        self.assertIn("untrusted template source: https://evil.example/quokkify/ci-kit", findings[0].message)
+
+    def test_trusted_github_sources_are_accepted_by_pattern(self):
+        from ci_kit.drift import TRUSTED_SRC_RE
+
+        for src in ("https://github.com/quokkify/ci-kit", "https://github.com/quokkify/ci-kit.git", "gh:quokkify/ci-kit", "git@github.com:quokkify/ci-kit.git"):
+            self.assertTrue(TRUSTED_SRC_RE.match(src), src)
+        for src in ("https://github.com/quokkify/ci-kit-evil", "https://github.com/evil/ci-kit", "/tmp/ci-kit"):
+            self.assertFalse(TRUSTED_SRC_RE.match(src), src)
+
+    def test_option_like_commit_is_cik_core_010(self):
+        answers = self.answers["java"]
+        answers.write_text(answers.read_text().replace("_commit: v99.0.0", "_commit: --help"))
+        findings = self.drift()
+        self.assertEqual(codes(findings), ["CIK-CORE-010"])
+        self.assertIn("cannot render module", findings[0].message)
+
+    def test_option_like_src_override_is_cik_core_010(self):
+        findings = drift_findings(self.repo, self.answers, "--help")
+        self.assertEqual(set(codes(findings)), {"CIK-CORE-010"})
+
+    def test_render_command_has_no_trust_and_separates_args(self):
+        real = subprocess.run
+        seen = []
+
+        def spy(cmd, *args, **kwargs):
+            seen.append(cmd)
+            return real(cmd, *args, **kwargs)
+
+        with mock.patch("ci_kit.drift.subprocess.run", spy), __import__("tempfile").TemporaryDirectory() as tmp:
+            render_module(self.answers["java"], Path(tmp) / "r", self.src)
+        self.assertNotIn("--trust", seen[0])
+        self.assertEqual(seen[0][-3], "--")
+
+    def test_changed_path_before_ref_is_still_drift(self):
+        path = self.repo / ".github/workflows/validate.yml"
+        path.write_text(path.read_text().replace("workflows/validate.yml@", "workflows/other.yml@"))
+        self.assertEqual(codes(self.drift()), ["CIK-CORE-010"])
+
+    def test_glued_quote_after_ref_is_not_masked(self):
+        path = self.repo / ".github/workflows/validate.yml"
+        path.write_text(path.read_text().replace("@v99.0.0", '@v99.0.0"'))
+        self.assertEqual(codes(self.drift()), ["CIK-CORE-010"])
+
+    def test_unreadable_answers_message_has_no_none(self):
+        answers = self.answers["java"]
+        answers.write_text("a: [")
+        findings = self.drift()
+        self.assertEqual(codes(findings), ["CIK-CORE-010"])
+        self.assertTrue(findings[0].message.startswith("cannot read answers file: "))
+
+    def test_copier_timeout_is_cik_core_010(self):
+        with mock.patch("ci_kit.drift.subprocess.run", side_effect=subprocess.TimeoutExpired("copier", 300)):
+            findings = self.drift()
+        self.assertEqual(set(codes(findings)), {"CIK-CORE-010"})
+        self.assertIn("timed out", findings[0].message)
 
     def test_build_plan_runs_drift_for_valid_modules_only(self):
         path = self.repo / ".ci/modules/java.yml"
