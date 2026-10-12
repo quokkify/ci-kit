@@ -141,6 +141,35 @@ class PilotGateTests(unittest.TestCase):
                 self.assertEqual("Tests pipeline complete" in contexts, expected)
                 self.assertIn("Shared template contract", contexts)
 
+    def test_handed_off_validate_replaces_legacy_context(self):
+        pilot = "quokkify/gh-pages-subdir-action"
+        legacy = gate.PILOT_CHECKS[pilot]
+        handed = gate.pilot_contexts(pilot, 7, handed_off=("validate",))
+        self.assertEqual(handed, tuple("ci / gate" if c == "Shared template contract" else c for c in legacy))
+        self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("validate", "validate")), handed)
+        self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("other",)), legacy)
+
+    def test_legacy_pilot_contexts_are_unchanged(self):
+        self.assertEqual(gate.pilot_contexts("quokkify/skills", None),
+                         ("Gitleaks", "App Python / ci", "Shared template contract"))
+        self.assertEqual(gate.pilot_contexts("quokkify/q4j", 7),
+                         ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete",
+                          "Shared template contract"))
+        self.assertEqual(gate.pilot_contexts("quokkify/q4j", None),
+                         ("Scan current tree (legacy history pending baseline)", "Shared template contract"))
+
+    def test_verify_pilot_expects_gate_after_handoff(self):
+        for answers, expected in ((b"handed_off: [validate]\n", "ci / gate"), (b"handed_off: oops\n", "Shared template contract"),
+                                  (b"", "Shared template contract")):
+            payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers).decode()}
+            with self.subTest(answers=answers), patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+                 patch.object(gate, "api", return_value=payload), \
+                 patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+                 patch.object(gate, "pilot_ready", return_value=True) as ready:
+                gate.verify_pilot("quokkify/gh-pages-subdir-action", 7, "v1.2.3", 0)
+                self.assertIn(expected, ready.call_args.args[2])
+                self.assertEqual("Shared template contract" in ready.call_args.args[2], expected != "ci / gate")
+
     def test_private_repository_stops(self):
         with patch.object(gate, "api", return_value={"private": True, "visibility": "private"}):
             with self.assertRaises(gate.GateError):
@@ -262,6 +291,83 @@ class RolloutTests(unittest.TestCase):
                 rollout.rollout(["--write", "--public-only", "--json-report", str(destination)])
             self.assertEqual(update.call_count, 1)
             self.assertFalse(json.loads(destination.read_text())["rollout"]["fanout_started"])
+
+
+class MigrateRolloutTests(unittest.TestCase):
+    ARGUMENTS = ["--write", "--public-only", "--migrate", "core"]
+
+    def run_rollout(self, statuses, migration, remaining=True):
+        events = []
+
+        def update(arguments, report):
+            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
+            events.append(("update", repository, arguments))
+            status = statuses.get(repository, "pull-request")
+            detail = f"https://github.com/{repository}/pull/5" if status == "pull-request" else ""
+            return {"repositories": [{"repository": repository, "status": status, "detail": detail}]}
+
+        calls = []
+
+        def verify(repository, pr, target, timeout, expected_snapshot=None, **kwargs):
+            calls.append((repository, pr, kwargs))
+            return SHA
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=update), \
+             patch.object(rollout, "pilot_migration", side_effect=migration), \
+             patch.object(rollout, "verify_pilot", side_effect=verify), \
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
+            try:
+                rollout.rollout([*self.ARGUMENTS, "--json-report", str(Path(temporary) / "report.json")])
+            finally:
+                self.events, self.calls = events, calls
+
+    def test_expected_contexts_come_from_pull_request_marker(self):
+        def migration(repository, pr):
+            return (f"{repository}: ci / gate", "Scan"), SHA
+
+        self.run_rollout({}, migration)
+        self.assertEqual([event[1] for event in self.events[:-1]], list(rollout.MIGRATE_PILOTS))
+        self.assertEqual(self.events[-1][1], "remaining")
+        self.assertEqual({repository for repository, _, _ in self.calls}, set(rollout.MIGRATE_PILOTS))
+        for repository, pr, kwargs in self.calls:
+            self.assertEqual(pr, 5)
+            self.assertEqual(kwargs["contexts"], (f"{repository}: ci / gate", "Scan"))
+            self.assertEqual(kwargs["branch"], "ci-kit/migrate-core")
+        for event in self.events:
+            self.assertIn("--migrate", event[2])
+
+    def test_non_pull_request_pilot_status_stops_with_repository_and_status(self):
+        for status in ("not-applicable", "needs-update-first", "migrate-rejected", "would-migrate"):
+            target = rollout.MIGRATE_PILOTS[1]
+            with self.subTest(status=status):
+                with self.assertRaisesRegex(gate.GateError, f"{target}.*{status}"):
+                    self.run_rollout({target: status}, lambda repository, pr: (("ci / gate",), SHA))
+                self.assertFalse(any(event[1] == "remaining" for event in self.events))
+
+    def test_missing_or_invalid_marker_stops(self):
+        def migration(repository, pr):
+            raise gate.GateError(f"migrate marker unusable: {repository}")
+
+        with self.assertRaises(gate.GateError):
+            self.run_rollout({}, migration)
+        self.assertEqual(self.calls, [])
+
+    def test_pilot_migration_parses_checks_after_and_head(self):
+        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "Scan"]}) + "\n```"
+        completed = type("Done", (), {"stdout": json.dumps({"body": body, "headRefOid": SHA})})()
+        with patch.object(rollout.subprocess, "run", return_value=completed):
+            self.assertEqual(rollout.pilot_migration(REPO, 5), (("ci / gate", "Scan"), SHA))
+        for payload in ({"body": "no marker", "headRefOid": SHA},
+                        {"body": body.replace("checks_after", "other"), "headRefOid": SHA},
+                        {"body": body, "headRefOid": "x"}):
+            completed = type("Done", (), {"stdout": json.dumps(payload)})()
+            with self.subTest(payload=payload), patch.object(rollout.subprocess, "run", return_value=completed):
+                with self.assertRaises(gate.GateError):
+                    rollout.pilot_migration(REPO, 5)
 
 
 if __name__ == "__main__":
