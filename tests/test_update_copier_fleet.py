@@ -2361,7 +2361,6 @@ class FetchAnswersFilesTests(TestCase):
         listing = [
             entry(".copier-answers.yml"),
             entry(".copier-answers.core.yml"),
-            entry(".copier-answers.Core.yml"),
             entry(".copier-answers.yaml"),
             entry(".copier-answers.d", "dir"),
             entry("README.md"),
@@ -2370,6 +2369,30 @@ class FetchAnswersFilesTests(TestCase):
             self.fetch(listing, files),
             {"legacy": LEGACY_ANSWERS_TEXT, "core": CORE_ANSWERS_TEXT},
         )
+
+    def test_module_answers_names_match_the_ci_kit_discovery(self) -> None:
+        from ci_kit.plan import discover
+
+        names = [
+            ".copier-answers.yml", ".copier-answers.java.yml", ".copier-answers.Core.yml",
+            ".copier-answers.my_mod.yml", ".copier-answers.a.b.yml", ".copier-answers..yml",
+        ]
+        files = {name: CORE_ANSWERS_TEXT for name in names}
+        fetched = self.fetch([entry(name) for name in names], files)
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary).resolve()
+            for name in names:
+                (repo / name).write_text(CORE_ANSWERS_TEXT, encoding="utf-8")
+            discovered = set(discover(repo)[0])
+        self.assertEqual(set(fetched) - {fleet.LEGACY_MODULE}, discovered)
+        self.assertEqual(discovered, {"java", "Core", "my_mod"})
+
+    def test_near_miss_module_answers_are_reported_as_unknown_modules(self) -> None:
+        listing = [entry(".copier-answers.yml"), entry(".copier-answers.Core.yml")]
+        files = {".copier-answers.yml": LEGACY_ANSWERS_TEXT, ".copier-answers.Core.yml": CORE_ANSWERS_TEXT}
+        result, clone_mock = process(self.fetch(listing, files))
+        self.assertEqual((result.status, result.detail), ("unknown-module", "Core"))
+        clone_mock.assert_not_called()
 
     def test_symlinked_module_answers_are_unsafe(self) -> None:
         listing = [entry(".copier-answers.yml"), entry(".copier-answers.java.yml", "symlink")]
@@ -2779,6 +2802,24 @@ class MigrateModeTests(TestCase):
         outcome, *_ = self.migrate({"legacy": self.LEGACY, "core": CORE_ANSWERS_TEXT})
         self.assertEqual(outcome.status, "not-applicable")
 
+    def test_language_components_are_not_applicable_without_cloning(self) -> None:
+        legacy = LEGACY_ANSWERS_TEXT + "components:\n  - type: python\n    path: .\n"
+        with mock.patch.object(fleet, "clone_repository") as clone_mock:
+            outcome, doctor_mock, migrate_mock, push_mock, calls = self.migrate({"legacy": legacy}, dry_run=False)
+        self.assertEqual((outcome.status, outcome.detail), ("not-applicable", "language components"))
+        for called in (clone_mock, doctor_mock, migrate_mock, push_mock):
+            called.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_migrate_refusal_for_unowned_jobs_is_not_applicable(self) -> None:
+        finding = ci_migrate.Finding("CIK-MIGRATE-005", "core", "job docker calls a reusable workflow; its check names cannot be derived; migrate after its owner module exists", ".github/workflows/validate.yml")
+        refused = ci_migrate.MigrateResult("core", "validate", "v3.1.0", findings=[finding])
+        outcome, _, _, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, result=refused)
+        self.assertEqual(outcome.status, "not-applicable")
+        self.assertIn("reusable workflow", outcome.detail)
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
     def test_legacy_commit_other_than_target_needs_update_first(self) -> None:
         outcome, doctor_mock, migrate_mock, push_mock, _ = self.migrate({"legacy": LEGACY_ANSWERS_TEXT})
         self.assertEqual(outcome.status, "needs-update-first")
@@ -3022,6 +3063,19 @@ class MigrateCommandLineTests(TestCase):
             data = json.loads(report.read_text(encoding="utf-8"))
         self.assertEqual(status, 1)
         self.assertEqual(data["repositories"][0]["migration"], {"findings": []})
+
+    def test_not_applicable_repository_does_not_fail_the_run(self) -> None:
+        skipped = fleet.Result("quokkify/knowledge", "not-applicable", "language components")
+        status, *_ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0"], outcome=skipped)
+        self.assertEqual(status, 0)
+
+    def test_module_without_area_is_a_usage_error(self) -> None:
+        stderr = StringIO()
+        with mock.patch.object(sys, "stderr", stderr):
+            status, migrate_mock, _ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "java", "--template-ref", "v3.1.0"])
+        self.assertEqual(status, 2)
+        self.assertIn("java owns no hand-off area", stderr.getvalue())
+        migrate_mock.assert_not_called()
 
     def test_unknown_module_is_a_usage_error(self) -> None:
         status, migrate_mock, _ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "nope", "--template-ref", "v3.1.0"])

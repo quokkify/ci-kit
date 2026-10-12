@@ -33,11 +33,10 @@ from ci_kit.drift import TRUSTED_SRC_RE
 from ci_kit.handoff import AREAS, area_for_module
 from ci_kit.migrate import MigrateResult, render_marker
 from ci_kit.modules import MODULES
-from ci_kit.plan import Finding
+from ci_kit.plan import ANSWERS_RE, Finding
 
 ANSWERS_FILE = ".copier-answers.yml"
 LEGACY_MODULE = "legacy"
-ANSWERS_NAME_PATTERN = re.compile(r"^\.copier-answers(\.[a-z][a-z0-9-]*)?\.yml$")
 CI_KIT_TOOLS = Path(__file__).resolve().parents[1] / "tools"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
@@ -309,11 +308,13 @@ def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, st
     files: dict[str, str] = {}
     for entry in entries:
         name = entry.get("name") if isinstance(entry, dict) else None
-        match = ANSWERS_NAME_PATTERN.fullmatch(name) if isinstance(name, str) else None
-        if not match:
+        if not isinstance(name, str):
             continue
-        module = match.group(1)[1:] if match.group(1) else LEGACY_MODULE
-        if entry.get("type") != "file" or (match.group(1) and module == LEGACY_MODULE):
+        match = ANSWERS_RE.fullmatch(name)
+        if name != ANSWERS_FILE and not match:
+            continue
+        module = match.group(1) if match else LEGACY_MODULE
+        if entry.get("type") != "file" or (match and module == LEGACY_MODULE):
             raise UnsafeAnswersFileError(name)
         completed = run(
             [
@@ -2060,6 +2061,8 @@ def migrate_repository(
     source = normalize_template_source(parse_template_source(raw_answers))
     if source != normalize_template_source(expected_template):
         return Result(name, "foreign-template", source or "unrecognized source")
+    if area == "validate" and parse_answers(raw_answers).get("components"):
+        return Result(name, "not-applicable", "language components")
     applied = parse_answers(raw_answers).get("_commit")
     if applied != target_ref:
         return Result(name, "needs-update-first", f"legacy _commit is {applied}, target is {target_ref}")
@@ -2072,6 +2075,8 @@ def migrate_repository(
         return Result(name, "migrate-rejected", ", ".join(codes), migration={"doctor": doctor_output, "findings": []})
     base = git_head(destination)
     migrated = run_ci_kit_migrate(destination, module, target_ref, env=env)
+    if [item.code for item in migrated.findings] == ["CIK-MIGRATE-005"]:
+        return Result(name, "not-applicable", migrated.findings[0].message.splitlines()[0])
     if migrated.findings:
         findings = [
             {"code": item.code, "module": item.module, "message": item.message, "path": item.path}
@@ -2136,6 +2141,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.migrate and args.migrate not in MODULES:
         print(f"unknown module for --migrate: {args.migrate}", file=sys.stderr)
+        return 2
+    if args.migrate and area_for_module(args.migrate) is None:
+        print(f"module {args.migrate} owns no hand-off area; --migrate cannot hand anything off to it", file=sys.stderr)
         return 2
     branch = f"ci-kit/migrate-{args.migrate}" if args.migrate and args.branch == DEFAULT_BRANCH else args.branch
 
