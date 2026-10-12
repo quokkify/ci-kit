@@ -67,7 +67,7 @@ jobs:
       - name: Set up Python and Copier
         uses: ./actions/setup-python
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           package-manager: pip
           cache-dependencies: "false"
           install-command: python -m pip install copier==9.18.2
