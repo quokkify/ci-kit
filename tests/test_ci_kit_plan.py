@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -136,6 +137,35 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(lines[0], 'modules=["core","java"]')
         self.assertEqual(lines[1], 'java=[{"id":"app-java","name":"Application Java","path":".","java_version":"21"}]')
+
+    def test_plan_writes_codes_and_commits_outputs(self):
+        repo = rendered_repo("core", "java")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out"
+            self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
+            lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
+        self.assertEqual(lines["codes"], "[]")
+        commits = json.loads(lines["commits"])
+        self.assertEqual(sorted(commits), ["core", "java"])
+        self.assertTrue(all(isinstance(value, str) and value for value in commits.values()))
+        self.assertEqual(lines["commits"], json.dumps(commits, separators=(",", ":")))
+
+    def test_plan_codes_unique_in_first_seen_order_and_unreadable_answers_skipped(self):
+        repo = rendered_repo("java")
+        (repo / ".copier-answers.core.yml").write_text(":\n  - [")
+        (repo / ".copier-answers.extra.yml").write_text("_commit: abc\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out"
+            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--github-output", str(target))
+            lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
+        self.assertEqual(code, 1)
+        found = json.loads(lines["codes"])
+        self.assertEqual(found, list(dict.fromkeys(found)))
+        self.assertIn("CIK-CORE-003", found)
+        commits = json.loads(lines["commits"])
+        self.assertNotIn("core", commits)
+        self.assertEqual(commits.get("extra"), "abc")
+        self.assertIn("java", commits)
 
     def test_plan_fails_on_findings(self):
         repo = rendered_repo("java")
