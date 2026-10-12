@@ -37,6 +37,21 @@ class LegacyCompatTests(unittest.TestCase):
                     normalize_answers(render_tree(self.candidate, scenario, PIN), "legacy"),
                 )
 
+    def test_empty_handed_off_is_byte_identical(self) -> None:
+        for scenario in sorted((ROOT / "tests/scenarios").glob("*.yml")):
+            with self.subTest(scenario=scenario.name):
+                plain = render_tree(self.candidate, scenario, PIN)
+                explicit = render_tree(self.candidate, scenario, {**PIN, "handed_off": []})
+                for tree in (plain, explicit):
+                    self.assertIn(b"\nhanded_off: []\n", tree[".copier-answers.yml"])
+                self.assertEqual(
+                    normalize_answers(plain, "legacy"), normalize_answers(explicit, "legacy")
+                )
+                self.assertEqual(
+                    {k: v for k, v in plain.items() if k != ".copier-answers.yml"},
+                    {k: v for k, v in explicit.items() if k != ".copier-answers.yml"},
+                )
+
     def test_module_answer_defaults_to_legacy(self) -> None:
         dest = render(self.candidate, ROOT / "tests/scenarios/python.yml", PIN)
         try:
