@@ -91,6 +91,26 @@ class GateTests(unittest.TestCase):
         self.assertIn(f"[CIK-CORE-020](https://github.com/quokkify/ci-kit/blob/{REF}/docs/errors/CIK-CORE-020.md)", table)
         self.assertIn("| java | - | 0123456789ab | skipped |", table)
 
+    def test_failed_non_enabled_job_fails_gate(self):
+        ok, rows = evaluate([], needs(core="skipped", java="failure"), [], REF)
+        self.assertFalse(ok)
+        self.assertEqual((row(rows, "java").result, row(rows, "java").category), ("fail", "unknown"))
+
+    def test_cancelled_non_enabled_job_fails_gate(self):
+        ok, rows = evaluate([], needs(core="skipped", java="cancelled"), [], REF)
+        self.assertFalse(ok)
+        self.assertEqual(row(rows, "java").result, "cancelled")
+
+    def test_unknown_result_on_non_enabled_job_fails_gate(self):
+        ok, rows = evaluate([], needs(core="skipped", java="neutral"), [], REF)
+        self.assertFalse(ok)
+        self.assertEqual(row(rows, "java").result, "neutral")
+
+    def test_skipped_non_enabled_job_adds_no_row(self):
+        ok, rows = evaluate([], needs(core="skipped", java="skipped"), [], REF)
+        self.assertTrue(ok)
+        self.assertEqual(rows, [])
+
     def test_pipe_in_step_name_is_escaped(self):
         found = failed_java("a | b")
         self.assertIn("a \\| b", render_summary(found))
@@ -133,6 +153,15 @@ class GateCliTests(unittest.TestCase):
             )
             self.assertEqual(code, 1)
             self.assertIn("unknown", out)
+
+    def test_unwritable_summary_fails_closed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            missing = Path(raw).resolve() / "no-dir" / "summary.md"
+            code, _, err = self.run_gate(
+                "--enabled", '["core"]', "--needs", json.dumps(needs(all="success")), "--ref", REF, "--summary", str(missing),
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("--summary", err)
 
     def test_success_exits_zero(self):
         code, _, _ = self.run_gate("--enabled", '["core"]', "--needs", json.dumps(needs(all="success")), "--ref", REF)

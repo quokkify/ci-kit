@@ -61,6 +61,7 @@ def _result(needs: dict, job_id: str) -> str:
 def evaluate(enabled: list[str], needs: dict, jobs: list[dict] | None, ref: str) -> tuple[bool, list[Row]]:
     rows: list[Row] = []
     ok = True
+    handled = {"plan"}
     plan_result = _result(needs, "plan")
     if plan_result != "success":
         ok = False
@@ -68,6 +69,7 @@ def evaluate(enabled: list[str], needs: dict, jobs: list[dict] | None, ref: str)
     for module in enabled:
         info = MODULES.get(module)
         job_id = info.job if info else module
+        handled.add(job_id)
         result = _result(needs, job_id)
         label = RESULT_LABELS.get(result, result)
         if result == "success":
@@ -81,6 +83,13 @@ def evaluate(enabled: list[str], needs: dict, jobs: list[dict] | None, ref: str)
             rows.append(Row(module, ref, label, category, step, ""))
         else:
             rows.append(Row(module, ref, label, "", "", ""))
+    for job_id in needs:
+        if job_id in handled:
+            continue
+        result = _result(needs, job_id)
+        if result not in ("success", "skipped"):
+            ok = False
+            rows.append(Row(job_id, ref, RESULT_LABELS.get(result, result), "unknown", "", ""))
     return ok, rows
 
 

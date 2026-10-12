@@ -94,11 +94,20 @@ def _gate(args: argparse.Namespace) -> int:
     table = render_summary(rows)
     print(table, end="")
     if args.summary:
-        with open(args.summary, "a", encoding="utf-8") as handle:
-            handle.write(table)
+        try:
+            with open(args.summary, "a", encoding="utf-8") as handle:
+                handle.write(table)
+        except OSError as error:
+            print(f"ci-kit gate: cannot write --summary {args.summary}: {error}", file=sys.stderr)
+            return 1
     for row in rows:
         if row.result != "ok":
-            detail = f"{row.module}: {row.result}" + (f" ({row.category}" + (f", step {row.failing_step!r}" if row.failing_step else "") + ")" if row.category else "")
+            detail = f"{row.module}: {row.result}"
+            if row.category:
+                detail += f" ({row.category}"
+                if row.failing_step:
+                    detail += f", step {row.failing_step!r}"
+                detail += ")"
             if _annotations():
                 title = f" title={_escape_property(row.code)}" if row.code else ""
                 print(f"::error{title}::{_escape_data(detail)}")
