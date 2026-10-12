@@ -89,3 +89,22 @@ def normalize_answers(tree: dict[str, bytes], expect_module: str | None = None) 
             raise AssertionError("module answer missing from answers file")
         out[".copier-answers.yml"] = "".join(kept).encode()
     return out
+
+
+_TEMPLATE_REPO: Path | None = None
+
+
+def shared_template_repo() -> Path:
+    global _TEMPLATE_REPO
+    if _TEMPLATE_REPO is None:
+        tmp = Path(tempfile.mkdtemp(prefix="ci-kit-template-")).resolve()
+        _TEMPLATE_REPO = make_template_repo(tmp)
+    return _TEMPLATE_REPO
+
+
+def rendered_repo(*modules: str) -> Path:
+    dest = Path(tempfile.mkdtemp(prefix="rendered-")).resolve()
+    template = shared_template_repo()
+    for module in modules:
+        run_copier(template, dest, "-a", f".copier-answers.{module}.yml", "-d", f"module={module}")
+    return dest
