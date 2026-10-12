@@ -1,5 +1,5 @@
 _min_copier_version: "9.18.2"
-_subdirectory: template
+_subdirectory: "{% if module == 'legacy' %}template{% else %}modules/{{ module }}/template{% endif %}"
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
 _exclude:
@@ -36,12 +36,20 @@ _skip_if_exists:
   - .github/release-please/manifest.json
   - .github/pull_request_template.md
 
+module:
+  type: str
+  help: Template module to apply. legacy keeps the single combined template.
+  choices: [legacy, core, java]
+  default: legacy
+
 project_name:
+  when: "{{ module in ['legacy', 'core'] }}"
   type: str
   help: Human-readable project name.
   default: my-project
 
 toolkit_version:
+  when: "{{ module in ['legacy', 'core'] }}"
   type: str
   help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's
@@ -50,6 +58,7 @@ toolkit_version:
   validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v3.1.1{% endif %}"
 
 components:
+  when: "{{ module == 'legacy' }}"
   type: yaml
   help: "Required component mappings such as [{type: python, path: backend, id: backend-python, name: Backend Python, allure_results_path: allure-results}]. id is the stable GitHub Actions job identifier and name is its display name. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
   # On update, retain the prior value long enough for its required identity
@@ -73,9 +82,11 @@ components:
     {% endfor %}
 
 docker:
+  when: "{{ module == 'legacy' }}"
   type: bool
   default: false
 codeql:
+  when: "{{ module == 'legacy' }}"
   type: bool
   help: Generate the CodeQL workflow. Code scanning needs GitHub Advanced Security, which private repositories do not receive by default.
   default: true
@@ -83,7 +94,7 @@ codeql_languages:
   type: yaml
   help: "Optional explicit CodeQL language list. Empty derives the list from components, which is wrong for a repository whose source is not described by components. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
   default: []
-  when: "{{ codeql }}"
+  when: "{{ module == 'legacy' and codeql }}"
   validator: >-
     {% set allowed_codeql_languages = ['actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'] %}
     {% if codeql_languages is string or codeql_languages is mapping or codeql_languages is not sequence %}
@@ -96,11 +107,13 @@ codeql_languages:
     {% endif %}
 
 gitleaks:
+  when: "{{ module == 'legacy' }}"
   type: bool
   help: Generate the checksum-verified Gitleaks workflow and stable gitleaks check context.
   default: true
 
 allure_report:
+  when: "{{ module == 'legacy' }}"
   type: bool
   help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.
   default: false
@@ -109,7 +122,7 @@ allure_source:
   help: "Where Allure results come from: auto follows components; component uses the generated component jobs in Validate; external uses a project-owned workflow, so generated component jobs upload no Allure results."
   choices: [auto, component, external]
   default: auto
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if allure_source == 'component' and not components %}allure_source=component requires at least one component.{% endif %}"
 allure_mode:
   type: str
@@ -119,37 +132,37 @@ allure_external_workflow_name:
   type: str
   help: Exact workflow name that uploads Allure artifacts when allure_source is external.
   default: Validate
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if not (allure_external_workflow_name | regex_search('^[A-Za-z0-9][A-Za-z0-9 ._()/:-]{0,99}$')) %}Use a non-empty workflow name containing only letters, digits, spaces, and ._()/:- characters.{% endif %}"
 allure_external_workflow_path:
   type: str
   help: Repository-relative source workflow path when components is empty.
   default: .github/workflows/validate.yml
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if not (allure_external_workflow_path | regex_search('^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$')) %}Use a workflow path such as .github/workflows/test.yml.{% endif %}"
 allure_external_artifact_prefix:
   type: str
   help: Prefix selecting dedicated Allure artifacts from the external source workflow.
   default: allure-results-
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if not (allure_external_artifact_prefix | regex_search('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')) %}Use a 1-64 character artifact prefix containing only letters, digits, dots, underscores, and hyphens.{% endif %}"
 allure_external_artifact_min_count:
   type: int
   help: Minimum number of matching, non-expired Allure artifacts required.
   default: 1
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if allure_external_artifact_min_count < 1 or allure_external_artifact_min_count > 50 %}Choose a minimum artifact count from 1 through 50.{% endif %}"
 allure_external_artifact_max_count:
   type: int
   help: Maximum number of matching Allure artifacts accepted by the bounded extractor.
   default: 50
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: "{% if allure_external_artifact_max_count < allure_external_artifact_min_count or allure_external_artifact_max_count > 50 %}Choose a maximum from the configured minimum through 50.{% endif %}"
 allure_categories_file:
   type: str
   help: Optional safe repository-relative Allure categories JSON file.
   default: ""
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
   validator: >-
     {% if allure_categories_file and (not (allure_categories_file | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.json$')) or '.' in allure_categories_file.split('/') or '..' in allure_categories_file.split('/')) %}
     Use a safe repository-relative JSON path without traversal or globs.
@@ -158,14 +171,15 @@ allure_publish_pages:
   type: bool
   help: Publish each pull request report below allure/pr-N on the gh-pages branch.
   default: false
-  when: "{{ allure_report }}"
+  when: "{{ module == 'legacy' and allure_report }}"
 allure_pages_url:
   type: str
   help: Full HTTPS base URL served by GitHub Pages, without a trailing slash (for example https://owner.github.io/repository).
   default: https://owner.github.io/repository
-  when: "{{ allure_report and allure_publish_pages }}"
+  when: "{{ module == 'legacy' and (allure_report and allure_publish_pages) }}"
   validator: "{% if not (allure_pages_url | regex_search('^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*$')) %}Use a full HTTPS Pages base URL without query, fragment, or trailing slash.{% endif %}"
 release_please:
+  when: "{{ module == 'legacy' }}"
   type: bool
   default: false
 release_mode:
@@ -175,12 +189,14 @@ release_mode:
   choices:
     - single
     - manifest
-  when: "{{ release_please }}"
+  when: "{{ module == 'legacy' and release_please }}"
 renovate:
+  when: "{{ module == 'legacy' }}"
   type: bool
   default: true
 
 renovate_config_repository:
+  when: "{{ module == 'legacy' }}"
   type: str
   help: GitHub owner/repository slug hosting the shared Renovate preset.
   default: quokkify/renovate-presets
@@ -190,6 +206,7 @@ renovate_config_repository:
     {% endif %}
 
 renovate_presets:
+  when: "{{ module == 'legacy' }}"
   type: yaml
   help: "Renovate preset names to extend. Supported names: default, python, javascript, java, docker, github-actions."
   default: >-
