@@ -18,6 +18,8 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 HEAD = "a" * 40
+BASE = "b" * 40
+REV = "c" * 40
 MANAGED_ID = 7
 MARKER_BODY = "intro\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({
     "module": "core", "area": "ci", "ref": "v1.0.0", "commits": [], "findings": [],
@@ -36,13 +38,25 @@ def policy(*entries, status="active"):
     return {"status": status, "checks": list(entries)}
 
 
-def codeql_rule(threshold):
-    return {"type": "code_scanning", "parameters": {"code_scanning_tools": [{"tool": "CodeQL", "alerts_threshold": threshold, "security_alerts_threshold": "all"}]}}
+def codeql_rule(threshold, security="all"):
+    return {"type": "code_scanning", "parameters": {"code_scanning_tools": [{"tool": "CodeQL", "alerts_threshold": threshold, "security_alerts_threshold": security}]}}
+
+
+def status_rule(*contexts, integration_id=None):
+    return {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c, "integration_id": integration_id} for c in contexts]}}
+
+
+def make_detail(*rules, enforcement="active", include=("refs/heads/develop",)):
+    return {"id": MANAGED_ID, "name": "ci-kit/security/o/r", "enforcement": enforcement,
+            "conditions": {"ref_name": {"include": list(include), "exclude": []}}, "rules": list(rules)}
+
+
+DEFAULT_RULES = (status_rule("Gitleaks", "Shared template contract"),)
 
 
 class FakeClient:
     managed = {"id": MANAGED_ID, "name": "ci-kit/security/o/r"}
-    detail = {"id": MANAGED_ID, "name": "ci-kit/security/o/r", "rules": []}
+    detail = make_detail(*DEFAULT_RULES)
     listing = None
 
     def __init__(self, token, *args, **kwargs):
@@ -81,8 +95,10 @@ class NextChecksTests(TestCase):
 class MainTests(TestCase):
     def setUp(self):
         FakeClient.managed = {"id": MANAGED_ID, "name": "ci-kit/security/o/r"}
-        FakeClient.detail = {"id": MANAGED_ID, "name": "ci-kit/security/o/r", "rules": []}
+        FakeClient.detail = make_detail(*DEFAULT_RULES)
         FakeClient.listing = None
+        self.legacy = ["Shared template contract"]
+        self.legacy_refs = []
         self.reconcile_calls = []
         self.policy = policy(entry("Gitleaks"), entry("Shared template contract"))
         self.body = MARKER_BODY
@@ -91,7 +107,13 @@ class MainTests(TestCase):
     def run_main(self, argv, **env):
         def fake_pr_view(repo, number):
             self.pr_calls.append((repo, number))
-            return {"body": self.body, "headRefOid": HEAD, "baseRefName": "develop"}
+            return {"body": self.body, "headRefOid": HEAD, "baseRefName": "develop", "baseRefOid": BASE}
+
+        def fake_legacy(repo, ref):
+            self.legacy_refs.append(ref)
+            if isinstance(self.legacy, Exception):
+                raise self.legacy
+            return self.legacy
 
         def fake_required(request, repository, branch):
             self.required_args = (repository, branch)
@@ -102,7 +124,7 @@ class MainTests(TestCase):
             return {"action": "update"}
 
         out, err = io.StringIO(), io.StringIO()
-        with patch.object(module, "pr_view", fake_pr_view), patch.object(module, "required_checks", fake_required), \
+        with patch.object(module, "pr_view", fake_pr_view), patch.object(module, "required_checks", fake_required), patch.object(module, "legacy_checks_at", fake_legacy), \
                 patch.object(module, "GitHubClient", FakeClient), patch.object(module, "reconcile", fake_reconcile), \
                 patch.dict(os.environ, {"GH_TOKEN": "t", **env}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = module.main(argv)
@@ -128,14 +150,18 @@ class MainTests(TestCase):
 
     def test_revert_swaps(self):
         self.policy = policy(entry("Gitleaks"), entry("ci / gate"))
-        code, _, _ = self.run_main(["--pr", "o/r#5", "--revert"])
+        FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
+        code, _, _ = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
         self.assertEqual(code, 0)
+        self.assertEqual(self.legacy_refs, [REV])
+        self.assertEqual(self.reconcile_calls[0]["revision"], REV)
         self.assertEqual(self.reconcile_calls[0]["checks"], ["Gitleaks", "Shared template contract"])
 
     def test_only_managed_ruleset_contexts_are_operated_on(self):
         self.policy = policy(entry("Gitleaks"), entry("Shared template contract"), entry("Other", ruleset_id=99), entry("Classic", source="classic-protection"))
         code, _, _ = self.run_main(["--pr", "o/r#5"])
         self.assertEqual(code, 0)
+        self.assertEqual(self.legacy_refs, [BASE])
         self.assertEqual(self.reconcile_calls[0]["checks"], ["Gitleaks", "ci / gate"])
 
     def test_classic_protection_owned_before_refused(self):
@@ -154,7 +180,8 @@ class MainTests(TestCase):
 
     def test_revert_checks_after_owned_elsewhere_refused(self):
         self.policy = policy(entry("ci / gate"), entry("ci / gate", source="classic-protection"))
-        code, _, err = self.run_main(["--pr", "o/r#5", "--revert"])
+        FakeClient.detail = make_detail(status_rule("ci / gate"))
+        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
         self.assertEqual(code, 1)
         self.assertIn("classic-protection", err)
         self.assertEqual(self.reconcile_calls, [])
@@ -174,7 +201,7 @@ class MainTests(TestCase):
         self.assertEqual(self.reconcile_calls, [])
 
     def test_codeql_threshold_preserved(self):
-        FakeClient.detail = {"id": MANAGED_ID, "rules": [codeql_rule("errors")]}
+        FakeClient.detail = make_detail(*DEFAULT_RULES, codeql_rule("errors", "high_or_higher"))
         self.run_main(["--pr", "o/r#5"])
         self.assertEqual(self.reconcile_calls[0]["codeql_threshold"], "errors")
 
@@ -191,6 +218,93 @@ class MainTests(TestCase):
     def test_malformed_pr_argument(self):
         with self.assertRaises(SystemExit):
             self.run_main(["--pr", "o/r"])
+
+    def refused(self, argv=("--pr", "o/r#5"), needle=None):
+        code, _, err = self.run_main(list(argv))
+        self.assertEqual(code, 1)
+        self.assertEqual(self.reconcile_calls, [])
+        if needle:
+            self.assertIn(needle, err)
+
+    def test_evaluate_mode_refused(self):
+        FakeClient.detail = make_detail(*DEFAULT_RULES, enforcement="evaluate")
+        self.refused(needle="enforcement")
+
+    def test_other_branch_target_refused(self):
+        FakeClient.detail = make_detail(*DEFAULT_RULES, include=("refs/heads/main",))
+        self.refused(needle="refs/heads/develop")
+
+    def test_no_required_checks_rule_refused(self):
+        FakeClient.detail = make_detail(codeql_rule("errors", "high_or_higher"))
+        self.refused(needle="required_status_checks")
+
+    def test_current_comes_from_detail_not_effective_rules(self):
+        self.policy = policy(entry("Elsewhere", ruleset_id=99))
+        code, _, _ = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 0)
+        self.assertEqual(self.reconcile_calls[0]["checks"], ["Gitleaks", "ci / gate"])
+
+    def test_crafted_checks_before_refused(self):
+        self.body = MARKER_BODY.replace('["Shared template contract"]', '["Gitleaks"]')
+        self.refused(needle="differs")
+
+    def test_checks_after_must_match_module(self):
+        self.body = MARKER_BODY.replace('["ci / gate"]', '["Other"]')
+        self.refused(needle="CHECKS_AFTER")
+
+    def test_unknown_module_refused(self):
+        self.body = MARKER_BODY.replace('"core"', '"nope"')
+        self.refused(needle="CHECKS_AFTER")
+
+    def test_revert_requires_revision(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(["--pr", "o/r#5", "--revert"])
+
+    def test_integration_bound_check_refused(self):
+        FakeClient.detail = make_detail(status_rule("Gitleaks", "Shared template contract", integration_id=15368))
+        self.refused(needle="integration")
+
+    def test_security_threshold_mismatch_refused(self):
+        FakeClient.detail = make_detail(*DEFAULT_RULES, codeql_rule("errors", "all"))
+        self.refused(needle="security_alerts_threshold")
+
+    def test_malformed_codeql_rule_refused_not_crash(self):
+        FakeClient.detail = make_detail(*DEFAULT_RULES, {"type": "code_scanning", "parameters": None})
+        self.refused()
+        FakeClient.detail = make_detail(*DEFAULT_RULES, {"type": "code_scanning", "parameters": {"code_scanning_tools": ["x"]}})
+        self.refused()
+
+    def test_validate_yml_read_failure_refused(self):
+        self.legacy = RuntimeError("gh api failed")
+        self.refused(needle="validate.yml")
+
+    def test_missing_gh_refused(self):
+        self.legacy = FileNotFoundError("gh")
+        self.refused(needle="validate.yml")
+
+    def test_api_request_non_404_failure_raises_runtime_error(self):
+        class Result:
+            returncode = 1
+            stderr = "HTTP 500"
+            stdout = ""
+        with patch.object(module.subprocess, "run", return_value=Result()):
+            with self.assertRaises(RuntimeError):
+                module.api_request("repos/o/r/x")
+
+    def test_required_checks_runtime_error_refused(self):
+        def boom(request, repository, branch):
+            raise RuntimeError("gh down")
+        with patch.object(module, "pr_view", lambda r, n: {"body": self.body, "headRefOid": HEAD, "baseRefName": "develop", "baseRefOid": BASE}), \
+                patch.object(module, "legacy_checks_at", lambda r, ref: self.legacy), patch.object(module, "required_checks", boom), \
+                patch.object(module, "GitHubClient", FakeClient), patch.dict(os.environ, {"GH_TOKEN": "t"}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(module.main(["--pr", "o/r#5"]), 1)
+
+    def test_missing_gh_on_pr_view_refused(self):
+        def boom(repo, number):
+            raise FileNotFoundError("gh")
+        with patch.object(module, "pr_view", boom), patch.dict(os.environ, {"GH_TOKEN": "t"}), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(module.main(["--pr", "o/r#5"]), 1)
 
     def test_missing_token_exit_2(self):
         with patch.dict(os.environ, {}, clear=True):
