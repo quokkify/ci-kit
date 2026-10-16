@@ -1,4 +1,4 @@
-_min_copier_version: "9.19.0"
+_min_copier_version: "9.19.1"
 _subdirectory: "{% if module == 'legacy' %}template{% else %}modules/{{ module }}/template{% endif %}"
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
