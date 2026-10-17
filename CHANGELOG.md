@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.2.2](https://github.com/quokkify/ci-kit/compare/v3.2.1...v3.2.2) (2026-10-17)
+
+
+### 🐛 Bug Fixes
+
+* **ci-kit:** show plan failure codes in the gate summary ([#415](https://github.com/quokkify/ci-kit/issues/415)) ([a2193cf](https://github.com/quokkify/ci-kit/commit/a2193cfb87c08038c18a241ec98541a8225f9c5c))
+* **ci:** install CodeQL render dependencies from pyproject ([#418](https://github.com/quokkify/ci-kit/issues/418)) ([07c9e2e](https://github.com/quokkify/ci-kit/commit/07c9e2e9790538eb15a4348b11444b8cfde85930))
+
+
+### 📦 Dependencies
+
+* **copier:** update copier to v9.19.0 ([#420](https://github.com/quokkify/ci-kit/issues/420)) ([ce236ad](https://github.com/quokkify/ci-kit/commit/ce236adeccb1bb59ff5146f79de26de2fc379309))
+* **copier:** update copier to v9.19.1 ([#429](https://github.com/quokkify/ci-kit/issues/429)) ([75c0c1d](https://github.com/quokkify/ci-kit/commit/75c0c1df1c231812a552a7b087ae1cb10f279553))
+* **github-actions:** update github/codeql-action digest to 24c5418 ([#419](https://github.com/quokkify/ci-kit/issues/419)) ([e47427e](https://github.com/quokkify/ci-kit/commit/e47427e16485feeead7b25510563ec6cbde4eb37))
+* **github-actions:** update python to 3.15 ([#423](https://github.com/quokkify/ci-kit/issues/423)) ([5b7371e](https://github.com/quokkify/ci-kit/commit/5b7371e222b9459412137dd2e7d5088ef240627b))
+* **renovate:** update renovate to v44.150.1 ([#413](https://github.com/quokkify/ci-kit/issues/413)) ([b0b7c78](https://github.com/quokkify/ci-kit/commit/b0b7c78b566bb28ac39225f61d118c359bb22887))
+* **renovate:** update renovate to v44.155.1 ([#424](https://github.com/quokkify/ci-kit/issues/424)) ([4fc3715](https://github.com/quokkify/ci-kit/commit/4fc3715335fc4bb34b322039a09305ca764490b1))
+* **renovate:** update renovate to v44.155.2 ([#426](https://github.com/quokkify/ci-kit/issues/426)) ([74f518d](https://github.com/quokkify/ci-kit/commit/74f518d9f02f1419d157ba80ffac63af4c700fba))
+* **renovate:** update renovate to v44.155.8 ([#427](https://github.com/quokkify/ci-kit/issues/427)) ([918d8b9](https://github.com/quokkify/ci-kit/commit/918d8b9a28d61de362e90a1425ed064289b9fa8a))
+* **renovate:** update renovate to v44.164.7 ([#428](https://github.com/quokkify/ci-kit/issues/428)) ([89a0f59](https://github.com/quokkify/ci-kit/commit/89a0f596b2bcf91faaa09693e8e4a848dee396ea))
+* **uv:** update uv to v0.13.1 ([#430](https://github.com/quokkify/ci-kit/issues/430)) ([5970b6a](https://github.com/quokkify/ci-kit/commit/5970b6ad8c4d172b842a2b7dbada137d0553063d))
+
 ## [3.2.1](https://github.com/quokkify/ci-kit/compare/v3.2.0...v3.2.1) (2026-10-12)
 
 
