@@ -46,6 +46,7 @@ DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
 PR_TITLE = "chore(template): update shared project template"
+PR_LABEL = "area: template"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
     "public fleet automation and are updated by a maintainer running this script without "
@@ -2175,7 +2176,7 @@ def ensure_pull_request(
         "Do not edit the automation branch directly; make project-specific changes after merging "
         "or adjust the Copier answers/template.\n"
     )
-    completed = run(
+    return create_pull_request(
         [
             "gh",
             "pr",
@@ -2193,7 +2194,20 @@ def ensure_pull_request(
         ],
         env=env,
     )
-    return completed.stdout.strip()
+
+
+def create_pull_request(command: Sequence[str], *, env: dict[str, str]) -> str:
+    """Create a pull request labelled PR_LABEL, unlabelled where the repository lacks it.
+
+    gh resolves labels before it creates the pull request, so an unknown label fails
+    the whole command without creating anything and the unlabelled retry is safe.
+    """
+    try:
+        return run([*command, "--label", PR_LABEL], env=env).stdout.strip()
+    except FleetUpdateError as exc:
+        if f"could not add label: '{PR_LABEL}' not found" not in str(exc):
+            raise
+    return run(command, env=env).stdout.strip()
 
 
 AUTO_MERGE_HEAD_POLL_SECONDS = 2

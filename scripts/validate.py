@@ -2375,6 +2375,13 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             (dest / ".copier-answers.yml").exists(),
             f"{scenario}: missing .copier-answers.yml",
         )
+        check(
+            (dest / ".github/workflows/labels.yml").is_file()
+            and "quokkify/ci-kit/.github/workflows/labels-sync.yml@"
+            f"{yaml.safe_load((dest / '.copier-answers.yml').read_text())['toolkit_version']}"
+            in (dest / ".github/workflows/labels.yml").read_text(),
+            f"{scenario}: labels.yml does not call the selected toolkit label sync",
+        )
         assert_generated_renovate_config(
             dest / ".github/renovate.json",
             renovate_extends("quokkify/renovate-presets", expected_presets),

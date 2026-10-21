@@ -2664,6 +2664,46 @@ class PullRequestBodyTests(TestCase):
         self.assertTrue(body.startswith(LEGACY_PULL_REQUEST_BODY.split("## Verification")[0]))
 
 
+class PullRequestLabelTests(TestCase):
+    MISSING = "could not add label: 'area: template' not found\n"
+
+    def create(self, *results: tuple[int, str]) -> tuple[str, list[list[str]]]:
+        calls: list[list[str]] = []
+        outcomes = iter(results)
+
+        def fake_subprocess(command, **_):
+            calls.append(list(command))
+            code, stderr = next(outcomes)
+            return subprocess.CompletedProcess(command, code, "" if code else "https://example.invalid/pr\n", stderr)
+
+        with mock.patch.object(fleet, "gh_json", return_value=[]), \
+             mock.patch.object(fleet.subprocess, "run", side_effect=fake_subprocess):
+            url = fleet.ensure_pull_request(fleet.Repository("quokkify/example", "main"), branch="b", changed=["a.yml"], env={})
+        return url, calls
+
+    def test_pull_request_is_created_with_the_template_area_label(self) -> None:
+        url, calls = self.create((0, ""))
+        self.assertEqual(url, "https://example.invalid/pr")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][-2:], ["--label", "area: template"])
+
+    def test_missing_label_falls_back_to_an_unlabelled_pull_request(self) -> None:
+        url, calls = self.create((1, self.MISSING), (0, ""))
+        self.assertEqual(url, "https://example.invalid/pr")
+        self.assertEqual(len(calls), 2)
+        self.assertIn("--label", calls[0])
+        self.assertNotIn("--label", calls[1])
+        self.assertEqual(calls[0][:-2], calls[1])
+
+    def test_other_create_failures_are_not_retried(self) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "HTTP 403"):
+            self.create((1, "HTTP 403: Resource not accessible by integration\n"), (0, ""))
+
+    def test_failure_naming_another_label_is_not_retried(self) -> None:
+        with self.assertRaisesRegex(fleet.FleetUpdateError, "'other' not found"):
+            self.create((1, "could not add label: 'other' not found\n"), (0, ""))
+
+
 class ModuleUpdateRunnerTests(TestCase):
     def fake(self, returncode: int, payload: dict):
         def fake_run(command, **kwargs):

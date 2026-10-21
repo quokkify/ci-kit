@@ -65,6 +65,7 @@ Every generated repository is the legacy template plus the `core` module and its
 - `validate.yml`, owned by the `core` module, runs the Python, Node.js, Java, and Docker jobs declared by the language modules; the legacy template no longer renders it ([CIK-LEGACY-006](errors/CIK-LEGACY-006.md));
 - `codeql.yml` analyzes GitHub Actions plus the languages inferred from `components` when `codeql` is enabled;
 - `gitleaks.yml` scans both Git history and the current tree with a checksum-verified binary;
+- `labels.yml` syncs the organization label manifest and an optional project `.github/labels.yml` on label edits, weekly, and on demand, without deleting unlisted labels;
 - `release.yml` uses the shared Release Please workflow when `release_please` is enabled;
 - `allure-report.yml` securely consumes source-run `allure-results-*` artifacts and comments an Allure 3 report when `allure_report` is enabled;
 - `.github/renovate.json` extends the selected organization presets when `renovate` is enabled.
