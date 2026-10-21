@@ -2145,7 +2145,7 @@ class TemplateInventoryTests(TestCase):
 
         self.assertIn("template=v2.8.2->v2.9.0 components=python:.", console)
         self.assertIn("renovate=missing", console)
-        self.assertIn("| ⚠️ | [example](https://github.com/quokkify/example) | Missing template outputs: `.github/renovate.json`. Template drift v2.8.2 → v2.9.0;", markdown)
+        self.assertIn("| ⚠️ | [example](https://github.com/quokkify/example) | Missing template outputs: `.github/renovate.json`. Template drift v2.8.2 → v2.9.0: would change `.github/renovate.json`.", markdown)
         self.assertIn("| ⚠️ | [example](https://github.com/quokkify/example) | v2.8.2 → v2.9.0 | ? | ? |", markdown)
         self.assertEqual(report["schema_version"], 6)
         self.assertEqual(report["configuration_mismatches"], 1)
@@ -3234,6 +3234,70 @@ class FleetReportTests(TestCase):
         self.assertIn("1 ready to merge ([ready#1](https://github.com/quokkify/ready/pull/1))", markdown)
         self.assertIn("| ⏳ | [pending](https://github.com/quokkify/pending) | v3.2.3 → v3.3.0 | ? | [#2](https://github.com/quokkify/pending/pull/2) open today · CI ⏳ |", markdown)
 
+    def test_context_lists_pull_request_links_only_up_to_three(self) -> None:
+        results = [fleet.Result(f"quokkify/r{number}", "pull-request", f"https://github.com/quokkify/r{number}/pull/{number}",
+                                self.inventory(target="v3.3.0"), self.pull_request(f"quokkify/r{number}", number, ci))
+                   for number, ci in enumerate(["pending"] * 3 + ["unknown"] * 4, 1)]
+        markdown = fleet.markdown_report(results)
+        self.assertIn("3 waiting on CI ([r1#1](https://github.com/quokkify/r1/pull/1), [r2#2](https://github.com/quokkify/r2/pull/2), "
+                      "[r3#3](https://github.com/quokkify/r3/pull/3)) · 4 open, CI unknown\n", markdown)
+        self.assertNotIn("[r4#4]", markdown.split("<details>", 1)[0])
+
+    def test_summary_never_counts_zero_calm_repositories(self) -> None:
+        drift = fleet.Result("quokkify/drift", "would-update", "x.yml", self.inventory(target="v3.3.0"))
+        open_pr = fleet.Result("quokkify/open", "pull-request", "https://github.com/quokkify/open/pull/1",
+                               self.inventory(target="v3.3.0"), self.pull_request("quokkify/open", 1, "pending"))
+        other_pr = fleet.Result("quokkify/other", "pull-request", "https://github.com/quokkify/other/pull/2",
+                                self.inventory(target="v3.3.0"), self.pull_request("quokkify/other", 2, "pending"))
+        self.assertIn("\nAll 2 managed repositories have update PRs open.\n", fleet.markdown_report([open_pr, other_pr]))
+        self.assertIn("\nAll 1 managed repositories need attention.\n", fleet.markdown_report([drift]))
+        self.assertIn("\n1 of 2 managed repositories need attention; the rest have PRs in flight.\n", fleet.markdown_report([drift, open_pr]))
+
+    def test_successful_pilot_gate_marks_its_pull_request_ready(self) -> None:
+        health = self.pull_request("quokkify/pilot", 5, "unknown")
+        health["pull_request"]["head_sha"] = "a" * 40
+        pilot = fleet.Result("quokkify/pilot", "pull-request", "https://github.com/quokkify/pilot/pull/5", self.inventory(target="v3.3.0"), health)
+        other = fleet.Result("quokkify/other", "pull-request", "https://github.com/quokkify/other/pull/6",
+                             self.inventory(target="v3.3.0"), self.pull_request("quokkify/other", 6, "unknown"))
+        gate = {"repository": "quokkify/pilot", "pull_request": 5, "revision": "a" * 40, "result": "success"}
+        rollout = {"target": "v3.3.0", "pilots": [gate], "fanout_started": True, "stopped": None}
+        markdown = fleet.markdown_report([pilot, other], None, None, rollout)
+        self.assertIn("| [#5](https://github.com/quokkify/pilot/pull/5) open today · CI ✅ · pilot gate |", markdown)
+        self.assertIn("| [#6](https://github.com/quokkify/other/pull/6) open today · CI ? |", markdown)
+        self.assertIn("1 ready to merge ([pilot#5](https://github.com/quokkify/pilot/pull/5)) · 1 open, CI unknown ([other#6]", markdown)
+        for stale in ({**gate, "pull_request": 4}, {**gate, "revision": "b" * 40}, {**gate, "result": "failure"}):
+            markdown = fleet.markdown_report([pilot], None, None, {**rollout, "pilots": [stale]})
+            self.assertNotIn("pilot gate", markdown)
+            self.assertIn("1 open, CI unknown", markdown)
+        headless = self.pull_request("quokkify/pilot", 5, "unknown")
+        closed = self.pull_request("quokkify/pilot", 5, "unknown", state="closed")
+        closed["pull_request"]["head_sha"] = "a" * 40
+        for health in (headless, closed):
+            result = fleet.Result("quokkify/pilot", "pull-request", "https://github.com/quokkify/pilot/pull/5", self.inventory(target="v3.3.0"), health)
+            self.assertNotIn("pilot gate", fleet.markdown_report([result], None, None, rollout))
+
+    def test_drift_rows_name_changed_files_and_offer_the_write_command(self) -> None:
+        run = {"mode": "dry-run", "template_ref": "v3.3.0", "trigger": "workflow_dispatch",
+               "run_url": "https://github.com/quokkify/ci-kit/actions/runs/7", "generated_at": None}
+        few = fleet.Result("quokkify/few", "would-update", ".github/a.yml", self.inventory())
+        many = fleet.Result("quokkify/many", "would-update", "a, b, c, d, e", self.inventory())
+        markdown = fleet.markdown_report([few, many], None, run)
+        rows = self.attention_rows(markdown)
+        self.assertIn("| Template drift: would change `.github/a.yml`. | **Open** the update PR: run write mode for this repository (command below). |", rows[0])
+        self.assertIn("Template drift: would change `a`, `b`, `c` and 2 more.", rows[1])
+        self.assertIn("<summary>Commands</summary>", markdown)
+        self.assertNotIn("<pre>", markdown)
+        self.assertNotIn("dry-run=true", markdown)
+        self.assertIn("gh workflow run copier-fleet-auto-update.yml -R quokkify/ci-kit -f repository=quokkify/many\n", markdown)
+        two = fleet.markdown_report([fleet.Result("quokkify/two", "would-update", "a, b", self.inventory())], None, run)
+        self.assertIn("would change `a` and `b`.", two)
+        write = fleet.markdown_report([few], None, {**run, "mode": "write"})
+        self.assertNotIn("gh workflow run", write)
+        self.assertNotIn("<summary>Commands", write)
+        failed = fleet.markdown_report([few, fleet.Result("quokkify/f", "failed", "boom")], None, run)
+        self.assertIn("<summary>Commands and raw errors</summary>", failed)
+        self.assertIn("-f repository=quokkify/f -f dry-run=true\n", failed)
+
     def test_run_block_is_written_to_json_and_context_without_guessing(self) -> None:
         env = {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "quokkify/ci-kit",
                "GITHUB_RUN_ID": "42", "GITHUB_EVENT_NAME": "schedule"}
@@ -3284,7 +3348,8 @@ class FleetReportTests(TestCase):
         result = fleet.Result("quokkify/a", "pull-request", "created", self.inventory(target="v3.3.0"))
         markdown = fleet.markdown_report([result])
         self.assertTrue(markdown.startswith("## Copier fleet: 🔀 1 PR open\n"))
-        self.assertIn("0 of 1 managed repositories need nothing; the rest have PRs in flight.", markdown)
+        self.assertIn("All 1 managed repositories have update PRs open.", markdown)
+        self.assertNotIn("need nothing", markdown)
         self.assertIn("1 open, CI unknown (a PR (link unavailable))", markdown)
         self.assertIn("| 🔀 | [a](https://github.com/quokkify/a) | v3.2.3 → v3.3.0 | ? | PR (link unavailable) open ? · CI ? |", markdown)
 

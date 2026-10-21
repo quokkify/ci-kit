@@ -346,6 +346,7 @@ class RolloutTests(unittest.TestCase):
         stack.enter_context(patch.object(rollout, "run_update", side_effect=update))
         stack.enter_context(patch.object(rollout, "verify_pilot", return_value=SHA))
         stack.enter_context(patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")))
+        stack.enter_context(patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")))
         return stack
 
     def rollout_arguments(self, temporary):
@@ -367,6 +368,34 @@ class RolloutTests(unittest.TestCase):
             summary = (Path(temporary) / "report.md").read_text()
             self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — 1 failed\n"))
             self.assertNotIn("Rollout stopped", summary)
+
+    def test_fanout_exclusion_of_pilots_does_not_duplicate_them(self):
+        def update(arguments, report):
+            if "--repo" in arguments:
+                repository = arguments[arguments.index("--repo") + 1]
+                return {"summary": {"pull-request": 1}, "repositories": [
+                    {"repository": repository, "status": "pull-request", "detail": f"https://github.com/{repository}/pull/5",
+                     "health": {"pull_request": {"url": f"https://github.com/{repository}/pull/5", "number": 5, "state": "open",
+                                                 "head_sha": SHA, "age_days": 0, "ci": {"status": "unknown"}}}}]}
+            return {"summary": {"excluded": len(gate.PILOT_CHECKS) + 1, "up-to-date": 1}, "repositories": [
+                *({"repository": pilot, "status": "excluded", "detail": ""} for pilot in gate.PILOT_CHECKS),
+                {"repository": "quokkify/ci-kit", "status": "excluded", "detail": ""},
+                {"repository": "quokkify/other", "status": "up-to-date", "detail": ""}]}
+
+        with tempfile.TemporaryDirectory() as temporary, self.rollout_patches(temporary, update):
+            rollout.rollout(self.rollout_arguments(temporary))
+            combined = json.loads((Path(temporary) / "report.json").read_text())
+            self.assertEqual([(item["repository"], item["status"]) for item in combined["repositories"]],
+                             [*((pilot, "pull-request") for pilot in gate.PILOT_CHECKS),
+                              ("quokkify/ci-kit", "excluded"), ("quokkify/other", "up-to-date")])
+            self.assertEqual(combined["summary"], {"pull-request": len(gate.PILOT_CHECKS), "excluded": 1, "up-to-date": 1})
+            summary = (Path(temporary) / "report.md").read_text()
+            self.assertIn(" · 1 excluded · ", summary)
+            self.assertIn(f"{len(gate.PILOT_CHECKS)} ready to merge (", summary)
+            self.assertIn("· CI ✅ · pilot gate |", summary)
+            excluded = summary.split("| Excluded | Why |", 1)[1]
+            self.assertIn("quokkify/ci-kit", excluded)
+            self.assertFalse(any(pilot in excluded for pilot in gate.PILOT_CHECKS))
 
     def test_render_failure_writes_fallback_and_keeps_the_original_error(self):
         with tempfile.TemporaryDirectory() as temporary, \

@@ -1100,8 +1100,15 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
     elif status in {"would-update", "would-migrate"}:
         inventory = result.inventory
         version = f" {markdown_text(inventory.commit)} → {markdown_text(inventory.target_commit)}" if inventory and inventory.target_commit and inventory.target_commit != inventory.commit else ""
-        label = "Template drift" if status == "would-update" else "Would migrate"
-        facts.append(Fact("drift", f"{label}{version}; details below.", "**Review** the drift; a write-mode run opens the PR."))
+        if status == "would-update":
+            paths = [path.strip() for path in result.detail.split(",") if path.strip()]
+            names = [f"`{path}`" if GIT_REF_PATTERN.fullmatch(path) else markdown_text(path) for path in paths[:3]]
+            if len(paths) > 3:
+                names.append(f"{len(paths) - 3} more")
+            files = f": would change {', '.join(names[:-1])} and {names[-1]}" if len(names) > 1 else f": would change {names[0]}" if names else ""
+            facts.append(Fact("drift", f"Template drift{version}{files}.", "**Open** the update PR: run write mode for this repository (command below)."))
+        else:
+            facts.append(Fact("drift", f"Would migrate{version}; details below.", "**Review** the drift; a write-mode run opens the PR."))
     elif status not in QUIET_STATUSES:
         detail = f": {markdown_text(result.detail)}" if result.detail else ""
         facts.append(Fact("unknown", f"Unrecognized status {markdown_text(status)}{detail}.", "**Review** the raw status and detail below."))
@@ -1149,22 +1156,24 @@ def last_pull_request(pull_request: dict[str, Any] | None, health: dict[str, Any
     if pull_request.get("state") != "open":
         return f"{link} {markdown_text(str(pull_request.get('state')))}"
     ci = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(pull_request_ci(pull_request), "?")
-    return f"{link} open {age_text(pull_request.get('age_days'))} · CI {ci}"
+    evidence = pull_request.get("ci")
+    gate = " · pilot gate" if isinstance(evidence, dict) and evidence.get("source") == "pilot gate" else ""
+    return f"{link} open {age_text(pull_request.get('age_days'))} · CI {ci}{gate}"
 
 
 def rerun_command(result: Result, run: dict[str, Any]) -> str | None:
-    if result.status != "failed" or not REPOSITORY_SLUG_PATTERN.fullmatch(result.repository):
+    if not (result.status == "failed" or result.status == "would-update" and run.get("mode") == "dry-run") or not REPOSITORY_SLUG_PATTERN.fullmatch(result.repository):
         return None
     match = RUN_URL_PATTERN.fullmatch(str(run.get("run_url") or ""))
     target = f" -R {match[1]}" if match else ""
     reference = run.get("requested_template_ref")
     template_ref = f" -f template-ref={reference}" if isinstance(reference, str) and GIT_REF_PATTERN.fullmatch(reference) else ""
-    dry_run = " -f dry-run=true" if run.get("mode") == "dry-run" else ""
+    dry_run = " -f dry-run=true" if result.status == "failed" and run.get("mode") == "dry-run" else ""
     return f"gh workflow run copier-fleet-auto-update.yml{target} -f repository={result.repository}{template_ref}{dry_run}"
 
 
 def raw_evidence(result: Result) -> list[str]:
-    evidence = [result.detail] if result.detail and result.status != "pull-request" else []
+    evidence = [result.detail] if result.detail and result.status not in {"pull-request", "would-update"} else []
     for finding in (result.migration or {}).get("findings", []):
         message = str(finding.get("message") or "").splitlines()
         evidence.append(f"{finding.get('code')} {message[0] if message else ''}".rstrip())
@@ -1181,12 +1190,19 @@ def generated_text(value: Any) -> str | None:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def report_rows(results: Sequence[Result]) -> list[ReportRow]:
+def report_rows(results: Sequence[Result], rollout: dict[str, Any] | None = None) -> list[ReportRow]:
+    gates = {gate.get("repository"): gate for gate in (rollout or {}).get("pilots") or [] if isinstance(gate, dict) and gate.get("result") == "success"}
     rows = []
     for result in results:
         if result.status == "excluded":
             continue
         pull_request = automation_pull_request(result)
+        gate = gates.get(result.repository)
+        match = PULL_REQUEST_URL_PATTERN.fullmatch(str((pull_request or {}).get("url") or ""))
+        if (gate and pull_request and match and match[1] == result.repository and int(match[2]) == gate.get("pull_request")
+                and pull_request.get("state") == "open" and pull_request_ci(pull_request) == "unknown"
+                and pull_request.get("head_sha") and pull_request.get("head_sha") == gate.get("revision")):
+            pull_request = {**pull_request, "ci": {"status": "passed", "source": "pilot gate"}}
         in_flight = bool(pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) != "failed")
         rows.append(ReportRow(result, pull_request, attention_facts(result, pull_request), in_flight))
     return sorted(rows, key=lambda row: (0, BUCKET_ORDER[row.facts[0].bucket]) if row.facts else (1, 0) if row.in_flight else (2, 0))
@@ -1217,9 +1233,14 @@ def _summary(rows: Sequence[ReportRow], stopped: Any) -> str:
     elif len(calm) == len(managed):
         sentence = f"All {len(managed)} managed repositories need nothing."
     elif not any(row.facts for row in managed):
-        sentence = f"{len(calm)} of {len(managed)} managed repositories need nothing; the rest have PRs in flight."
-    else:
+        sentence = (f"{len(calm)} of {len(managed)} managed repositories need nothing; the rest have PRs in flight." if calm
+                    else f"All {len(managed)} managed repositories have update PRs open.")
+    elif calm:
         sentence = f"{len(calm)} of {len(managed)} managed repositories need nothing."
+    else:
+        attention = sum(bool(row.facts) for row in managed)
+        sentence = (f"All {len(managed)} managed repositories need attention." if attention == len(managed)
+                    else f"{attention} of {len(managed)} managed repositories need attention; the rest have PRs in flight.")
     if stopped:
         sentence += f" **Rollout stopped:** {markdown_text(str(stopped))}."
     return sentence
@@ -1247,7 +1268,8 @@ def _context(rows: Sequence[ReportRow], excluded: int, run: dict[str, Any], roll
     for ci, label in (("pending", "waiting on CI"), ("passed", "ready to merge"), (None, "open, CI unknown")):
         pulls = [pull for pull in in_flight if (pull_request_ci(pull) == ci if ci else pull_request_ci(pull) not in {"pending", "passed"})]
         if pulls:
-            context.append(f"{len(pulls)} {label} (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")")
+            links = " (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")" if len(pulls) <= 3 else ""
+            context.append(f"{len(pulls)} {label}{links}")
     states = [(row.result.auto_merge or {}).get("state") for row in rows]
     for state, label in (("enabled", "auto-merging"), ("merged", "merged")):
         if states.count(state):
@@ -1265,6 +1287,7 @@ def _attention_section(rows: Sequence[ReportRow], run: dict[str, Any]) -> list[s
         steps = " ".join(dict.fromkeys(fact.step for fact in row.facts))
         lines.append(f"| {row.glyph} | {repository_link(row.result.repository)} | {happened} | {steps} |")
     sections = []
+    raw = False
     for number, row in enumerate(attention, 1):
         command = rerun_command(row.result, run)
         evidence = raw_evidence(row.result)
@@ -1274,9 +1297,11 @@ def _attention_section(rows: Sequence[ReportRow], run: dict[str, Any]) -> list[s
         sections.extend([f"#### {number}. {markdown_text(row.result.repository)} — {row.bucket.singular}", ""])
         if command:
             sections.extend(["```", command, "```", ""])
-        sections.extend([*(preformatted(item) for item in evidence), ""])
+        if evidence:
+            raw = True
+            sections.extend([*(preformatted(item) for item in evidence), ""])
     if sections:
-        lines.extend(["", "<details>", "<summary>Commands and raw errors</summary>", "", *sections, "</details>"])
+        lines.extend(["", "<details>", f"<summary>{'Commands and raw errors' if raw else 'Commands'}</summary>", "", *sections, "</details>"])
     return [*lines, ""]
 
 
@@ -1344,7 +1369,7 @@ def markdown_report(
     """Render one verdict-first report; `counts` is accepted for compatibility and recomputed from results."""
     run = run or {}
     stopped = (rollout or {}).get("stopped")
-    rows = report_rows(results)
+    rows = report_rows(results, rollout)
     lines = [f"## Copier fleet: {_verdict(rows, stopped)}", "", _summary(rows, stopped), ""]
     context = _context(rows, sum(result.status == "excluded" for result in results), run, rollout)
     if context:
