@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.2.3](https://github.com/quokkify/ci-kit/compare/v3.2.2...v3.2.3) (2026-10-21)
+
+
+### 🐛 Bug Fixes
+
+* **rollout:** wait for the skills gitleaks check ([#439](https://github.com/quokkify/ci-kit/issues/439)) ([c64c70e](https://github.com/quokkify/ci-kit/commit/c64c70e3f65ff09f5fceba2f14ad3f231102cdb0))
+
+
+### 📦 Dependencies
+
+* **analyze:** update github/codeql-action/analyze digest to 6f2ac81 ([#436](https://github.com/quokkify/ci-kit/issues/436)) ([69dedd7](https://github.com/quokkify/ci-kit/commit/69dedd7188841ebb5e228837fbbf9de9e53a1012))
+* **init:** update github/codeql-action/init digest to 6f2ac81 ([#437](https://github.com/quokkify/ci-kit/issues/437)) ([f862347](https://github.com/quokkify/ci-kit/commit/f8623470c4d1a4b69b9c5c21eaa0d37a5380fccf))
+* **uv:** update uv to v0.13.4 [security] ([#443](https://github.com/quokkify/ci-kit/issues/443)) ([af30549](https://github.com/quokkify/ci-kit/commit/af30549621c24ecf903c353035a419707cee0f1d))
+
+
+### 🚀 Performance
+
+* **ci:** recalibrate suite weights from CI timings ([#442](https://github.com/quokkify/ci-kit/issues/442)) ([bb86e25](https://github.com/quokkify/ci-kit/commit/bb86e25af991fddc0df304a3b2b8df27d3072458))
+* **ci:** run unit suites in parallel shards and gate releases only on tagged revisions ([#438](https://github.com/quokkify/ci-kit/issues/438)) ([3baef95](https://github.com/quokkify/ci-kit/commit/3baef95cdcfdfa46b2df681c231b45702f5695b2))
+
 ## [3.2.2](https://github.com/quokkify/ci-kit/compare/v3.2.1...v3.2.2) (2026-10-21)
 
 
