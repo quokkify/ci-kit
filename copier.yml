@@ -109,7 +109,7 @@ python_components:
   type: yaml
   help: "Python components such as [{id: backend-python, name: Backend Python, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the python-ci workflow inputs in snake_case; every *_version must be a string."
   default: >-
-    {% if _commit is defined and python_components is defined %}{{ python_components }}{% else %}[{id: app-python, name: Application Python, path: .}]{% endif %}
+    {% if _commit is defined and python_components is defined %}{{ python_components }}{% else %}[{id: app-python, name: Application Python, path: ., python_version: "3.14"}]{% endif %}
   validator: >-
     {% set allowed_keys = ['build_command', 'cache_dependencies', 'id', 'install_command', 'lint_command', 'name', 'package_manager', 'path', 'pip_version', 'poetry_version', 'python_version', 'requirements_file', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'timeout_minutes', 'upload_test_artifacts', 'uv_version'] %}
     {% if python_components is string or python_components is mapping or python_components is not sequence or not python_components %}python_components must be a non-empty YAML list of mappings.{% else %}
@@ -133,7 +133,7 @@ node_components:
   type: yaml
   help: "Node components such as [{id: backend-node, name: Backend Node, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the node-ci workflow inputs in snake_case; every *_version must be a string."
   default: >-
-    {% if _commit is defined and node_components is defined %}{{ node_components }}{% else %}[{id: app-node, name: Application Node, path: .}]{% endif %}
+    {% if _commit is defined and node_components is defined %}{{ node_components }}{% else %}[{id: app-node, name: Application Node, path: ., node_version: "22"}]{% endif %}
   validator: >-
     {% set allowed_keys = ['build_command', 'cache_dependencies', 'corepack_version', 'id', 'install_command', 'lint_command', 'name', 'node_version', 'package_manager', 'path', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'timeout_minutes', 'upload_test_artifacts'] %}
     {% if node_components is string or node_components is mapping or node_components is not sequence or not node_components %}node_components must be a non-empty YAML list of mappings.{% else %}

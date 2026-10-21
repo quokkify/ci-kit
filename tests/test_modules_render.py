@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from module_test_support import ROOT, make_template_repo
 from ci_kit.plan import build_plan
-from ci_kit.inputs import module_fields
+from ci_kit.inputs import load_inputs, module_fields
 
 DEFAULT_COMPONENT = {"id": "app-java", "name": "Application Java", "path": ".", "java_version": "21"}
 
@@ -82,6 +82,13 @@ class ModuleRenderTests(unittest.TestCase):
             with self.subTest(module=module):
                 dest = self.render_with_core(module, f"{key}={json.dumps(components)}")
                 self.assertEqual(build_plan(dest, drift=True, src_override=str(self.repo)).findings, [])
+
+    def test_default_answers_pin_workflow_default_versions(self) -> None:
+        table = load_inputs()
+        python = yaml.safe_load(self.decl("python"))["components"][0]
+        node = yaml.safe_load(self.decl("node"))["components"][0]
+        self.assertEqual(python["python_version"], table["python-ci"]["python-version"]["default"])
+        self.assertEqual(node["node_version"], table["node-ci"]["node-version"]["default"])
 
     def test_core_renders_exact_file_set(self) -> None:
         self.assertEqual(
