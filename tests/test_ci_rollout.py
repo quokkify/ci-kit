@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from contextlib import ExitStack
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import rollout_copier_fleet as rollout
 import verify_ci_gate as gate
 
 SHA = "a" * 40
+GITHUB_RUN_VARIABLES = ("GITHUB_EVENT_NAME", "GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
 OTHER = "b" * 40
 REPO = "quokkify/skills"
 
@@ -307,18 +309,88 @@ class RolloutTests(unittest.TestCase):
              patch.object(rollout, "wait_until"), \
              patch.object(rollout, "run_update", side_effect=update), \
              patch.object(rollout, "verify_pilot", side_effect=verify), \
-             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")), \
+             patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
             destination = Path(temporary) / "report.json"
-            rollout.rollout(["--write", "--public-only", "--json-report", str(destination)])
+            markdown = Path(temporary) / "report.md"
+            rollout.rollout(["--write", "--public-only", "--json-report", str(destination), "--markdown-report", str(markdown)])
             self.assertEqual(events[-1], ("update", "remaining"))
+            summary = markdown.read_text()
+            self.assertEqual(summary.count("## Copier fleet:"), 1)
+            self.assertTrue(summary.startswith("## Copier fleet: ✅ nothing to do\n"))
+            self.assertIn("Write mode · ", summary)
+            self.assertIn("target v1.2.3 · pilots verified: ", summary)
             self.assertEqual(sum(event[0] == "verify" for event in events), 6)
             self.assertEqual(timeouts, {repository: 2700 if repository == "quokkify/q4j" else 900
                                         for repository in gate.PILOT_CHECKS})
             self.assertTrue(json.loads(destination.read_text())["rollout"]["fanout_started"])
             combined = json.loads(destination.read_text())
-            self.assertEqual(combined["schema_version"], 4)
+            self.assertEqual(combined["schema_version"], 6)
             self.assertEqual(combined["configuration_gaps"], 4)
             self.assertEqual(combined["repositories"][0]["health"], {"adopted": True})
+
+    def rollout_patches(self, temporary, update):
+        stack = ExitStack()
+        stack.enter_context(patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"))
+        stack.enter_context(patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA))
+        stack.enter_context(patch.object(rollout, "wait_until"))
+        stack.enter_context(patch.object(rollout, "run_update", side_effect=update))
+        stack.enter_context(patch.object(rollout, "verify_pilot", return_value=SHA))
+        stack.enter_context(patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")))
+        return stack
+
+    def rollout_arguments(self, temporary):
+        return ["--write", "--public-only", "--json-report", str(Path(temporary) / "report.json"),
+                "--markdown-report", str(Path(temporary) / "report.md")]
+
+    def test_fanout_failure_is_a_failure_row_not_a_stopped_rollout(self):
+        def update(arguments, report):
+            if "--repo" in arguments:
+                return {"repositories": [{"repository": arguments[arguments.index("--repo") + 1], "status": "up-to-date", "detail": ""}]}
+            return {"_exit_code": 1, "repositories": [{"repository": "quokkify/other", "status": "failed", "detail": "HTTP 502"}]}
+
+        with tempfile.TemporaryDirectory() as temporary, self.rollout_patches(temporary, update):
+            with self.assertRaises(gate.GateError):
+                rollout.rollout(self.rollout_arguments(temporary))
+            combined = json.loads((Path(temporary) / "report.json").read_text())
+            self.assertIsNone(combined["rollout"]["stopped"])
+            self.assertTrue(combined["rollout"]["fanout_started"])
+            summary = (Path(temporary) / "report.md").read_text()
+            self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — 1 failed\n"))
+            self.assertNotIn("Rollout stopped", summary)
+
+    def test_render_failure_writes_fallback_and_keeps_the_original_error(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             self.rollout_patches(temporary, gate.GateError("pilot exploded")), \
+             patch.object(rollout.fleet, "markdown_report", side_effect=RuntimeError("render")):
+            with self.assertRaisesRegex(gate.GateError, "pilot exploded"):
+                rollout.rollout(self.rollout_arguments(temporary))
+            summary = (Path(temporary) / "report.md").read_text()
+            self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — rollout stopped\n"))
+            self.assertIn("(RuntimeError)", summary)
+
+    def test_keyboard_interrupt_is_recorded_and_reraised(self):
+        with tempfile.TemporaryDirectory() as temporary, self.rollout_patches(temporary, KeyboardInterrupt()):
+            with self.assertRaises(KeyboardInterrupt):
+                rollout.rollout(self.rollout_arguments(temporary))
+            self.assertEqual(json.loads((Path(temporary) / "report.json").read_text())["rollout"]["stopped"], "KeyboardInterrupt")
+
+    def test_stopped_rollout_without_stage_report_still_renders_one_verdict(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=gate.GateError(f"Fleet updater stopped with exit code 2; see {temporary}/toolkit-canary-x/pilot-0.json")):
+            destination = Path(temporary) / "report.json"
+            markdown = Path(temporary) / "report.md"
+            with self.assertRaises(gate.GateError):
+                rollout.rollout(["--write", "--public-only", "--json-report", str(destination), "--markdown-report", str(markdown)])
+            combined = json.loads(destination.read_text())
+            self.assertEqual((combined["schema_version"], combined["repositories"]), (6, []))
+            self.assertEqual(combined["rollout"]["stopped"], "Fleet updater stopped with exit code 2; see the stage report")
+            summary = markdown.read_text()
+            self.assertEqual(summary.count("## Copier fleet:"), 1)
+            self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — rollout stopped\n\nNo managed repositories were processed. **Rollout stopped:**"))
 
     def test_pilot_failure_stops_before_fanout_and_writes_partial_report(self):
         with tempfile.TemporaryDirectory() as temporary, \
@@ -329,10 +401,17 @@ class RolloutTests(unittest.TestCase):
              patch.object(rollout, "run_update", return_value={"repositories": [{"repository": next(iter(gate.PILOT_CHECKS)), "status": "up-to-date", "detail": ""}]}) as update, \
              patch.object(rollout, "verify_pilot", side_effect=gate.GateError("failed")):
             destination = Path(temporary) / "report.json"
+            markdown = Path(temporary) / "report.md"
             with self.assertRaises(gate.GateError):
-                rollout.rollout(["--write", "--public-only", "--json-report", str(destination)])
+                rollout.rollout(["--write", "--public-only", "--json-report", str(destination), "--markdown-report", str(markdown)])
             self.assertEqual(update.call_count, 1)
-            self.assertFalse(json.loads(destination.read_text())["rollout"]["fanout_started"])
+            combined = json.loads(destination.read_text())
+            self.assertFalse(combined["rollout"]["fanout_started"])
+            self.assertEqual((combined["rollout"]["stopped"], combined["run"]["mode"]), ("failed", "write"))
+            summary = markdown.read_text()
+            self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — rollout stopped\n"))
+            self.assertIn("**Rollout stopped:** failed.", summary)
+            self.assertIn("fanout not started", summary)
 
 
 class MigrateRolloutTests(unittest.TestCase):

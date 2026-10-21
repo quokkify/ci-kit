@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import posixpath
@@ -22,6 +23,7 @@ import sys
 import tempfile
 import unicodedata
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -131,13 +133,6 @@ FEATURE_LABELS = {
     "missing": "missing",
     "custom": "custom",
     "unknown": "unknown",
-}
-MARKDOWN_FEATURE_LABELS = {
-    "enabled": "✅ On",
-    "disabled": "— Off",
-    "missing": "⚠️ Missing",
-    "custom": "🛠️ Custom",
-    "unknown": "❔ Unknown",
 }
 
 
@@ -965,126 +960,429 @@ def markdown_escape(value: str) -> str:
     return sanitize_text(value).replace("\\", "\\\\").replace("|", "\\|")
 
 
-def markdown_report(results: Sequence[Result], counts: dict[str, int]) -> str:
-    current = counts.get("up-to-date", 0)
-    drift = counts.get("would-update", 0)
-    excluded = counts.get("excluded", 0)
-    mismatches = configuration_gap_count(results)
-    lines = [
-        "## Copier fleet audit",
-        "",
-        f"Fleet: {len(results)} repositories",
-        "",
-        f"✅ {current} up-to-date · 🟡 {drift} drift · ⚠️ {mismatches} configuration gaps · ⏭️ {excluded} excluded",
-        "",
-        "| Repository | Sync | Template | Components | Baseline | Docker | CodeQL | Allure | Release Please | Renovate | Modules / state |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ]
-    status_labels = {
-        "up-to-date": "✅ Current",
-        "would-update": "🟡 Drift",
-        "pull-request": "🔀 Pull request",
-        "not-managed": "— Not managed",
-        "foreign-template": "↗️ Foreign template",
-        "excluded": "⏭️ Excluded",
-        "failed": "❌ Failed",
-        "foreign-module-template": "↗️ Foreign module template",
-        "unknown-module": "❔ Unknown module",
-        "unsafe-answers-file": "⚠️ Unsafe answers file",
-        "not-applicable": "— Not applicable",
-        "needs-update-first": "⏳ Needs update first",
-        "migrate-rejected": "🚫 Migration rejected",
-        "would-migrate": "🟡 Would migrate",
-    }
-    for result in results:
+REPOSITORY_SLUG_PATTERN = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
+PULL_REQUEST_URL_PATTERN = re.compile(r"https://github\.com/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/pull/([0-9]+)")
+RUN_URL_PATTERN = re.compile(r"https://[A-Za-z0-9.-]+/([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)/actions/runs/[0-9]+")
+GIT_REF_PATTERN = re.compile(r"[A-Za-z0-9._/-]+")
+MARKDOWN_ENTITIES = {ord(character): f"&#{ord(character)};" for character in "\\`*_[]()#!|~<>&\"'@:$"}
+UNMANAGED_STATUSES = {"excluded", "not-managed", "not-applicable", "foreign-template"}
+QUIET_STATUSES = UNMANAGED_STATUSES | {"up-to-date", "pull-request"}
+STATUS_GLYPHS = {"up-to-date": "✅", "pull-request": "🔀", "not-managed": "—", "not-applicable": "—", "foreign-template": "↗️"}
+CONFLICT_PREFIX = "Copier produced conflict files:"
+
+
+@dataclass(frozen=True)
+class AttentionBucket:
+    key: str
+    singular: str
+    plural: str
+    glyph: str
+
+    def count(self, number: int) -> str:
+        return f"{number} {self.singular if number == 1 else self.plural}"
+
+
+ATTENTION_BUCKETS = (
+    AttentionBucket("conflict", "conflict", "conflicts", "❌"),
+    AttentionBucket("failed", "failed", "failed", "❌"),
+    AttentionBucket("pr-ci", "PR with failed CI", "PRs with failed CI", "❌"),
+    AttentionBucket("main-ci", "failing CI on main", "failing CI on main", "❌"),
+    AttentionBucket("gap", "configuration gap", "configuration gaps", "⚠️"),
+    AttentionBucket("update-first", "needs update first", "need update first", "⬆️"),
+    AttentionBucket("drift", "drift", "drift", "🟡"),
+    AttentionBucket("unknown", "unrecognized status", "unrecognized statuses", "❔"),
+)
+BUCKETS = {bucket.key: bucket for bucket in ATTENTION_BUCKETS}
+BUCKET_ORDER = {bucket.key: index for index, bucket in enumerate(ATTENTION_BUCKETS)}
+LEGEND = (
+    ("✅", "ok"), ("❌", "failed"), ("⚠️", "gap"), ("⬆️", "update first"), ("🔀", "PR open"), ("⏳", "CI pending"),
+    ("🟡", "drift (dry run)"), ("❔", "unrecognized status"), ("—", "not managed or not applicable"), ("↗️", "foreign template"),
+)
+
+
+@dataclass(frozen=True)
+class Fact:
+    bucket: str
+    happened: str
+    step: str
+
+
+@dataclass(frozen=True)
+class ReportRow:
+    result: Result
+    pull_request: dict[str, Any] | None
+    facts: tuple[Fact, ...]
+    in_flight: bool
+
+    @property
+    def bucket(self) -> AttentionBucket | None:
+        return BUCKETS[self.facts[0].bucket] if self.facts else None
+
+    @property
+    def glyph(self) -> str:
+        if self.bucket:
+            return self.bucket.glyph
+        if self.in_flight:
+            return "⏳" if self.pull_request and pull_request_ci(self.pull_request) == "pending" else "🔀"
+        return STATUS_GLYPHS.get(self.result.status, "❔")
+
+
+def markdown_text(value: str) -> str:
+    """Neutralize untrusted text for Markdown prose and table cells without visible backslashes."""
+    return sanitize_text(value).translate(MARKDOWN_ENTITIES)
+
+
+def preformatted(value: str) -> str:
+    return "<pre>" + "\n".join(html.escape(sanitize_text(line)) for line in value.splitlines()) + "</pre>"
+
+
+def repository_link(repository: str) -> str:
+    if REPOSITORY_SLUG_PATTERN.fullmatch(repository):
+        return f"[{repository.split('/', 1)[1]}](https://github.com/{repository})"
+    return markdown_text(repository)
+
+
+def automation_pull_request(result: Result) -> dict[str, Any] | None:
+    pull_request = (result.health or {}).get("pull_request")
+    if isinstance(pull_request, dict) and PULL_REQUEST_URL_PATTERN.fullmatch(str(pull_request.get("url", ""))):
+        return pull_request
+    if result.status != "pull-request":
+        return None
+    match = PULL_REQUEST_URL_PATTERN.fullmatch(result.detail)
+    return {"url": match[0] if match else None, "state": "open", "ci": {"status": "unknown"}, "repository": result.repository}
+
+
+def pull_request_link(pull_request: dict[str, Any], *, with_repository: bool = False) -> str:
+    match = PULL_REQUEST_URL_PATTERN.fullmatch(str(pull_request.get("url") or ""))
+    if not match:
+        name = str(pull_request.get("repository") or "").rsplit("/", 1)[-1]
+        return (f"{markdown_text(name)} PR" if with_repository else "PR") + " (link unavailable)"
+    label = f"{match[1].split('/', 1)[1]}#{match[2]}" if with_repository else f"#{match[2]}"
+    return f"[{label}]({match[0]})"
+
+
+def pull_request_ci(pull_request: dict[str, Any]) -> str:
+    ci = pull_request.get("ci")
+    return str(ci.get("status", "unknown")) if isinstance(ci, dict) else "unknown"
+
+
+def age_text(days: Any) -> str:
+    return "today" if days == 0 else f"{days}d" if isinstance(days, int) else "?"
+
+
+def missing_outputs(inventory: TemplateInventory) -> list[str]:
+    missing = list(inventory.missing_baseline)
+    missing.extend(FEATURE_PATHS[key] for key in ("codeql", "release_please", "renovate") if getattr(inventory, key) == "missing")
+    if inventory.allure_report == "missing":
+        missing.extend(ALLURE_EXPECTED_PATHS)
+    return missing
+
+
+def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tuple[Fact, ...]:
+    facts: list[Fact] = []
+    status = result.status
+    health = result.health or {}
+    if status == "failed" and result.detail.startswith(CONFLICT_PREFIX):
+        files = ", ".join(name.strip().removesuffix(".rej") for name in result.detail[len(CONFLICT_PREFIX):].split(","))
+        facts.append(Fact("conflict", f"Copier conflict in {markdown_text(files)}; nothing pushed.", "**Resolve** the conflicting files on the default branch, then re-run for this repository."))
+    elif status == "failed":
+        facts.append(Fact("failed", "Update failed; raw error below.", "**Re-run** for this repository; investigate if it fails again."))
+    elif status == "migrate-rejected":
+        facts.append(Fact("failed", f"Migration rejected: {markdown_text(result.detail)}; nothing pushed.", "**Review** the findings below."))
+    elif status in {"unsafe-answers-file", "unknown-module", "foreign-module-template"}:
+        facts.append(Fact("gap", f"{markdown_text(status.replace('-', ' ').capitalize())}: {markdown_text(result.detail)}.", "**Fix** the module answers file in the repository."))
+    elif status == "needs-update-first":
+        facts.append(Fact("update-first", f"Needs update first: {markdown_text(result.detail)}.", "**Run** the template update first, then migrate again."))
+    elif status in {"would-update", "would-migrate"}:
         inventory = result.inventory
-        if inventory:
-            template_version = inventory.commit
-            if inventory.target_commit and inventory.target_commit != inventory.commit:
-                template_version += f" → {inventory.target_commit}"
-            cells = (
-                template_version,
-                ", ".join(inventory.components),
-                inventory.baseline,
-                MARKDOWN_FEATURE_LABELS[inventory.docker],
-                MARKDOWN_FEATURE_LABELS[inventory.codeql],
-                MARKDOWN_FEATURE_LABELS[inventory.allure_report],
-                MARKDOWN_FEATURE_LABELS[inventory.release_please],
-                MARKDOWN_FEATURE_LABELS[inventory.renovate],
-                f"{', '.join(inventory.modules) or '—'} / {inventory.state}",
-            )
-        else:
-            cells = ("—", "—", "—", "—", "—", "—", "—", "—", "—")
-        lines.append(
-            "| "
-            + " | ".join(
-                markdown_escape(value)
-                for value in (
-                    result.repository,
-                    status_labels.get(result.status, result.status),
-                    *cells,
-                )
-            )
-            + " |"
+        version = f" {markdown_text(inventory.commit)} → {markdown_text(inventory.target_commit)}" if inventory and inventory.target_commit and inventory.target_commit != inventory.commit else ""
+        label = "Template drift" if status == "would-update" else "Would migrate"
+        facts.append(Fact("drift", f"{label}{version}; details below.", "**Review** the drift; a write-mode run opens the PR."))
+    elif status not in QUIET_STATUSES:
+        detail = f": {markdown_text(result.detail)}" if result.detail else ""
+        facts.append(Fact("unknown", f"Unrecognized status {markdown_text(status)}{detail}.", "**Review** the raw status and detail below."))
+    if inventory_has_mismatch(result.inventory):
+        assert result.inventory
+        files = ", ".join(f"`{path}`" for path in missing_outputs(result.inventory)) or f"baseline {markdown_text(result.inventory.baseline)}"
+        facts.append(Fact("gap", f"Missing template outputs: {files}.", "**Fix** the missing outputs or the Copier answers."))
+    exception = health.get("exception")
+    if isinstance(exception, dict) and exception.get("status") == "expired":
+        facts.append(Fact("gap", f"Health exception expired on {markdown_text(str(exception.get('expires_on')))}: {markdown_text(str(exception.get('reason')))}.", "**Review** the exception: renew or remove it."))
+    if pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) == "failed":
+        facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌.", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
+    failing = [str(check.get("context")) for check in (health.get("default_ci") or {}).get("checks", []) if isinstance(check, dict) and check.get("status") == "failed"]
+    if failing:
+        facts.append(Fact("main-ci", "CI on `main` failing: " + ", ".join(markdown_text(context) for context in failing) + ".", "**Fix** the failing checks on the default branch."))
+    return tuple(sorted(facts, key=lambda fact: BUCKET_ORDER[fact.bucket]))
+
+
+def ci_on_default_branch(health: dict[str, Any] | None) -> str:
+    if not health:
+        return "?"
+    policy = health.get("required_checks") or {}
+    required = [str(check.get("context")) for check in policy.get("checks", []) if isinstance(check, dict)]
+    if not required:
+        return "no required checks" if policy.get("status") == "unprotected" else "?"
+    observed = {str(check.get("context")): check.get("status") for check in (health.get("default_ci") or {}).get("checks", []) if isinstance(check, dict)}
+    passed = sum(observed.get(context) == "passed" for context in required)
+    parts = [f"{passed}/{len(required)} ✅"]
+    failed = [context for context in required if observed.get(context) == "failed"]
+    if failed:
+        parts.append("❌ " + ", ".join(markdown_text(context) for context in failed))
+    unknown = [context for context in required if observed.get(context) not in {"passed", "failed"}]
+    if unknown:
+        parts.append(", ".join(f"{markdown_text(context)} ?" for context in unknown))
+    return " · ".join(parts)
+
+
+def last_pull_request(pull_request: dict[str, Any] | None, health: dict[str, Any] | None) -> str:
+    if not pull_request:
+        return "none" if (health or {}).get("pull_request_observation", {}).get("status") == "observed" else "?"
+    link = pull_request_link(pull_request)
+    if pull_request.get("state") != "open":
+        return f"{link} {markdown_text(str(pull_request.get('state')))}"
+    ci = {"passed": "✅", "failed": "❌", "pending": "⏳"}.get(pull_request_ci(pull_request), "?")
+    return f"{link} open {age_text(pull_request.get('age_days'))} · CI {ci}"
+
+
+def rerun_command(result: Result, run: dict[str, Any]) -> str | None:
+    if result.status != "failed" or not REPOSITORY_SLUG_PATTERN.fullmatch(result.repository):
+        return None
+    match = RUN_URL_PATTERN.fullmatch(str(run.get("run_url") or ""))
+    target = f" -R {match[1]}" if match else ""
+    reference = run.get("requested_template_ref")
+    template_ref = f" -f template-ref={reference}" if isinstance(reference, str) and GIT_REF_PATTERN.fullmatch(reference) else ""
+    dry_run = " -f dry-run=true" if run.get("mode") == "dry-run" else ""
+    return f"gh workflow run copier-fleet-auto-update.yml{target} -f repository={result.repository}{template_ref}{dry_run}"
+
+
+def raw_evidence(result: Result) -> list[str]:
+    evidence = [result.detail] if result.detail and result.status != "pull-request" else []
+    for finding in (result.migration or {}).get("findings", []):
+        message = str(finding.get("message") or "").splitlines()
+        evidence.append(f"{finding.get('code')} {message[0] if message else ''}".rstrip())
+    return evidence
+
+
+def generated_text(value: Any) -> str | None:
+    try:
+        moment = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        return None
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def report_rows(results: Sequence[Result]) -> list[ReportRow]:
+    rows = []
+    for result in results:
+        if result.status == "excluded":
+            continue
+        pull_request = automation_pull_request(result)
+        in_flight = bool(pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) != "failed")
+        rows.append(ReportRow(result, pull_request, attention_facts(result, pull_request), in_flight))
+    return sorted(rows, key=lambda row: (0, BUCKET_ORDER[row.facts[0].bucket]) if row.facts else (1, 0) if row.in_flight else (2, 0))
+
+
+def _verdict(rows: Sequence[ReportRow], stopped: Any) -> str:
+    attention = [row.bucket for row in rows if row.bucket]
+    if stopped or any(bucket.key != "drift" for bucket in attention):
+        counts = [bucket.count(attention.count(bucket)) for bucket in ATTENTION_BUCKETS if bucket in attention]
+        return "❌ action required — " + " · ".join((["rollout stopped"] if stopped else []) + counts)
+    if attention:
+        return f"🟡 drift in {len(attention)}"
+    open_count = sum(row.in_flight for row in rows)
+    if open_count:
+        return f"🔀 {open_count} PR{'s' if open_count != 1 else ''} open"
+    return "✅ nothing to do"
+
+
+def _summary(rows: Sequence[ReportRow], stopped: Any) -> str:
+    managed = [row for row in rows if row.result.status not in UNMANAGED_STATUSES]
+    calm = [row for row in managed if not row.facts and not row.in_flight]
+    inventories = [row.result.inventory for row in managed]
+    versions = {inventory.commit for inventory in inventories if inventory}
+    if not managed:
+        sentence = "No managed repositories were processed."
+    elif len(calm) == len(managed) and len(versions) == 1 and all(inventory and inventory.target_commit in {None, inventory.commit} for inventory in inventories):
+        sentence = f"All {len(managed)} managed repositories are on **{markdown_text(next(iter(versions)))}**."
+    elif len(calm) == len(managed):
+        sentence = f"All {len(managed)} managed repositories need nothing."
+    elif not any(row.facts for row in managed):
+        sentence = f"{len(calm)} of {len(managed)} managed repositories need nothing; the rest have PRs in flight."
+    else:
+        sentence = f"{len(calm)} of {len(managed)} managed repositories need nothing."
+    if stopped:
+        sentence += f" **Rollout stopped:** {markdown_text(str(stopped))}."
+    return sentence
+
+
+def _context(rows: Sequence[ReportRow], excluded: int, run: dict[str, Any], rollout: dict[str, Any] | None) -> str:
+    context = []
+    mode = {"write": "Write mode", "dry-run": "Dry run"}.get(str(run.get("mode")))
+    if mode:
+        context.append(mode + (f" ({markdown_text(str(run['trigger']))})" if run.get("trigger") else ""))
+    generated = generated_text(run.get("generated_at")) if run.get("generated_at") else None
+    if generated:
+        context.append(generated)
+    if RUN_URL_PATTERN.fullmatch(str(run.get("run_url") or "")):
+        context.append(f"[job log]({run['run_url']})")
+    if run.get("template_ref"):
+        context.append(f"target {markdown_text(str(run['template_ref']))}")
+    if rollout and rollout.get("pilots"):
+        context.append("pilots verified: " + ", ".join(repository_link(str(gate.get("repository"))) for gate in rollout["pilots"]))
+    if rollout and not rollout.get("fanout_started"):
+        context.append("fanout not started")
+    if excluded:
+        context.append(f"{excluded} excluded")
+    in_flight = [row.pull_request for row in rows if row.in_flight and row.pull_request]
+    for ci, label in (("pending", "waiting on CI"), ("passed", "ready to merge"), (None, "open, CI unknown")):
+        pulls = [pull for pull in in_flight if (pull_request_ci(pull) == ci if ci else pull_request_ci(pull) not in {"pending", "passed"})]
+        if pulls:
+            context.append(f"{len(pulls)} {label} (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")")
+    return " · ".join(context)
+
+
+def _attention_section(rows: Sequence[ReportRow], run: dict[str, Any]) -> list[str]:
+    attention = [row for row in rows if row.bucket]
+    if not attention:
+        return []
+    lines = [f"### Needs your attention — {len(attention)}", "", "| | Repository | What happened | Next step |", "| :-: | --- | --- | --- |"]
+    for row in attention:
+        happened = " ".join(dict.fromkeys(fact.happened for fact in row.facts))
+        steps = " ".join(dict.fromkeys(fact.step for fact in row.facts))
+        lines.append(f"| {row.glyph} | {repository_link(row.result.repository)} | {happened} | {steps} |")
+    sections = []
+    for number, row in enumerate(attention, 1):
+        command = rerun_command(row.result, run)
+        evidence = raw_evidence(row.result)
+        if not command and not evidence:
+            continue
+        assert row.bucket
+        sections.extend([f"#### {number}. {markdown_text(row.result.repository)} — {row.bucket.singular}", ""])
+        if command:
+            sections.extend(["```", command, "```", ""])
+        sections.extend([*(preformatted(item) for item in evidence), ""])
+    if sections:
+        lines.extend(["", "<details>", "<summary>Commands and raw errors</summary>", "", *sections, "</details>"])
+    return [*lines, ""]
+
+
+def _fleet_section(rows: Sequence[ReportRow], results: Sequence[Result]) -> list[str]:
+    statuses: dict[str, int] = {}
+    for result in results:
+        statuses[result.status] = statuses.get(result.status, 0) + 1
+    status_counts = " · ".join(
+        f"{count} {markdown_text({'pull-request': 'PR open' if count == 1 else 'PRs open', 'would-update': 'drift'}.get(status, status.replace('-', ' ')))}"
+        for status, count in sorted(statuses.items(), key=lambda item: (item[0] == "excluded", item[0] != "up-to-date", item[0]))
+    )
+    lines = ["<details>", f"<summary>Fleet — {status_counts or 'no repositories'}</summary>", ""]
+    if rows:
+        marked = any(row.glyph != "✅" for row in rows)
+        lines.append(("| | " if marked else "| ") + "Repository | Template | CI on `main` | Last automation PR |")
+        lines.append(("| :-: | " if marked else "| ") + "--- | --- | --- | --- |")
+        for row in rows:
+            inventory = row.result.inventory
+            template = "?"
+            if inventory:
+                template = markdown_text(inventory.commit)
+                if inventory.target_commit and inventory.target_commit != inventory.commit:
+                    template += f" → {markdown_text(inventory.target_commit)}"
+            cells = [repository_link(row.result.repository), template, ci_on_default_branch(row.result.health), last_pull_request(row.pull_request, row.result.health)]
+            lines.append("| " + (f"{row.glyph} | " if marked else "") + " | ".join(cells) + " |")
+        explanation = (
+            "**Template** is the version recorded in `.copier-answers.yml`; `→` names this run's target. "
+            "**CI on `main`** counts required checks from active rulesets that passed at the current default-branch commit; "
+            "❌ names failed checks and `?` names checks with no run for that exact revision (often scheduled workflows such as CodeQL): "
+            "missing evidence, not a failure."
         )
-
-    problem_results = [
-        result
-        for result in results
-        if result.status in {"would-update", "failed", "migrate-rejected"} or inventory_has_mismatch(result.inventory)
-    ]
-    if problem_results:
-        lines.extend(["", "### Details", ""])
-        for result in problem_results:
-            lines.append(f"#### `{markdown_escape(result.repository)}`")
-            if result.detail:
-                lines.append(f"- {markdown_escape(result.detail)}")
-            for finding in (result.migration or {}).get("findings", []):
-                lines.append(f"- `{markdown_escape(str(finding.get('code')))}` {markdown_escape(str(finding.get('message')).splitlines()[0] if finding.get('message') else '')}")
-            inventory = result.inventory
-            if inventory and inventory.baseline != f"{len(BASELINE_PATHS)}/{len(BASELINE_PATHS)}":
-                lines.append(f"- Baseline files present: {inventory.baseline}")
-                lines.extend(f"  - Missing: `{path}`" for path in inventory.missing_baseline)
-            if inventory and inventory.codeql == "missing":
-                lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['codeql']}`")
-            if inventory and inventory.release_please == "missing":
-                lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['release_please']}`")
-            if inventory and inventory.allure_report == "missing":
-                lines.append(
-                    "- Allure is enabled but its generated workflow/config/extractor set is incomplete: "
-                    + ", ".join(f"`{path}`" for path in ALLURE_EXPECTED_PATHS)
-                )
-            if inventory and inventory.renovate == "missing":
-                lines.append(f"- Missing enabled template output: `{FEATURE_PATHS['renovate']}`")
-            lines.append("")
-    health_results = [result for result in results if result.health is not None]
-    if health_results:
-        lines.extend(["", "### Adoption and branch health", "", "This read-only snapshot is independent of PR creation and template rendering.", "", "| Repository | Applied → target | Default revision / CI | Automation PR / CI | Active required checks | Exception | Modules / state |", "| --- | --- | --- | --- | --- | --- | --- |"])
-        for result in health_results:
-            health = result.health or {}
-            pr = health.get("pull_request")
-            if pr:
-                pr_text = f"{pr.get('url')} · {pr.get('state')} · {pr.get('age_days')}d · {pr.get('head_sha')} · {pr.get('ci', {}).get('status', 'unknown')}"
-            else:
-                pr_text = "none" if health.get("pull_request_observation", {}).get("status") == "observed" else "unknown"
-            policy = health.get("required_checks", {})
-            checks = ", ".join(str(item.get("context")) + (f" (app {item['integration_id']})" if item.get("integration_id") is not None else "") for item in policy.get("checks", []))
-            exception = health.get("exception")
-            exception_text = f"{exception.get('status')}: {exception.get('reason')} · expires {exception.get('expires_on')}" if exception else "none"
-            cells = [result.repository, f"{health.get('applied_template_version')} → {health.get('target_template_version')} ({health.get('adoption')})", f"{health.get('default_sha')} · {health.get('default_ci', {}).get('status', 'unknown')}", pr_text, f"{policy.get('status', 'unknown')}: {checks or 'none observed'}", exception_text, f"{', '.join(result.inventory.modules) or '—'} / {result.inventory.state}" if result.inventory else "—"]
-            lines.append("| " + " | ".join(health_markdown_escape(str(value)) for value in cells) + " |")
-    return "\n".join(lines).rstrip() + "\n"
+        if not any(row.result.health for row in rows):
+            explanation += " CI evidence is collected only with `--include-health`."
+        elif any(((row.result.health or {}).get("required_checks") or {}).get("reason") == "classic branch protection evidence unavailable" for row in rows):
+            explanation += " Classic branch protection cannot be read with this token, so policy coverage beyond rulesets is unknown (expected)."
+        lines.extend(["", explanation + " Full SHAs, check-run IDs and per-check reasons are in the JSON report."])
+    exceptions = [(row.result, (row.result.health or {}).get("exception")) for row in rows if isinstance((row.result.health or {}).get("exception"), dict)]
+    if exceptions:
+        lines.extend(["", "| Exception | Status | Reason | Expires |", "| --- | --- | --- | --- |"])
+        lines.extend(
+            "| " + " | ".join([repository_link(result.repository), *(markdown_text(str(exception.get(key))) for key in ("status", "reason", "expires_on"))]) + " |"
+            for result, exception in exceptions
+        )
+    excluded = [result for result in results if result.status == "excluded"]
+    if excluded:
+        lines.extend(["", "| Excluded | Why |", "| --- | --- |"])
+        lines.extend(f"| {markdown_text(result.repository)} | {markdown_text(result.detail) if result.detail else '`--exclude`'} |" for result in excluded)
+    return [*lines, "", "</details>"]
 
 
-def health_markdown_escape(value: str) -> str:
-    import html
-    value = html.escape(sanitize_text(value)).replace("\\", "\\\\")
-    for character in "|`*_[]()#!":
-        value = value.replace(character, "\\" + character)
-    return value
+def _legend(lines: Sequence[str]) -> str:
+    cells = "\n".join(line for line in lines if line.startswith("|"))
+    entries = [f"{glyph} {meaning}" for glyph, meaning in LEGEND if glyph in cells]
+    if " ?" in cells:
+        entries.append("`?` no evidence")
+    return "Legend: " + " · ".join(entries) + "." if entries else ""
 
 
-def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
+def markdown_report(
+    results: Sequence[Result],
+    counts: dict[str, int] | None = None,
+    run: dict[str, Any] | None = None,
+    rollout: dict[str, Any] | None = None,
+) -> str:
+    """Render one verdict-first report; `counts` is accepted for compatibility and recomputed from results."""
+    run = run or {}
+    stopped = (rollout or {}).get("stopped")
+    rows = report_rows(results)
+    lines = [f"## Copier fleet: {_verdict(rows, stopped)}", "", _summary(rows, stopped), ""]
+    context = _context(rows, sum(result.status == "excluded" for result in results), run, rollout)
+    if context:
+        lines.extend([context, ""])
+    lines.extend(_attention_section(rows, run))
+    lines.extend(_fleet_section(rows, results))
+    legend = _legend(lines)
+    if legend:
+        lines.extend(["", legend])
+    return "\n".join(lines) + "\n"
+
+
+def run_metadata(mode: str, template_ref: str | None, env: dict[str, str], requested_template_ref: str | None = None) -> dict[str, Any]:
+    server, repository, run_id = (env.get(name, "").strip() for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
+    return {
+        "mode": mode,
+        "template_ref": template_ref,
+        "requested_template_ref": requested_template_ref,
+        "trigger": env.get("GITHUB_EVENT_NAME") or None,
+        "run_url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository and run_id else None,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+def results_from_report(payload: dict[str, Any]) -> list[Result]:
+    results = []
+    for item in payload.get("repositories", []):
+        template = item.get("template")
+        inventory = None
+        if template:
+            inventory = TemplateInventory(
+                commit=template["commit"],
+                target_commit=template.get("target_commit"),
+                components=tuple(template["components"]),
+                baseline=f"{template['baseline']['present']}/{template['baseline']['expected']}",
+                missing_baseline=tuple(template["baseline"]["missing"]),
+                docker=template["docker"],
+                codeql=template["codeql"],
+                allure_report=template["allure_report"],
+                release_please=template["release_please"],
+                renovate=template["renovate"],
+                modules=tuple(template.get("modules", ())),
+                state=template.get("state", "legacy"),
+            )
+        results.append(Result(item["repository"], item["status"], item.get("detail", ""), inventory, item.get("health"), item.get("migration")))
+    return results
+
+
+def json_report(results: Sequence[Result], counts: dict[str, int], run: dict[str, Any] | None = None) -> str:
     repositories = []
     for result in results:
         item: dict[str, Any] = {
@@ -1117,12 +1415,14 @@ def json_report(results: Sequence[Result], counts: dict[str, int]) -> str:
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
-        "schema_version": 5,
+        "schema_version": 6,
         "summary": counts,
         "configuration_gaps": gaps,
         "configuration_mismatches": gaps,
         "repositories": repositories,
     }
+    if run is not None:
+        payload["run"] = run
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -1519,7 +1819,7 @@ def update_template(
     ]
     if rejected:
         names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
-        raise FleetUpdateError(f"Copier produced conflict files: {names}")
+        raise FleetUpdateError(f"{CONFLICT_PREFIX} {names}")
     return changed_paths(repository_path)
 
 
@@ -2325,12 +2625,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     for line in feature_summary(results):
         print(line)
     print(f"configuration-gaps: {configuration_gap_count(results)}")
+    run = run_metadata("dry-run" if args.dry_run else "write", template_ref, env, args.template_ref)
     if args.markdown_report:
         args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
-        args.markdown_report.write_text(markdown_report(results, counts), encoding="utf-8")
+        args.markdown_report.write_text(markdown_report(results, counts, run), encoding="utf-8")
     if args.json_report:
         args.json_report.parent.mkdir(parents=True, exist_ok=True)
-        args.json_report.write_text(json_report(results, counts), encoding="utf-8")
+        args.json_report.write_text(json_report(results, counts, run), encoding="utf-8")
     if failures or counts.get("migrate-rejected", 0):
         return 1
     if args.dry_run and counts.get("would-update", 0):

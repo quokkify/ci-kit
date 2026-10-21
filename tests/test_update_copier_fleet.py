@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from contextlib import redirect_stdout
 from io import StringIO
@@ -2144,9 +2145,9 @@ class TemplateInventoryTests(TestCase):
 
         self.assertIn("template=v2.8.2->v2.9.0 components=python:.", console)
         self.assertIn("renovate=missing", console)
-        self.assertIn("| quokkify/example | 🟡 Drift | v2.8.2 → v2.9.0 | python:.", markdown)
-        self.assertIn("Missing enabled template output: `.github/renovate.json`", markdown)
-        self.assertEqual(report["schema_version"], 5)
+        self.assertIn("| ⚠️ | [example](https://github.com/quokkify/example) | Missing template outputs: `.github/renovate.json`. Template drift v2.8.2 → v2.9.0;", markdown)
+        self.assertIn("| ⚠️ | [example](https://github.com/quokkify/example) | v2.8.2 → v2.9.0 | ? | ? |", markdown)
+        self.assertEqual(report["schema_version"], 6)
         self.assertEqual(report["configuration_mismatches"], 1)
         self.assertEqual(report["repositories"][0]["template"]["renovate"], "missing")
         self.assertEqual(report["repositories"][0]["template"]["allure_report"], "enabled")
@@ -2154,7 +2155,7 @@ class TemplateInventoryTests(TestCase):
 
     def test_report_renderers_escape_control_characters_and_backslash_pipes(self) -> None:
         inventory = fleet.TemplateInventory(
-            commit="v2.8.2\r",
+            commit="v2.8.2\r\x1b\u0085\u009b|row",
             target_commit=None,
             components=("python:C:\\repo\\|row\r\x1b\u0085\u009b",),
             baseline="2/2",
@@ -2170,15 +2171,17 @@ class TemplateInventoryTests(TestCase):
         console = "\n".join(fleet.console_lines(result))
         markdown = fleet.markdown_report([result], {"up-to-date": 1})
 
-        for rendered in (console, markdown):
+        for rendered, backslash in ((console, "\\"), (markdown, "&#92;")):
             self.assertNotIn("\r", rendered)
             self.assertNotIn("\x1b", rendered)
-            self.assertIn("\\x0d", rendered)
-            self.assertIn("\\x1b", rendered)
+            self.assertIn(backslash + "x0d", rendered)
+            self.assertIn(backslash + "x1b", rendered)
             self.assertNotIn("\u0085", rendered)
             self.assertNotIn("\u009b", rendered)
-            self.assertIn("\\x85", rendered)
-            self.assertIn("\\x9b", rendered)
+            self.assertIn(backslash + "x85", rendered)
+            self.assertIn(backslash + "x9b", rendered)
+        self.assertIn("&#124;row", markdown)
+        self.assertNotIn("|row", markdown)
         self.assertEqual(len([line for line in markdown.splitlines() if line.startswith("|")]), 3)
 
 
@@ -2807,9 +2810,6 @@ class ModuleReportTests(TestCase):
         report = json.loads(fleet.json_report([result], counts))
         self.assertEqual(report["repositories"][0]["template"]["modules"], ["core", "java"])
         self.assertEqual(report["repositories"][0]["template"]["state"], "hybrid(ci)")
-        markdown = fleet.markdown_report([result], counts)
-        self.assertIn("| Modules / state |", markdown)
-        self.assertIn("core, java / hybrid(ci) |", markdown)
         self.assertIn("state=hybrid(ci) modules=core,java", "\n".join(fleet.console_lines(result)))
 
     def test_new_statuses_have_markdown_labels_and_modules_state_has_no_baseline_gap(self) -> None:
@@ -3090,10 +3090,219 @@ class MigrateReportTests(TestCase):
 
     def test_markdown_lists_rejection_codes_and_new_statuses(self) -> None:
         markdown = fleet.markdown_report([self.rejected()], {"migrate-rejected": 1})
-        self.assertIn("Migration rejected", markdown)
-        self.assertIn("CIK-MIGRATE-003", markdown.split("### Details", 1)[1])
-        for status, label in {"not-applicable": "Not applicable", "needs-update-first": "Needs update first", "would-migrate": "Would migrate"}.items():
+        self.assertIn("Migration rejected: CIK-MIGRATE-003", markdown.split("### Needs your attention — 1", 1)[1])
+        self.assertIn("<pre>CIK-MIGRATE-003 x differs</pre>", markdown.split("Commands and raw errors", 1)[1])
+        self.assertNotIn("gh workflow run", markdown)
+        not_applicable = fleet.markdown_report([fleet.Result("quokkify/x", "not-applicable")], {"not-applicable": 1})
+        self.assertIn("| — | [x](https://github.com/quokkify/x) | ? | ? | ? |", not_applicable)
+        self.assertNotIn("Needs your attention", not_applicable)
+        for status, label in {"needs-update-first": "| ⬆️ | [x](https://github.com/quokkify/x) | Needs update first", "would-migrate": "| 🟡 | [x](https://github.com/quokkify/x) | Would migrate"}.items():
             self.assertIn(label, fleet.markdown_report([fleet.Result("quokkify/x", status)], {status: 1}))
+
+
+class FleetReportTests(TestCase):
+    def inventory(self, commit="v3.2.3", target="v3.2.3", **kwargs):
+        values = dict(commit=commit, target_commit=target, components=("python:.",), baseline="2/2",
+                      missing_baseline=(), docker="disabled", codeql="enabled", allure_report="disabled",
+                      release_please="enabled", renovate="enabled")
+        values.update(kwargs)
+        return fleet.TemplateInventory(**values)
+
+    def pull_request(self, repository, number, ci, state="open"):
+        return {"pull_request": {"url": f"https://github.com/{repository}/pull/{number}", "number": number,
+                                 "state": state, "age_days": 0, "ci": {"status": ci}},
+                "pull_request_observation": {"status": "observed"}}
+
+    def attention_rows(self, markdown):
+        section = markdown.split("### Needs your attention", 1)[1].split("<details>", 1)[0]
+        return [line for line in section.splitlines() if line.startswith("| ") and "Repository" not in line and not line.startswith("| :-:")]
+
+    def test_green_run_has_one_verdict_and_four_column_fleet_table(self) -> None:
+        results = [fleet.Result("quokkify/a", "up-to-date", inventory=self.inventory()),
+                   fleet.Result("quokkify/b", "up-to-date", inventory=self.inventory()),
+                   fleet.Result("quokkify/ci-kit", "excluded")]
+        markdown = fleet.markdown_report(results, {"up-to-date": 2, "excluded": 1})
+        self.assertTrue(markdown.startswith("## Copier fleet: ✅ nothing to do\n"))
+        self.assertEqual(markdown.count("## Copier fleet:"), 1)
+        self.assertIn("All 2 managed repositories are on **v3.2.3**.", markdown)
+        self.assertNotIn("Needs your attention", markdown)
+        self.assertIn("| Repository | Template | CI on `main` | Last automation PR |\n| --- | --- | --- | --- |", markdown)
+        self.assertIn("| [a](https://github.com/quokkify/a) | v3.2.3 | ? | ? |", markdown)
+        self.assertIn("| quokkify/ci-kit | `--exclude` |", markdown)
+
+    def test_attention_rows_follow_human_cost_and_keep_unknown_statuses(self) -> None:
+        gap = self.inventory(baseline="1/2", missing_baseline=(fleet.BASELINE_PATHS[1],))
+        results = [
+            fleet.Result("quokkify/drift", "would-update", ".github/x.yml", self.inventory(target="v3.3.0")),
+            fleet.Result("quokkify/mystery", "brand-new-status", "raw detail"),
+            fleet.Result("quokkify/gap", "up-to-date", inventory=gap),
+            fleet.Result("quokkify/red-pr", "pull-request", "https://github.com/quokkify/red-pr/pull/7",
+                         self.inventory(target="v3.3.0"), self.pull_request("quokkify/red-pr", 7, "failed")),
+            fleet.Result("quokkify/broken", "failed", "HTTP 502"),
+            fleet.Result("quokkify/conflict", "failed", "Copier produced conflict files: a.yml.rej, b.json.rej"),
+        ]
+        markdown = fleet.markdown_report(results, {})
+        rows = self.attention_rows(markdown)
+        self.assertIn("### Needs your attention — 6\n", markdown)
+        self.assertEqual(len(rows), 6)
+        self.assertEqual([row.split("](https://github.com/quokkify/", 1)[1].split(")", 1)[0] for row in rows],
+                         ["conflict", "broken", "red-pr", "gap", "drift", "mystery"])
+        self.assertIn("Copier conflict in a.yml, b.json; nothing pushed.", rows[0])
+        self.assertIn("**Re-run**", rows[1])
+        self.assertIn("`.github/workflows/gitleaks.yml`", rows[3])
+        self.assertIn("Unrecognized status brand-new-status: raw detail.", rows[5])
+        self.assertTrue(all("| **" in row for row in rows))
+        self.assertIn("## Copier fleet: ❌ action required — 1 conflict · 1 failed · 1 PR with failed CI · "
+                      "1 configuration gap · 1 drift · 1 unrecognized status\n", markdown)
+        details = markdown.split("<summary>Commands and raw errors</summary>", 1)[1]
+        self.assertIn("gh workflow run copier-fleet-auto-update.yml -f repository=quokkify/conflict\n", details)
+        self.assertIn("<pre>HTTP 502</pre>", details)
+
+    def test_drift_only_dry_run_verdict(self) -> None:
+        result = fleet.Result("quokkify/a", "would-update", "x.yml", self.inventory(target="v3.3.0"))
+        run = {"mode": "dry-run", "template_ref": "v3.3.0", "trigger": None, "run_url": None, "generated_at": "2026-10-21T09:27:00+00:00"}
+        markdown = fleet.markdown_report([result], {"would-update": 1}, run)
+        self.assertTrue(markdown.startswith("## Copier fleet: 🟡 drift in 1\n"))
+        self.assertIn("Dry run · 2026-10-21 09:27 UTC · target v3.3.0\n", markdown)
+
+    def test_ready_and_pending_pull_requests_are_context_not_attention(self) -> None:
+        results = [
+            fleet.Result("quokkify/ready", "pull-request", "https://github.com/quokkify/ready/pull/1",
+                         self.inventory(target="v3.3.0"), self.pull_request("quokkify/ready", 1, "passed")),
+            fleet.Result("quokkify/pending", "pull-request", "https://github.com/quokkify/pending/pull/2",
+                         self.inventory(target="v3.3.0"), self.pull_request("quokkify/pending", 2, "pending")),
+            fleet.Result("quokkify/calm", "up-to-date", inventory=self.inventory()),
+        ]
+        markdown = fleet.markdown_report(results, {"pull-request": 2, "up-to-date": 1})
+        self.assertTrue(markdown.startswith("## Copier fleet: 🔀 2 PRs open\n"))
+        self.assertNotIn("Needs your attention", markdown)
+        self.assertIn("1 waiting on CI ([pending#2](https://github.com/quokkify/pending/pull/2))", markdown)
+        self.assertIn("1 ready to merge ([ready#1](https://github.com/quokkify/ready/pull/1))", markdown)
+        self.assertIn("| ⏳ | [pending](https://github.com/quokkify/pending) | v3.2.3 → v3.3.0 | ? | [#2](https://github.com/quokkify/pending/pull/2) open today · CI ⏳ |", markdown)
+
+    def test_run_block_is_written_to_json_and_context_without_guessing(self) -> None:
+        env = {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "quokkify/ci-kit",
+               "GITHUB_RUN_ID": "42", "GITHUB_EVENT_NAME": "schedule"}
+        run = fleet.run_metadata("write", "v3.3.0", env)
+        self.assertEqual({key: run[key] for key in ("mode", "template_ref", "trigger", "run_url")},
+                         {"mode": "write", "template_ref": "v3.3.0", "trigger": "schedule",
+                          "run_url": "https://github.com/quokkify/ci-kit/actions/runs/42"})
+        self.assertEqual(datetime.fromisoformat(run["generated_at"]).utcoffset().total_seconds(), 0)
+        bare = fleet.run_metadata("dry-run", None, {})
+        self.assertEqual((bare["trigger"], bare["run_url"]), (None, None))
+        result = fleet.Result("quokkify/a", "failed", "boom")
+        report = json.loads(fleet.json_report([result], {"failed": 1}, run))
+        self.assertEqual(report["schema_version"], 6)
+        self.assertEqual(report["run"], run)
+        self.assertNotIn("run", json.loads(fleet.json_report([result], {"failed": 1})))
+        markdown = fleet.markdown_report([result], {"failed": 1}, run)
+        self.assertIn("Write mode (schedule) · ", markdown)
+        self.assertIn("[job log](https://github.com/quokkify/ci-kit/actions/runs/42) · target v3.3.0", markdown)
+        self.assertIn("gh workflow run copier-fleet-auto-update.yml -R quokkify/ci-kit -f repository=quokkify/a\n", markdown)
+        unknown = fleet.markdown_report([result], {"failed": 1})
+        for guessed in ("Write mode", "Dry run", "target ", "job log", " -R "):
+            self.assertNotIn(guessed, unknown)
+
+    def test_untrusted_detail_is_escaped_without_visible_backslashes(self) -> None:
+        detail = "a|b <img src=x> `c` [l](https://evil.example) \\( *x*\n</pre># h"
+        results = [fleet.Result("quokkify/odd", "odd|status", detail), fleet.Result("quokkify/f", "failed", detail)]
+        markdown = fleet.markdown_report(results, {})
+        rows = self.attention_rows(markdown)
+        self.assertEqual([row.count("|") for row in rows], [5, 5])
+        self.assertIn("odd&#124;status: a&#124;b &#60;img src=x&#62; &#96;c&#96; &#91;l&#93;&#40;https&#58;//evil.example&#41; &#92;&#40; &#42;x&#42;", rows[1])
+        self.assertNotIn("<img", markdown)
+        self.assertNotIn("</pre>#", markdown)
+        self.assertNotIn("\\|", markdown)
+        self.assertNotIn("\\", "".join(rows))
+        self.assertIn("<pre>a|b &lt;img src=x&gt; `c` [l](https://evil.example) \\( *x*\n&lt;/pre&gt;# h</pre>", markdown)
+
+    def test_unmanaged_repositories_do_not_break_a_green_fleet(self) -> None:
+        results = [fleet.Result("quokkify/a", "up-to-date", inventory=self.inventory()),
+                   fleet.Result("quokkify/docs", "not-managed"), fleet.Result("quokkify/other", "foreign-template", "gh:acme/t"),
+                   fleet.Result("quokkify/skip", "not-applicable")]
+        markdown = fleet.markdown_report(results)
+        self.assertTrue(markdown.startswith("## Copier fleet: ✅ nothing to do\n\nAll 1 managed repositories are on **v3.2.3**.\n"))
+        self.assertIn("| — | [docs](https://github.com/quokkify/docs) | ? | ? | ? |", markdown)
+        self.assertIn("| ↗️ | [other](https://github.com/quokkify/other) | ? | ? | ? |", markdown)
+        self.assertIn("Legend: ✅ ok · — not managed or not applicable · ↗️ foreign template · `?` no evidence.", markdown)
+
+    def test_pull_request_without_a_parseable_url_stays_in_flight(self) -> None:
+        result = fleet.Result("quokkify/a", "pull-request", "created", self.inventory(target="v3.3.0"))
+        markdown = fleet.markdown_report([result])
+        self.assertTrue(markdown.startswith("## Copier fleet: 🔀 1 PR open\n"))
+        self.assertIn("0 of 1 managed repositories need nothing; the rest have PRs in flight.", markdown)
+        self.assertIn("1 open, CI unknown (a PR (link unavailable))", markdown)
+        self.assertIn("| 🔀 | [a](https://github.com/quokkify/a) | v3.2.3 → v3.3.0 | ? | PR (link unavailable) open ? · CI ? |", markdown)
+
+    def test_failing_ci_on_main_and_expired_exception_need_attention(self) -> None:
+        health = {"default_ci": {"checks": [{"context": "Tests", "status": "failed"}, {"context": "Lint", "status": "passed"}]},
+                  "required_checks": {"checks": [{"context": "Tests"}, {"context": "Lint"}]},
+                  "exception": {"status": "expired", "reason": "waiting on vendor", "expires_on": "2026-09-01"}}
+        results = [fleet.Result("quokkify/a", "up-to-date", inventory=self.inventory(), health=health)]
+        markdown = fleet.markdown_report(results)
+        rows = self.attention_rows(markdown)
+        self.assertTrue(markdown.startswith("## Copier fleet: ❌ action required — 1 failing CI on main\n"))
+        self.assertEqual(len(rows), 1)
+        self.assertIn("CI on `main` failing: Tests. Health exception expired on 2026-09-01: waiting on vendor.", rows[0])
+        self.assertIn("**Fix** the failing checks on the default branch. **Review** the exception: renew or remove it.", rows[0])
+        self.assertIn("| ❌ | [a](https://github.com/quokkify/a) | v3.2.3 | 1/2 ✅ · ❌ Tests | ? |", markdown)
+        expired_only = {"exception": health["exception"]}
+        markdown = fleet.markdown_report([fleet.Result("quokkify/a", "up-to-date", inventory=self.inventory(), health=expired_only)])
+        self.assertTrue(markdown.startswith("## Copier fleet: ❌ action required — 1 configuration gap\n"))
+
+    def test_rerun_command_only_for_failed_and_carries_requested_template_ref(self) -> None:
+        run = fleet.run_metadata("write", "v3.1.0", {}, "v3.1.0")
+        self.assertEqual(run["requested_template_ref"], "v3.1.0")
+        rejected = fleet.Result("quokkify/r", "migrate-rejected", "CIK-MIGRATE-003")
+        failed = fleet.Result("quokkify/f", "failed", "boom")
+        markdown = fleet.markdown_report([rejected, failed], None, run)
+        self.assertIn("gh workflow run copier-fleet-auto-update.yml -f repository=quokkify/f -f template-ref=v3.1.0\n", markdown)
+        self.assertNotIn("repository=quokkify/r", markdown)
+        latest = fleet.markdown_report([failed], None, fleet.run_metadata("write", "v3.3.0", {}))
+        self.assertNotIn("template-ref", latest)
+
+    def test_needs_update_first_in_write_mode_is_not_drift(self) -> None:
+        result = fleet.Result("quokkify/a", "needs-update-first", "legacy _commit is v3.0.0, target is v3.3.0")
+        markdown = fleet.markdown_report([result], None, fleet.run_metadata("write", "v3.3.0", {}))
+        self.assertTrue(markdown.startswith("## Copier fleet: ❌ action required — 1 needs update first\n"))
+        self.assertNotIn("🟡", markdown)
+        self.assertIn("| ⬆️ | [a](https://github.com/quokkify/a) | Needs update first: legacy _commit is v3.0.0, target is v3.3.0. | **Run** the template update first", markdown.replace("&#95;", "_"))
+        self.assertNotIn("gh workflow run", markdown)
+
+    @mock.patch.object(fleet, "discard_if_already_applied", return_value=False)
+    @mock.patch.object(fleet, "canonicalize_answers_source")
+    @mock.patch.object(fleet, "run")
+    def test_real_conflict_error_classifies_as_conflict(self, run_mock: mock.Mock, _: mock.Mock, __: mock.Mock) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            (repository / fleet.ANSWERS_FILE).write_text("_src_path: https://github.com/quokkify/ci-kit.git\n", encoding="utf-8")
+            run_mock.side_effect = lambda *args, **kwargs: (repository / "validate.yml.rej").write_text("-x\n", encoding="utf-8")
+            with self.assertRaises(fleet.FleetUpdateError) as raised:
+                fleet.update_template(repository, template_source="quokkify/ci-kit", template_ref="v2.21.5", env={})
+        self.assertTrue(str(raised.exception).startswith(fleet.CONFLICT_PREFIX))
+        facts = fleet.attention_facts(fleet.Result("quokkify/a", "failed", str(raised.exception)), None)
+        self.assertEqual([fact.bucket for fact in facts], ["conflict"])
+        self.assertIn("Copier conflict in validate.yml;", facts[0].happened)
+
+    def test_null_health_sections_render(self) -> None:
+        health = {"required_checks": None, "default_ci": None, "pull_request": None}
+        markdown = fleet.markdown_report([fleet.Result("quokkify/a", "up-to-date", inventory=self.inventory(), health=health)])
+        self.assertTrue(markdown.startswith("## Copier fleet: ✅ nothing to do\n"))
+        self.assertIn("| [a](https://github.com/quokkify/a) | v3.2.3 | ? | ? |", markdown)
+
+    def test_legend_lists_only_present_glyphs_and_text_encodes_mentions_and_math(self) -> None:
+        results = [fleet.Result("quokkify/ok", "up-to-date", inventory=self.inventory()),
+                   fleet.Result("quokkify/bad", "failed", "boom"),
+                   fleet.Result("quokkify/drift", "would-update", "x.yml", self.inventory(target="v3.3.0"))]
+        markdown = fleet.markdown_report(results)
+        self.assertTrue(markdown.endswith("\nLegend: ✅ ok · ❌ failed · 🟡 drift (dry run) · `?` no evidence.\n"))
+        self.assertEqual(fleet.markdown_text("@team $x$"), "&#64;team &#36;x&#36;")
+
+    def test_report_round_trips_through_json(self) -> None:
+        result = fleet.Result("quokkify/a", "pull-request", "https://github.com/quokkify/a/pull/1",
+                              self.inventory(modules=("core",), state="hybrid(validate)"), {"adoption": "different"}, {"findings": []})
+        payload = json.loads(fleet.json_report([result], {"pull-request": 1}))
+        self.assertEqual(fleet.results_from_report(payload), [result])
 
 
 class MigrateCommandLineTests(TestCase):

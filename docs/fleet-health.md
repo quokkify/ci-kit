@@ -14,8 +14,13 @@ is reporting evidence, not rollout approval. JSON schema version 5 preserves
 all previous inventory and summary keys, adds `repositories[].health` when
 requested, and adds `repositories[].template.modules` (module names from the
 repository's `.copier-answers.<module>.yml` files) and `.state` (`legacy`,
-`hybrid(<handed-off areas>)` or `modules`). Markdown and health tables gain a
-"Modules / state" column. Repositories whose module answers are untrusted get
+`hybrid(<handed-off areas>)` or `modules`). Version 6 adds a top-level `run`
+object: `mode` (`write` or `dry-run`), `template_ref` (resolved),
+`requested_template_ref` (the `--template-ref` input), `trigger`
+(`GITHUB_EVENT_NAME`), `run_url` (built from `GITHUB_SERVER_URL`,
+`GITHUB_REPOSITORY` and `GITHUB_RUN_ID`) and `generated_at`; unset values are
+`null`. A full rollout also records `rollout.stopped`, the reason the gate
+stopped, or `null`. Repositories whose module answers are untrusted get
 the statuses `foreign-module-template`, `unknown-module` or
 `unsafe-answers-file` and are not processed. The recorded `template.commit` remains the updater's inventory;
 `health.applied_template_version` comes from the actual default-branch answers
@@ -57,6 +62,31 @@ flagged. Exceptions never change adoption, checks, branch rules or exit codes.
 Invalid exception configuration fails before any update begins. Reports escape
 untrusted Markdown text, and API errors use generic reasons rather than copying
 raw CLI errors or credentials.
+
+## Markdown report
+
+The Markdown report (the job summary) opens with one verdict:
+`❌ action required` for failures, configuration gaps (including expired
+health exceptions), automation PRs with failed CI, failing required checks on
+the default branch, migrations that need an update first, unrecognized statuses
+or a stopped rollout; `🟡 drift in N` for
+dry-run drift only; `🔀 N PRs open` when PRs are only in flight; otherwise
+`✅ nothing to do`. A full rollout renders it once from the merged pilot and
+fanout results. The context line shows mode, time, job log and target only
+from the `run` block, never guessed, plus excluded repositories and the PRs
+waiting on CI or ready to merge. Those PRs are not attention rows.
+
+`Needs your attention` has one row per repository, ordered conflict, failure,
+PR with failed CI, failing CI on `main`, configuration gap, needs update first,
+drift, unrecognized status; any status the report does not know is shown with
+its raw value. Re-run commands (for failed repositories, repeating an explicit
+template ref) and raw errors follow in a collapsed block. `not-managed`,
+`not-applicable` and `foreign-template` repositories appear only in the fleet
+table and do not count as managed. The collapsed fleet table lists Template,
+CI on `main` (passed/required checks, with `?` for checks without exact-revision
+evidence) and the last automation PR; inventory columns stay in the JSON report.
+Untrusted text is neutralized with HTML entities in prose and table cells and
+with `<pre>` blocks for raw errors, so no backslash escapes show.
 
 Reading checks on private repositories may require Checks/Contents read access;
 reading classic protection may require additional administration read access.
