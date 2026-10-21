@@ -120,7 +120,7 @@ if __name__ == "__main__":
     arguments = parser.parse_args()
     if arguments.suite:
         raise SystemExit(run_suite(ROOT, arguments.suite))
-    if arguments.list_shards:
+    if arguments.list_shards is not None:
         raise SystemExit(list_shards(ROOT, arguments.list_shards))
     try:
         selected = parse_shard(arguments.shard) if arguments.shard else None
