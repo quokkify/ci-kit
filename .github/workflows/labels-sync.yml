@@ -8,7 +8,7 @@ on:
         type: string
         default: https://raw.githubusercontent.com/quokkify/.github/main/labels.yml
       delete-other-labels:
-        description: Delete labels listed in no config file. Keep false until issue kinds have moved to Issue Types.
+        description: Delete labels listed in no config file. Keep false until issue kinds have moved to Issue Types. Aliases still merge and delete a matched old label when its target already exists or several aliases of one target match.
         type: boolean
         default: false
       dry-run:

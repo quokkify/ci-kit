@@ -108,7 +108,7 @@ class LabelsCallerTemplateTests(unittest.TestCase):
 
     def test_triggers_cover_label_edits_dispatch_and_a_weekly_refresh(self) -> None:
         triggers = self.workflow["on"]
-        self.assertEqual(triggers["push"], {"branches": ["main"], "paths": [".github/labels.yml"]})
+        self.assertEqual(triggers["push"], {"branches": ["main"], "paths": [".github/labels.yml", ".github/workflows/labels.yml"]})
         self.assertEqual(len(triggers["schedule"]), 1)
         self.assertRegex(triggers["schedule"][0]["cron"], r"^\d+ \d+ \* \* [0-6]$")
         self.assertIs(triggers["workflow_dispatch"]["inputs"]["dry-run"]["default"], False)
