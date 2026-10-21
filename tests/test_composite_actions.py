@@ -1747,6 +1747,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                     "ARCHIVE_ROOT": str(root / "external-downloaded"),
                     "OUTPUT_ROOT": str(root / "external-expanded"),
                     "MATERIALIZE_ROOT": str(external_materialized),
+                    "MATERIALIZE_LAYOUT": "per-artifact",
                     "GITHUB_WORKSPACE": str(destination),
                 },
                 check=False,
@@ -1754,7 +1755,9 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 text=True,
             )
             self.assertEqual(external_extract.returncode, 0, external_extract.stderr)
-            nested_result = external_materialized / "service/build/allure-results/external-1-result.json"
+            nested_result = (
+                external_materialized / "external-allure-one/service/build/allure-results/external-1-result.json"
+            )
             self.assertEqual(json.loads(nested_result.read_text())["status"], "passed")
             external_report_results = destination / ".allure-input/results"
             self.assertEqual(self._run_pinned_action_handoff(external_report_results, external_materialized), 1)

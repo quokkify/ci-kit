@@ -278,6 +278,7 @@ jobs:
         ARCHIVE_ROOT: ${{ runner.temp }}/allure-archives
         OUTPUT_ROOT: ${{ runner.temp }}/allure-expanded
         MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}
+        MATERIALIZE_LAYOUT: ${{ needs.resolve.outputs.source-artifacts-directory != '' && 'per-artifact' || 'merged' }}
       run: python .toolkit/template/.github/allure/safe_extract.py.jinja
     - name: Upload validated source bundle for the generator
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
