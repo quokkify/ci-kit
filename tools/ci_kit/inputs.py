@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from functools import cache
 from importlib import resources
 from pathlib import Path
 
@@ -23,6 +24,7 @@ def extract_inputs(workflow_yml: Path) -> dict[str, dict]:
     return result
 
 
+@cache
 def load_inputs() -> dict[str, dict[str, dict]]:
     return json.loads(resources.files("ci_kit").joinpath("workflow_inputs.json").read_text())
 

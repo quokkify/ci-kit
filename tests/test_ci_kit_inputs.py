@@ -24,6 +24,9 @@ class WorkflowInputsTest(unittest.TestCase):
         self.assertEqual(table["python-version"], {"type": "string", "default": "3.14"})
         self.assertEqual(table["run-build"], {"type": "boolean", "default": False})
 
+    def test_table_is_read_once(self):
+        self.assertIs(load_inputs(), load_inputs())
+
     def test_names_round_trip(self):
         self.assertEqual(field_name("run-build"), "run_build")
         self.assertEqual(input_name("run_build"), "run-build")
