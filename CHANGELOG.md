@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.6.0](https://github.com/quokkify/ci-kit/compare/v3.5.0...v3.6.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **fleet:** opt-in auto-merge for Copier update pull requests ([#455](https://github.com/quokkify/ci-kit/issues/455)) ([165cdb3](https://github.com/quokkify/ci-kit/commit/165cdb37ec72126a41399c8a3c993cd42b8c6b14))
+
+
+### 🐛 Bug Fixes
+
+* **allure:** materialize external artifacts per artifact ([#460](https://github.com/quokkify/ci-kit/issues/460)) ([513d212](https://github.com/quokkify/ci-kit/commit/513d21226e3e5ddbbf1cac9bbd9c358ecadf83c6))
+* **fleet:** report each rollout repository once and credit the pilot gate ([#457](https://github.com/quokkify/ci-kit/issues/457)) ([ece129d](https://github.com/quokkify/ci-kit/commit/ece129d7696a44a1f2d65e983a158913681e5b66))
+
 ## [3.5.0](https://github.com/quokkify/ci-kit/compare/v3.4.0...v3.5.0) (2026-10-21)
 
 
