@@ -34,7 +34,8 @@
           },
           "path": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "pattern": "^(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
           },
           "build_command": {
             "type": "string"

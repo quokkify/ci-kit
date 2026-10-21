@@ -30,7 +30,8 @@
             "minLength": 1
           },
           "context": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
           },
           "dockerfile": {
             "type": "string"

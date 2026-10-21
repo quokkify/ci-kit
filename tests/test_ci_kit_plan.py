@@ -73,6 +73,21 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([(f.module, f.path) for f in found], [("node", ".ci/modules/node.yml")])
         self.assertIn("name Same is used by more than one component", found[0].message)
 
+    def test_schema_rejects_unsafe_paths_and_empty_versions(self):
+        cases = (
+            ("python", {"path": "../x"}), ("python", {"path": "a/../b"}), ("python", {"path": "a/*"}), ("python", {"python_version": ""}),
+            ("node", {"path": ".."}), ("node", {"node_version": ""}),
+            ("java", {"path": "../x"}),
+            ("docker", {"context": "../x"}), ("docker", {"context": "a?"}),
+        )
+        for module, bad in cases:
+            with self.subTest(module=module, bad=bad):
+                base = {"id": "a"} if module == "docker" else {"id": "a", "name": "A", "path": "."}
+                if module == "java":
+                    base["java_version"] = "21"
+                repo = modules_repo({module: [{**base, **bad}]})
+                self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
     def test_numeric_version_is_core_004(self):
         repo = modules_repo({"node": [{"id": "web", "name": "Web", "path": ".", "node_version": 24}]})
         self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
