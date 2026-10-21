@@ -204,15 +204,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(set(entry), {"id", "name", "path", *module_fields("java")})
 
     def test_plan_outputs_every_matrix(self):
-        repo = modules_repo({"python": [{"id": "app", "name": "App", "path": "."}]})
+        repo = rendered_repo("core", "python")
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "out"
-            self.run_cli("plan", "--repo", str(repo), "--github-output", str(target))
-            lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
-        self.assertEqual([entry["id"] for entry in json.loads(lines["python"])], ["app"])
+            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
+            pairs = [line.split("=", 1) for line in target.read_text().splitlines()]
+        self.assertEqual(code, 0)
+        self.assertEqual([key for key, _ in pairs], ["modules", "java", "python", "node", "docker", "codes", "commits"])
+        lines = dict(pairs)
+        self.assertEqual([entry["id"] for entry in json.loads(lines["python"])], ["app-python"])
         self.assertEqual(json.loads(lines["node"]), [])
         self.assertEqual(json.loads(lines["docker"]), [])
         self.assertEqual(json.loads(lines["java"]), [])
+        self.assertEqual(lines["codes"], "[]")
 
     def test_plan_writes_codes_and_commits_outputs(self):
         repo = rendered_repo("core", "java")
