@@ -49,14 +49,14 @@ The PR body is not trusted for check names: `checks_after` must equal the module
 - the marker is missing or malformed, or the PR head/base cannot be read;
 - `checks_after` differs from `CHECKS_AFTER`, or `checks_before` differs from the legacy `validate.yml` jobs;
 - `validate.yml` is missing, unreadable or defines no jobs, or has a job that calls a reusable workflow (`uses:`; its check context `<job name> / <called job>` cannot be derived);
-- there is no managed ruleset and the base branch has zero or several rulesets requiring checks, classic branch protection, or the one ruleset is not a repository ruleset, not `active`, hides `bypass_actors` from the token, has no or a duplicated `required_status_checks` rule, or changed between the read and the PUT;
+- there is no managed ruleset and the base branch has zero or several rulesets requiring checks, classic branch protection, a required check without a ruleset id, or the one ruleset is not a repository ruleset, has duplicated check contexts, not `active`, hides `bypass_actors` from the token, has no or a duplicated `required_status_checks` rule, or changed between the read and the PUT;
 - the managed ruleset is not `active`, does not target `refs/heads/<base branch>`, has no or a duplicated `required_status_checks` rule, a malformed rule, several code-scanning rules, or a code-scanning rule that is not a single CodeQL tool with a known threshold and the `security_alerts_threshold` reconcile would write;
 - a required check in the managed ruleset is bound to an integration (re-sending it would unbind it);
 - the effective required checks cannot be read ("required checks unavailable"), or their status is unknown;
 - a check being replaced is required by classic branch protection or another ruleset;
 - the new set would be empty.
 
-Exit 2 is a reconcile/API error, a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, or `--revert` without `--revision <40-hex SHA>`). For the managed ruleset, a PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`. The output names the edited ruleset (`ruleset.id`, `ruleset.name`, `ruleset.managed`).
+Exit 2 is a reconcile/API error (a message starting `PUT applied` means the ruleset was written but its readback did not match: inspect it before re-running), a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, or `--revert` without `--revision <40-hex SHA>`). For the managed ruleset, a PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`. The output names the edited ruleset (`ruleset.id`, `ruleset.name`, `ruleset.managed`).
 
 ## Rollback
 

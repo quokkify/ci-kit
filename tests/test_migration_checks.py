@@ -553,6 +553,27 @@ class UnmanagedRulesetTests(TestCase):
         self.assertEqual(code, 0, err)
         self.assertIsNotNone(self.client.put)
 
+    def test_missing_ruleset_id_refused(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=None))
+        self.refused(needle="no ruleset id")
+
+    def test_duplicated_context_refused(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Gitleaks", "Shared template contract"))
+        self.refused(needle="duplicated")
+
+    def test_malformed_readback_exit_2_names_applied_put(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"), readback=lambda put: ["not", "a", "ruleset"])
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 2)
+        self.assertIn("PUT applied", err)
+
+    def test_readback_mismatch_names_applied_put(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"),
+                                      readback=lambda put: {**put, "id": UNMANAGED_ID, "bypass_actors": []})
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 2)
+        self.assertIn("PUT applied", err)
+
     def test_unpublished_new_check_exit_2_without_write(self):
         self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"), published=("Gitleaks",))
         code, _, err = self.run_main(["--pr", "o/r#5"])

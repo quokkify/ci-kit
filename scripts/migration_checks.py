@@ -165,7 +165,9 @@ def unmanaged_ruleset(client: GitHubClient, repo: str, policy: dict[str, Any], n
     if any(item["source"] == "classic-protection" for item in entries):
         raise Refusal(f"managed ruleset {name} does not exist and classic branch protection requires checks; refusing")
     owners = {item.get("ruleset_id") for item in entries}
-    if len(owners) != 1 or not all(isinstance(owner, int) for owner in owners):
+    if not all(isinstance(owner, int) for owner in owners):
+        raise Refusal("a required check on the base branch has no ruleset id; refusing")
+    if len(owners) != 1:
         raise Refusal(f"managed ruleset {name} does not exist and {len(owners)} rulesets require checks on the base branch, not exactly one; refusing")
     identifier = owners.pop()
     detail = client.request("GET", f"/repos/{repo}/rulesets/{identifier}")
@@ -183,7 +185,10 @@ def unmanaged_ruleset(client: GitHubClient, repo: str, policy: dict[str, Any], n
     statuses = rules[0].get("parameters", {}).get("required_status_checks") if len(rules) == 1 and isinstance(rules[0].get("parameters"), dict) else None
     if not isinstance(statuses, list) or not all(isinstance(status, dict) and isinstance(status.get("context"), str) for status in statuses):
         raise Refusal(f"ruleset {identifier} required_status_checks rule is missing, malformed or duplicated; refusing")
-    return detail, [status["context"] for status in statuses]
+    contexts = [status["context"] for status in statuses]
+    if len(set(contexts)) != len(contexts):
+        raise Refusal(f"ruleset {identifier} has duplicated required check contexts; refusing")
+    return detail, contexts
 
 
 def patched_view(ruleset: dict[str, Any]) -> Any:
@@ -217,8 +222,12 @@ def patch_required_checks(client: GitHubClient, repo: str, detail: dict[str, Any
     if not isinstance(fresh, dict) or fresh.get("updated_at") != detail["updated_at"]:
         raise Refusal(f"ruleset {detail['id']} changed since it was read; refusing")
     client.request("PUT", path, desired)
-    if patched_view(client.request("GET", path)) != patched_view(desired):
-        raise ReconcileError(f"ruleset {detail['id']} readback mismatch; refusing to report success")
+    try:
+        matches = patched_view(client.request("GET", path)) == patched_view(desired)
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise ReconcileError(f"ruleset {detail['id']} PUT applied; readback is malformed: {exc}") from exc
+    if not matches:
+        raise ReconcileError(f"ruleset {detail['id']} PUT applied; readback differs from what was sent")
     return {"action": "update"}
 
 
