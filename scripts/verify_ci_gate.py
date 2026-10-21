@@ -146,7 +146,7 @@ PILOT_CHECKS = {
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
-HANDOFF_CONTEXTS = {"validate": {"Shared template contract": "ci / gate"}}
+HANDOFF_CONTEXTS = {"validate": {"Shared template contract": "ci / gate", "App Python / ci": "ci / gate"}}
 PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.

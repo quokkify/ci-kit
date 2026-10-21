@@ -193,6 +193,9 @@ class PilotGateTests(unittest.TestCase):
         self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("validate", "validate")), handed)
         self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("other",)), legacy)
 
+    def test_handed_off_validate_replaces_component_contexts(self):
+        self.assertEqual(gate.pilot_contexts("quokkify/skills", 7, handed_off=("validate",)), ("gitleaks", "ci / gate"))
+
     def test_legacy_pilot_contexts_are_unchanged(self):
         self.assertEqual(gate.pilot_contexts("quokkify/skills", None),
                          ("gitleaks", "App Python / ci", "Shared template contract"))
