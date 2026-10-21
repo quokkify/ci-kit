@@ -15,6 +15,7 @@ import rollout_copier_fleet as rollout
 import verify_ci_gate as gate
 
 SHA = "a" * 40
+GITHUB_RUN_VARIABLES = ("GITHUB_EVENT_NAME", "GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
 OTHER = "b" * 40
 REPO = "quokkify/skills"
 
@@ -308,7 +309,8 @@ class RolloutTests(unittest.TestCase):
              patch.object(rollout, "wait_until"), \
              patch.object(rollout, "run_update", side_effect=update), \
              patch.object(rollout, "verify_pilot", side_effect=verify), \
-             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")), \
+             patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
             destination = Path(temporary) / "report.json"
             markdown = Path(temporary) / "report.md"
             rollout.rollout(["--write", "--public-only", "--json-report", str(destination), "--markdown-report", str(markdown)])
