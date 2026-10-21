@@ -3359,6 +3359,320 @@ class FleetReportTests(TestCase):
         self.assertEqual(fleet.results_from_report(payload), [result])
 
 
+class AutoMergeTests(TestCase):
+    URL = "https://github.com/quokkify/example/pull/7"
+    HEAD = "c" * 40
+    OLD_HEAD = "d" * 40
+    REPOSITORY = fleet.Repository("quokkify/example", "main")
+    VIEW = ["pr", "view", "7", "--repo", "quokkify/example", "--json",
+            "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"]
+    MERGE = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--auto", "--squash", "--match-head-commit", HEAD]
+    DISABLE = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--disable-auto"]
+    HERMETIC_ENV = {"GH_TOKEN": "t", "GITHUB_TOKEN": "", "GITHUB_EVENT_NAME": "", "GITHUB_SERVER_URL": "",
+                    "GITHUB_REPOSITORY": "", "GITHUB_RUN_ID": "", "GITHUB_ACTIONS": ""}
+
+    def settings(self, **overrides):
+        return {"allow_auto_merge": True, "allow_squash_merge": True, **overrides}
+
+    def pull(self, **overrides):
+        return {"state": "OPEN", "baseRefName": "main", "mergeable": "MERGEABLE", "headRefOid": self.HEAD,
+                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH, **overrides}
+
+    def enable(self, *, settings=None, pulls=None, merge=(0, ""), disable=(0, ""), url=None, **overrides):
+        arguments = {"branch": fleet.DEFAULT_BRANCH, "head": self.HEAD, "applied": "v3.2.0", "target": "v3.3.0",
+                     "requested_template_ref": None, **overrides}
+        views = list(pulls or [self.pull()])
+
+        def fake_gh_json(arguments, **_):
+            if arguments[0] == "pr":
+                if isinstance(views[0], Exception):
+                    raise views[0]
+                return views.pop(0) if len(views) > 1 else views[0]
+            if isinstance(settings, Exception):
+                raise settings
+            return self.settings() if settings is None else settings
+
+        def fake_run(command, **_):
+            returncode, stderr = disable if "--disable-auto" in command else merge
+            return subprocess.CompletedProcess(command, returncode, "", stderr)
+
+        with mock.patch.object(fleet, "gh_json", side_effect=fake_gh_json) as gh_mock, \
+             mock.patch.object(fleet, "run", side_effect=fake_run) as run_mock, \
+             mock.patch.object(fleet.time, "sleep") as sleep_mock:
+            outcome = fleet.enable_auto_merge(self.REPOSITORY, url or self.URL, env={}, **arguments)
+        self.sleep_mock = sleep_mock
+        return outcome, [call.args[0] for call in gh_mock.call_args_list], [call.args[0] for call in run_mock.call_args_list]
+
+    def test_enables_squash_auto_merge_bound_to_the_pushed_head(self) -> None:
+        outcome, reads, commands = self.enable()
+        self.assertEqual(outcome, {"state": "enabled", "reason": f"auto-merge enabled for {self.HEAD}"})
+        self.assertEqual(reads, [self.VIEW, ["api", "repos/quokkify/example"]])
+        self.assertEqual(commands, [self.MERGE])
+
+    def test_without_a_push_binds_to_the_current_pull_request_head(self) -> None:
+        _, _, commands = self.enable(head=None, pulls=[self.pull(headRefOid=self.OLD_HEAD)])
+        self.assertEqual(commands[-1][-1], self.OLD_HEAD)
+
+    def test_ineligible_pull_requests_are_skipped_with_an_exact_reason(self) -> None:
+        cases = (
+            ({"branch": "ci-kit/migrate-core"}, "not the automation update branch"),
+            ({"pulls": [self.pull(isCrossRepository=True)]}, "pull request is not the updater's own branch"),
+            ({"pulls": [self.pull(headRefName="feature")]}, "pull request is not the updater's own branch"),
+            ({"requested_template_ref": "v3.3.0"}, "target is not a release tag resolved by the run"),
+            ({"target": "main"}, "target is not a release tag resolved by the run"),
+            ({"applied": "0f1e2d3c"}, "applied version is not a release tag"),
+            ({"applied": "v3.4.0"}, "target v3.3.0 is older than v3.4.0"),
+            ({"applied": "v3.10.0", "target": "v3.9.0"}, "target v3.9.0 is older than v3.10.0"),
+            ({"applied": "v2.9.0", "target": "v3.0.0"}, "major version bump v2.9.0 → v3.0.0 needs a human"),
+            ({"applied": "v0.3.5", "target": "v0.4.0"}, "major version bump v0.3.5 → v0.4.0 needs a human"),
+            ({"modules": [{"module": "core", "from": "v2.9.0"}]}, "major version bump core v2.9.0 → v3.3.0 needs a human"),
+            ({"modules": [{"module": "core", "from": ""}]}, "module core applied version is not a release tag"),
+            ({"settings": self.settings(allow_auto_merge=False)}, "repository has auto-merge disabled"),
+            ({"settings": self.settings(allow_squash_merge=False)}, "repository does not allow squash merge"),
+            ({"pulls": [self.pull(mergeable="CONFLICTING")]}, "pull request has merge conflicts"),
+            ({"pulls": [self.pull(baseRefName="develop")]}, "pull request base is not the default branch"),
+            ({"pulls": [self.pull(state="CLOSED")]}, "pull request is not open"),
+        )
+        for overrides, reason in cases:
+            with self.subTest(reason=reason, overrides=overrides):
+                outcome, _, commands = self.enable(**overrides)
+                self.assertEqual(outcome, {"state": "skipped", "reason": reason})
+                self.assertEqual(commands, [])
+
+    def test_minor_patch_and_repair_only_updates_are_eligible(self) -> None:
+        for applied, target, modules in (("v3.2.9", "v3.3.0", []), ("v3.3.0", "v3.3.1", []), ("v0.4.0", "v0.4.1", []),
+                                         ("v3.3.0", "v3.3.0", []), ("v0.4.1", "v0.4.1", [{"module": "core", "from": "v0.4.1"}]),
+                                         ("v3.2.0", "v3.3.0", [{"module": "core", "from": "v3.1.0"}])):
+            with self.subTest(applied=applied, target=target):
+                self.assertEqual(self.enable(applied=applied, target=target, modules=modules)[0]["state"], "enabled")
+
+    def test_missing_or_unreadable_settings_fail_rather_than_skip(self) -> None:
+        for settings in ({"allow_squash_merge": True}, {"allow_auto_merge": True}, [], "nope"):
+            with self.subTest(settings=settings):
+                outcome, _, commands = self.enable(settings=settings)
+                self.assertEqual(outcome, {"state": "failed", "reason": "repository auto-merge setting unreadable (token permissions?)"})
+                self.assertEqual(commands, [])
+
+    def test_failing_reads_and_unexpected_errors_fail_the_auto_merge_only(self) -> None:
+        cases = (
+            ({"pulls": [fleet.FleetUpdateError("gh pr view failed (1): no pull requests found")]}, "gh pr view failed (1): no pull requests found"),
+            ({"settings": fleet.FleetUpdateError("gh api failed (1): HTTP 403")}, "gh api failed (1): HTTP 403"),
+            ({"settings": KeyError("boom")}, "'boom'"),
+        )
+        for overrides, reason in cases:
+            with self.subTest(reason=reason):
+                outcome, _, commands = self.enable(**overrides)
+                self.assertEqual(outcome, {"state": "failed", "reason": reason})
+                self.assertEqual(commands, [])
+
+    def test_pull_request_url_of_another_repository_fails_before_any_call(self) -> None:
+        outcome, reads, commands = self.enable(url="https://github.com/someone/fork/pull/7")
+        self.assertEqual(outcome, {"state": "failed", "reason": "pull request URL does not belong to the repository"})
+        self.assertEqual((reads, commands), ([], []))
+
+    def test_rejected_merge_request_fails_with_the_sanitized_github_message(self) -> None:
+        outcome, _, _ = self.enable(merge=(1, "Head branch was modified\x1b[0m\n"))
+        self.assertEqual(outcome, {"state": "failed", "reason": "Head branch was modified\\x1b[0m"})
+
+    def test_already_merged_pull_request_is_reported_without_a_request(self) -> None:
+        outcome, reads, commands = self.enable(pulls=[self.pull(state="MERGED")])
+        self.assertEqual(outcome["state"], "merged")
+        self.assertEqual((reads, commands), ([self.VIEW], []))
+
+    def test_auto_merge_already_enabled_on_the_same_head_is_not_requested_again(self) -> None:
+        outcome, _, commands = self.enable(pulls=[self.pull(autoMergeRequest={"mergeMethod": "SQUASH"})])
+        self.assertEqual(outcome, {"state": "enabled", "reason": "auto-merge already enabled"})
+        self.assertEqual(commands, [])
+
+    def test_after_this_run_disarmed_a_stale_read_still_gets_a_fresh_request(self) -> None:
+        armed = self.pull(autoMergeRequest={"mergeMethod": "SQUASH"})
+        outcome, _, commands = self.enable(pulls=[armed], disarmed=True)
+        self.assertEqual(outcome, {"state": "enabled", "reason": f"auto-merge enabled for {self.HEAD}"})
+        self.assertEqual(commands, [self.MERGE])
+        outcome, _, commands = self.enable(pulls=[armed], disarmed=True, applied="v2.9.0")
+        self.assertEqual(outcome, {"state": "skipped", "reason": "major version bump v2.9.0 → v3.3.0 needs a human"})
+        self.assertEqual(commands, [])
+
+    def test_ineligible_pull_request_with_armed_auto_merge_is_disarmed(self) -> None:
+        armed = self.pull(autoMergeRequest={"mergeMethod": "SQUASH"})
+        outcome, _, commands = self.enable(pulls=[armed], applied="v2.9.0")
+        self.assertEqual(outcome, {"state": "skipped", "reason": "major version bump v2.9.0 → v3.3.0 needs a human; existing auto-merge disabled"})
+        self.assertEqual(commands, [self.DISABLE])
+        outcome, _, _ = self.enable(pulls=[armed], applied="v2.9.0", disable=(1, "HTTP 403"))
+        self.assertEqual(outcome, {"state": "failed", "reason": "major version bump v2.9.0 → v3.3.0 needs a human; could not disable existing auto-merge: HTTP 403"})
+        outcome, _, commands = self.enable(pulls=[armed], merge=(1, "x"), settings={"allow_auto_merge": True})
+        self.assertEqual(outcome["reason"], "repository auto-merge setting unreadable (token permissions?); existing auto-merge disabled")
+        self.assertEqual(commands, [self.DISABLE])
+
+    def test_lagging_pull_request_head_is_reread_then_skipped(self) -> None:
+        stale = self.pull(headRefOid=self.OLD_HEAD)
+        outcome, reads, commands = self.enable(pulls=[stale, stale, self.pull()])
+        self.assertEqual(outcome["state"], "enabled")
+        self.assertEqual(reads.count(self.VIEW), 3)
+        self.assertEqual(commands, [self.MERGE])
+        outcome, reads, commands = self.enable(pulls=[stale])
+        self.assertEqual(outcome, {"state": "skipped", "reason": "pull request head not yet updated"})
+        self.assertEqual((reads.count(self.VIEW), self.sleep_mock.call_count, commands), (4, 3, []))
+
+    def test_any_failed_disable_request_is_an_error(self) -> None:
+        for returncode, stderr, expected in ((0, "", None), (1, "GraphQL: Auto merge is not enabled", "GraphQL: Auto merge is not enabled"),
+                                             (1, "HTTP 403: Resource not accessible", "HTTP 403: Resource not accessible"),
+                                             (1, "", "gh pr merge --disable-auto exited 1")):
+            with self.subTest(stderr=stderr), \
+                 mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], returncode, "", stderr)) as run_mock:
+                self.assertEqual(fleet.disable_auto_merge(self.REPOSITORY, "7", env={}), expected)
+                run_mock.assert_called_once_with(self.DISABLE, env={}, check=False)
+
+    def test_force_push_reports_the_replaced_remote_head(self) -> None:
+        outputs = {"ls-remote": self.OLD_HEAD + "\trefs/heads/branch\n", "HEAD^{tree}": "t" * 40, "HEAD^": "p" * 40, "HEAD": self.HEAD}
+
+        def fake_run(command, **_):
+            key = next((arg for arg in reversed(command) if arg in outputs), None)
+            return subprocess.CompletedProcess(command, 0, outputs.get(key, ""), "")
+
+        for remote_tree, expected in (("t" * 40, []), ("x" * 40, [self.OLD_HEAD])):
+            remote = {"commit": {"tree": {"sha": remote_tree}}, "parents": [{"sha": "p" * 40}]}
+            replaced: list[str] = []
+            with self.subTest(remote_tree=remote_tree), mock.patch.object(fleet, "run", side_effect=fake_run), \
+                 mock.patch.object(fleet, "gh_json", return_value=remote), tempfile.TemporaryDirectory() as temporary:
+                fleet.push_automation_branch(self.REPOSITORY, Path(temporary), branch="branch", env={}, replaced=replaced)
+            self.assertEqual(replaced, expected)
+
+    def test_only_the_repositorys_own_pull_request_is_reused(self) -> None:
+        fork = {"url": "https://github.com/someone/example/pull/9", "number": 9, "isCrossRepository": True,
+                "headRepositoryOwner": {"login": "someone"}, "headRefName": fleet.DEFAULT_BRANCH}
+        other = {**fork, "url": "https://github.com/quokkify/example/pull/8", "isCrossRepository": False,
+                 "headRepositoryOwner": {"login": "Quokkify"}, "headRefName": "other"}
+        own = {**other, "url": self.URL, "headRefName": fleet.DEFAULT_BRANCH}
+        for listed, expected in (([fork, other, own], self.URL), ([fork, other], "https://github.com/quokkify/example/pull/10")):
+            with self.subTest(expected=expected), mock.patch.object(fleet, "gh_json", return_value=listed) as gh_mock, \
+                 mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, "https://github.com/quokkify/example/pull/10\n", "")) as run_mock:
+                url = fleet.ensure_pull_request(self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, changed=["a.yml"], env={})
+            self.assertEqual(url, expected)
+            self.assertEqual(gh_mock.call_args.args[0][-1], "url,number,isCrossRepository,headRepositoryOwner,headRefName")
+            self.assertEqual(run_mock.called, expected != self.URL)
+
+    def test_pull_request_body_mentions_auto_merge_only_with_the_flag(self) -> None:
+        bodies = {}
+        for auto_merge in (False, True):
+            with mock.patch.object(fleet, "gh_json", return_value=[]), \
+                 mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, self.URL, "")) as run_mock:
+                fleet.ensure_pull_request(self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, changed=["a.yml"], env={}, auto_merge=auto_merge)
+            command = run_mock.call_args.args[0]
+            bodies[auto_merge] = command[command.index("--body") + 1]
+        self.assertIn("while leaving merge approval to maintainers.", bodies[False])
+        self.assertNotIn("leaving merge approval", bodies[True])
+        self.assertIn("may enable auto-merge when the repository allows it; major version bumps always wait for a maintainer.", bodies[True])
+
+    def write_update(self, *, replace_head=False, disable=(0, ""), armed=True, **kwargs):
+        def push(*_, replaced=None, **__):
+            if replace_head:
+                replaced.append(self.OLD_HEAD)
+            return self.HEAD
+
+        with mock.patch.object(fleet, "fetch_answers_files", return_value={"legacy": "_src_path: gh:quokkify/ci-kit\n"}), \
+             mock.patch.object(fleet, "clone_repository", side_effect=cloned_answers("_commit: v3.2.0\n_src_path: gh:quokkify/ci-kit\n")), \
+             mock.patch.object(fleet, "update_template", return_value=[".github/workflows/validate.yml"]), \
+             mock.patch.object(fleet, "push_automation_branch", side_effect=push), \
+             mock.patch.object(fleet, "ensure_pull_request", return_value=self.URL) as pr_mock, \
+             mock.patch.object(fleet, "gh_json", side_effect=armed if isinstance(armed, Exception) else None,
+                               return_value={"autoMergeRequest": {"mergeMethod": "SQUASH"} if armed else None}) as gh_mock, \
+             mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], *disable[:1], "", disable[1])) as run_mock, \
+             mock.patch.object(fleet, "enable_auto_merge", return_value={"state": "enabled", "reason": "r"}) as merge_mock, \
+             tempfile.TemporaryDirectory() as temporary:
+            result = fleet.process_repository(self.REPOSITORY, expected_template="quokkify/ci-kit", branch=fleet.DEFAULT_BRANCH,
+                                              dry_run=False, template_ref="v3.3.0", env={}, workspace=Path(temporary), **kwargs)
+        self.reads = [call.args[0] for call in gh_mock.call_args_list]
+        return result, merge_mock, pr_mock, [call.args[0] for call in run_mock.call_args_list]
+
+    def test_write_update_evaluates_the_pull_request_it_refreshed(self) -> None:
+        result, merge_mock, pr_mock, commands = self.write_update(auto_merge=True, requested_template_ref=None)
+        self.assertEqual(result.auto_merge, {"state": "enabled", "reason": "r"})
+        self.assertTrue(pr_mock.call_args.kwargs["auto_merge"])
+        self.assertEqual(merge_mock.call_args.args, (self.REPOSITORY, self.URL))
+        self.assertEqual(merge_mock.call_args.kwargs, {"branch": fleet.DEFAULT_BRANCH, "head": self.HEAD, "applied": "v3.2.0",
+                                                       "target": "v3.3.0", "requested_template_ref": None, "env": {}, "modules": [],
+                                                       "disarmed": False})
+        self.assertEqual((commands, self.reads), ([], []))
+
+    def test_write_update_without_the_flag_never_enables_auto_merge(self) -> None:
+        result, merge_mock, pr_mock, commands = self.write_update()
+        self.assertIsNone(result.auto_merge)
+        merge_mock.assert_not_called()
+        self.assertNotIn("auto_merge", pr_mock.call_args.kwargs)
+        self.assertEqual(commands, [])
+
+    def test_new_head_on_an_existing_pull_request_disarms_auto_merge_even_without_the_flag(self) -> None:
+        result, merge_mock, _, commands = self.write_update(replace_head=True)
+        self.assertEqual(self.reads, [["pr", "view", "7", "--repo", "quokkify/example", "--json", "autoMergeRequest"]])
+        self.assertEqual(commands, [self.DISABLE])
+        self.assertIsNone(result.auto_merge)
+        merge_mock.assert_not_called()
+
+    def test_new_head_without_armed_auto_merge_sends_no_disable_request(self) -> None:
+        result, merge_mock, _, commands = self.write_update(replace_head=True, armed=False, auto_merge=True)
+        self.assertEqual(commands, [])
+        self.assertFalse(merge_mock.call_args.kwargs["disarmed"])
+
+    def test_failed_disarm_after_a_new_head_is_recorded_on_the_pull_request(self) -> None:
+        for overrides, reason in (({"disable": (1, "HTTP 403")}, "HTTP 403"),
+                                  ({"armed": fleet.FleetUpdateError("gh pr view failed (1): HTTP 502")}, "gh pr view failed (1): HTTP 502")):
+            with self.subTest(reason=reason):
+                result, merge_mock, _, _ = self.write_update(replace_head=True, auto_merge=True, **overrides)
+                self.assertEqual(result.status, "pull-request")
+                self.assertEqual(result.auto_merge, {"state": "failed", "reason": f"could not disable auto-merge after pushing a new head: {reason}"})
+                merge_mock.assert_not_called()
+
+    def test_disarmed_new_head_is_passed_to_the_fresh_auto_merge_request(self) -> None:
+        _, merge_mock, _, commands = self.write_update(replace_head=True, auto_merge=True)
+        self.assertEqual(commands, [self.DISABLE])
+        self.assertTrue(merge_mock.call_args.kwargs["disarmed"])
+
+    def test_flag_is_rejected_with_dry_run_and_migrate(self) -> None:
+        for argv in (["--dry-run", "--auto-merge"], ["--write", "--auto-merge", "--migrate", "core"]):
+            with self.subTest(argv=argv), mock.patch("sys.stderr", new_callable=StringIO) as stderr, \
+                 self.assertRaises(SystemExit) as exit_context:
+                fleet.main(argv)
+            self.assertEqual(exit_context.exception.code, 2)
+            self.assertIn("--auto-merge cannot be combined", stderr.getvalue())
+
+    def test_run_block_records_the_flag_and_forwards_it(self) -> None:
+        outcome = fleet.Result("quokkify/example", "pull-request", self.URL, auto_merge={"state": "failed", "reason": "r"})
+        with mock.patch.dict("os.environ", self.HERMETIC_ENV), \
+             mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.object(fleet, "discover_repositories", return_value=[self.REPOSITORY]), \
+             mock.patch.object(fleet, "resolve_template_ref", return_value="v3.3.0"), \
+             mock.patch.object(fleet, "process_repository", return_value=outcome) as process_mock, \
+             redirect_stdout(StringIO()), tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "report.json"
+            self.assertEqual(fleet.main(["--write", "--auto-merge", "--json-report", str(report_path)]), 0)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual((process_mock.call_args.kwargs["auto_merge"], process_mock.call_args.kwargs["requested_template_ref"]), (True, None))
+        self.assertEqual(report["schema_version"], 6)
+        self.assertEqual((report["run"]["auto_merge"], report["run"]["trigger"], report["run"]["run_url"]), (True, None, None))
+        self.assertEqual(report["repositories"][0]["auto_merge"], {"state": "failed", "reason": "r"})
+        self.assertFalse(fleet.run_metadata("write", "v3.3.0", {})["auto_merge"])
+
+    def test_json_report_round_trips_and_stays_additive(self) -> None:
+        merged = fleet.Result("quokkify/a", "pull-request", "https://github.com/quokkify/a/pull/1", auto_merge={"state": "merged", "reason": "r"})
+        plain = fleet.Result("quokkify/b", "up-to-date")
+        payload = json.loads(fleet.json_report([merged, plain], {}))
+        self.assertNotIn("auto_merge", payload["repositories"][1])
+        self.assertEqual(fleet.results_from_report(payload), [merged, plain])
+
+    def test_failed_auto_merge_is_an_attention_row_and_progress_is_context(self) -> None:
+        def result(name, number, state):
+            return fleet.Result(f"quokkify/{name}", "pull-request", f"https://github.com/quokkify/{name}/pull/{number}",
+                                auto_merge={"state": state, "reason": "Head branch was modified" if state == "failed" else "r"})
+        markdown = fleet.markdown_report([result("a", 1, "failed"), result("b", 2, "enabled"), result("c", 3, "merged"), result("d", 4, "skipped")])
+        self.assertTrue(markdown.startswith("## Copier fleet: ❌ action required — 1 auto-merge failed\n"))
+        self.assertIn("### Needs your attention — 1", markdown)
+        self.assertIn("Auto-merge could not be enabled on PR [#1](https://github.com/quokkify/a/pull/1): Head branch was modified.", markdown)
+        self.assertIn("**Fix** the cause", markdown)
+        self.assertIn(" · 1 auto-merging · 1 merged", markdown)
+        self.assertNotIn("[d](https://github.com/quokkify/d) | Auto-merge", markdown)
+
+
 class MigrateCommandLineTests(TestCase):
     ENV = {"GITHUB_TOKEN": "t", "GH_TOKEN": ""}
 

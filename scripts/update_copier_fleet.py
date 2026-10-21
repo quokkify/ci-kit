@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -93,6 +94,7 @@ class Result:
     inventory: "TemplateInventory | None" = None
     health: dict[str, Any] | None = None
     migration: dict[str, Any] | None = None
+    auto_merge: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -987,6 +989,7 @@ ATTENTION_BUCKETS = (
     AttentionBucket("conflict", "conflict", "conflicts", "❌"),
     AttentionBucket("failed", "failed", "failed", "❌"),
     AttentionBucket("pr-ci", "PR with failed CI", "PRs with failed CI", "❌"),
+    AttentionBucket("auto-merge", "auto-merge failed", "auto-merge failed", "❌"),
     AttentionBucket("main-ci", "failing CI on main", "failing CI on main", "❌"),
     AttentionBucket("gap", "configuration gap", "configuration gaps", "⚠️"),
     AttentionBucket("update-first", "needs update first", "need update first", "⬆️"),
@@ -1111,6 +1114,9 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("gap", f"Health exception expired on {markdown_text(str(exception.get('expires_on')))}: {markdown_text(str(exception.get('reason')))}.", "**Review** the exception: renew or remove it."))
     if pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) == "failed":
         facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌.", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
+    if (result.auto_merge or {}).get("state") == "failed":
+        target = f" on PR {pull_request_link(pull_request)}" if pull_request else ""
+        facts.append(Fact("auto-merge", f"Auto-merge could not be enabled{target}: {markdown_text(str(result.auto_merge.get('reason')))}.", "**Fix** the cause, then re-run with `--auto-merge` or merge the PR manually."))
     failing = [str(check.get("context")) for check in (health.get("default_ci") or {}).get("checks", []) if isinstance(check, dict) and check.get("status") == "failed"]
     if failing:
         facts.append(Fact("main-ci", "CI on `main` failing: " + ", ".join(markdown_text(context) for context in failing) + ".", "**Fix** the failing checks on the default branch."))
@@ -1242,6 +1248,10 @@ def _context(rows: Sequence[ReportRow], excluded: int, run: dict[str, Any], roll
         pulls = [pull for pull in in_flight if (pull_request_ci(pull) == ci if ci else pull_request_ci(pull) not in {"pending", "passed"})]
         if pulls:
             context.append(f"{len(pulls)} {label} (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")")
+    states = [(row.result.auto_merge or {}).get("state") for row in rows]
+    for state, label in (("enabled", "auto-merging"), ("merged", "merged")):
+        if states.count(state):
+            context.append(f"{states.count(state)} {label}")
     return " · ".join(context)
 
 
@@ -1347,12 +1357,19 @@ def markdown_report(
     return "\n".join(lines) + "\n"
 
 
-def run_metadata(mode: str, template_ref: str | None, env: dict[str, str], requested_template_ref: str | None = None) -> dict[str, Any]:
+def run_metadata(
+    mode: str,
+    template_ref: str | None,
+    env: dict[str, str],
+    requested_template_ref: str | None = None,
+    auto_merge: bool = False,
+) -> dict[str, Any]:
     server, repository, run_id = (env.get(name, "").strip() for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
     return {
         "mode": mode,
         "template_ref": template_ref,
         "requested_template_ref": requested_template_ref,
+        "auto_merge": auto_merge,
         "trigger": env.get("GITHUB_EVENT_NAME") or None,
         "run_url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository and run_id else None,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -1379,7 +1396,7 @@ def results_from_report(payload: dict[str, Any]) -> list[Result]:
                 modules=tuple(template.get("modules", ())),
                 state=template.get("state", "legacy"),
             )
-        results.append(Result(item["repository"], item["status"], item.get("detail", ""), inventory, item.get("health"), item.get("migration")))
+        results.append(Result(item["repository"], item["status"], item.get("detail", ""), inventory, item.get("health"), item.get("migration"), item.get("auto_merge")))
     return results
 
 
@@ -1413,6 +1430,8 @@ def json_report(results: Sequence[Result], counts: dict[str, int], run: dict[str
             item["health"] = result.health
         if result.migration is not None:
             item["migration"] = result.migration
+        if result.auto_merge is not None:
+            item["auto_merge"] = result.auto_merge
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
@@ -1950,6 +1969,7 @@ def push_automation_branch(
     branch: str,
     env: dict[str, str],
     message: str = PR_TITLE,
+    replaced: list[str] | None = None,
 ) -> str:
     run(["git", "switch", "-C", branch], cwd=repository_path, env=env)
     run(["git", "config", "user.name", "quokkify-copier[bot]"], cwd=repository_path)
@@ -1972,6 +1992,8 @@ def push_automation_branch(
         if remote_has_same_change(repository, repository_path, remote_sha, env=env):
             return remote_sha
         push.append(f"--force-with-lease=refs/heads/{branch}:{remote_sha}")
+        if replaced is not None:
+            replaced.append(remote_sha)
     push.extend(["origin", f"HEAD:refs/heads/{branch}"])
     run(push, cwd=repository_path, env=env)
     return git_head(repository_path)
@@ -2089,8 +2111,10 @@ def ensure_pull_request(
     changed: Sequence[str],
     env: dict[str, str],
     modules: Sequence[dict[str, str]] = (),
+    auto_merge: bool = False,
 ) -> str:
-    existing = gh_json(
+    owner = repository.name_with_owner.split("/", 1)[0].casefold()
+    listed = gh_json(
         [
             "pr",
             "list",
@@ -2101,10 +2125,18 @@ def ensure_pull_request(
             "--head",
             branch,
             "--json",
-            "url",
+            "url,number,isCrossRepository,headRepositoryOwner,headRefName",
         ],
         env=env,
     )
+    existing = [
+        pull
+        for pull in listed
+        if isinstance(pull, dict)
+        and pull.get("isCrossRepository") is False
+        and str((pull.get("headRepositoryOwner") or {}).get("login", "")).casefold() == owner
+        and pull.get("headRefName") == branch
+    ]
     if existing:
         return existing[0]["url"]
 
@@ -2113,8 +2145,13 @@ def ensure_pull_request(
         "Automated `copier update` from the shared "
         "[`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) template.\n\n"
         "This keeps the organization baseline (validation, CodeQL, Gitleaks, "
-        "Release Please, and Renovate) synchronized while leaving merge approval to maintainers.\n\n"
-        "## Generated changes\n\n"
+        "Release Please, and Renovate) synchronized "
+        + (
+            "and may enable auto-merge when the repository allows it; major version bumps always wait for a maintainer.\n\n"
+            if auto_merge
+            else "while leaving merge approval to maintainers.\n\n"
+        )
+        + "## Generated changes\n\n"
         + "\n".join(f"- `{path}`" for path in changed)
         + module_table(modules)
         + "\n\n## Verification\n\n"
@@ -2145,6 +2182,129 @@ def ensure_pull_request(
     return completed.stdout.strip()
 
 
+AUTO_MERGE_HEAD_POLL_SECONDS = 2
+AUTO_MERGE_HEAD_POLLS = 3
+AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"
+
+
+def pull_request_number(repository: Repository, url: str) -> str | None:
+    match = PULL_REQUEST_URL_PATTERN.fullmatch(url)
+    return match[2] if match and match[1].casefold() == repository.name_with_owner.casefold() else None
+
+
+def release_version(tag: str | None) -> tuple[int, int, int] | None:
+    if not tag or not RELEASE_TAG_PATTERN.fullmatch(tag):
+        return None
+    major, minor, patch = (int(part) for part in tag[1:].split("."))
+    return major, minor, patch
+
+
+def is_major_bump(applied: tuple[int, int, int], target: tuple[int, int, int]) -> bool:
+    return applied[0] != target[0] or (target[0] == 0 and applied[1] != target[1])
+
+
+def disable_auto_merge(repository: Repository, number: str, *, env: dict[str, str]) -> str | None:
+    """Disarm armed auto-merge; return the sanitized error, or None on success."""
+    completed = run(["gh", "pr", "merge", number, "--repo", repository.name_with_owner, "--disable-auto"], env=env, check=False)
+    if not completed.returncode:
+        return None
+    return sanitize_text(completed.stderr.strip() or completed.stdout.strip() or f"gh pr merge --disable-auto exited {completed.returncode}")
+
+
+def enable_auto_merge(
+    repository: Repository,
+    url: str,
+    *,
+    branch: str,
+    head: str | None,
+    applied: str,
+    target: str | None,
+    requested_template_ref: str | None,
+    env: dict[str, str],
+    modules: Sequence[dict[str, str]] = (),
+    disarmed: bool = False,
+) -> dict[str, str]:
+    """Ask GitHub to squash-merge the automation PR once its ruleset is satisfied."""
+    number = pull_request_number(repository, url)
+    if number is None:
+        return {"state": "failed", "reason": "pull request URL does not belong to the repository"}
+    name = repository.name_with_owner
+    pull_request: dict[str, Any] = {}
+
+    def view() -> dict[str, Any]:
+        payload = gh_json(["pr", "view", number, "--repo", name, "--json", AUTO_MERGE_PULL_FIELDS], env=env)
+        if not isinstance(payload, dict):
+            raise FleetUpdateError("pull request metadata is unreadable")
+        return payload
+
+    def evaluate() -> tuple[str, str]:
+        nonlocal pull_request
+        pull_request = view()
+        if pull_request.get("state") == "MERGED":
+            return "merged", "pull request already merged"
+        if branch != DEFAULT_BRANCH:
+            return "skipped", "not the automation update branch"
+        if pull_request.get("isCrossRepository") is not False or pull_request.get("headRefName") != branch:
+            return "skipped", "pull request is not the updater's own branch"
+        target_version = release_version(target)
+        if requested_template_ref or target_version is None:
+            return "skipped", "target is not a release tag resolved by the run"
+        applied_version = release_version(applied)
+        if applied_version is None:
+            return "skipped", "applied version is not a release tag"
+        if target_version < applied_version:
+            return "skipped", f"target {target} is older than {applied}"
+        if is_major_bump(applied_version, target_version):
+            return "skipped", f"major version bump {applied} → {target} needs a human"
+        for row in modules:
+            module_version = release_version(row.get("from"))
+            if module_version is None:
+                return "skipped", f"module {row.get('module')} applied version is not a release tag"
+            if is_major_bump(module_version, target_version):
+                return "skipped", f"major version bump {row.get('module')} {row.get('from')} → {target} needs a human"
+        settings = gh_json(["api", f"repos/{name}"], env=env)
+        if not isinstance(settings, dict) or "allow_auto_merge" not in settings or "allow_squash_merge" not in settings:
+            return "failed", "repository auto-merge setting unreadable (token permissions?)"
+        if not settings["allow_auto_merge"]:
+            return "skipped", "repository has auto-merge disabled"
+        if not settings["allow_squash_merge"]:
+            return "skipped", "repository does not allow squash merge"
+        if pull_request.get("state") != "OPEN":
+            return "skipped", "pull request is not open"
+        if pull_request.get("baseRefName") != repository.default_branch:
+            return "skipped", "pull request base is not the default branch"
+        if pull_request.get("mergeable") == "CONFLICTING":
+            return "skipped", "pull request has merge conflicts"
+        expected = head or pull_request.get("headRefOid")
+        if not isinstance(expected, str) or not COMMIT_SHA_PATTERN.fullmatch(expected):
+            return "failed", "pull request head commit is unknown"
+        for _ in range(AUTO_MERGE_HEAD_POLLS):
+            if pull_request.get("headRefOid") == expected:
+                break
+            time.sleep(AUTO_MERGE_HEAD_POLL_SECONDS)
+            pull_request = view()
+        if pull_request.get("headRefOid") != expected:
+            return "skipped", "pull request head not yet updated"
+        if pull_request.get("autoMergeRequest") and not disarmed:
+            return "enabled", "auto-merge already enabled"
+        completed = run(["gh", "pr", "merge", number, "--repo", name, "--auto", "--squash", "--match-head-commit", expected], env=env, check=False)
+        if completed.returncode:
+            return "failed", sanitize_text(completed.stderr.strip() or completed.stdout.strip() or f"gh pr merge exited {completed.returncode}")
+        return "enabled", f"auto-merge enabled for {expected}"
+
+    try:
+        state, reason = evaluate()
+        if state in {"skipped", "failed"} and pull_request.get("autoMergeRequest") and not disarmed:
+            error = disable_auto_merge(repository, number, env=env)
+            if error is None:
+                reason += "; existing auto-merge disabled"
+            else:
+                state, reason = "failed", f"{reason}; could not disable existing auto-merge: {error}"
+    except Exception as exc:  # the PR exists; never fail the repository over auto-merge
+        state, reason = "failed", sanitize_text(str(exc) or type(exc).__name__)
+    return {"state": state, "reason": reason}
+
+
 def process_repository(
     repository: Repository,
     *,
@@ -2154,6 +2314,8 @@ def process_repository(
     template_ref: str | None,
     env: dict[str, str],
     workspace: Path,
+    auto_merge: bool = False,
+    requested_template_ref: str | None = None,
 ) -> Result:
     name = repository.name_with_owner
     try:
@@ -2240,9 +2402,44 @@ def process_repository(
         if dry_run:
             return Result(name, "would-update", ", ".join(paths), inventory)
 
-        push_automation_branch(repository, destination, branch=branch, env=env)
-        url = ensure_pull_request(repository, branch=branch, changed=paths, env=env, **({"modules": rows} if rows else {}))
-        return Result(name, "pull-request", url, inventory)
+        replaced: list[str] = []
+        head = push_automation_branch(repository, destination, branch=branch, env=env, replaced=replaced)
+        url = ensure_pull_request(
+            repository,
+            branch=branch,
+            changed=paths,
+            env=env,
+            **({"modules": rows} if rows else {}),
+            **({"auto_merge": True} if auto_merge else {}),
+        )
+        disarmed = False
+        if replaced:
+            # GitHub keeps auto-merge armed across pushes, so a new head must be re-approved.
+            number = pull_request_number(repository, url)
+            error = None if number else "pull request URL does not belong to the repository"
+            try:
+                if number and gh_json(["pr", "view", number, "--repo", name, "--json", "autoMergeRequest"], env=env).get("autoMergeRequest"):
+                    error = disable_auto_merge(repository, number, env=env)
+                    disarmed = error is None
+            except Exception as exc:  # the PR exists; record instead of failing the repository
+                error = sanitize_text(str(exc) or type(exc).__name__)
+            if error:
+                return Result(name, "pull-request", url, inventory, auto_merge={"state": "failed", "reason": f"could not disable auto-merge after pushing a new head: {error}"})
+        if not auto_merge:
+            return Result(name, "pull-request", url, inventory)
+        merge = enable_auto_merge(
+            repository,
+            url,
+            branch=branch,
+            head=head,
+            applied=inventory.commit,
+            target=template_ref,
+            requested_template_ref=requested_template_ref,
+            env=env,
+            modules=rows,
+            disarmed=disarmed,
+        )
+        return Result(name, "pull-request", url, inventory, auto_merge=merge)
     except Exception as exc:
         raise RepositoryProcessError(str(exc), inventory) from exc
 
@@ -2484,6 +2681,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Serve only public repositories; organization discovery is filtered and an explicit --repo that is not public fails.",
     )
     parser.add_argument("--migrate", metavar="MODULE", help="Hand the module's legacy area off and open a PR on ci-kit/migrate-MODULE instead of updating.")
+    parser.add_argument("--auto-merge", action="store_true", help="Enable GitHub auto-merge (squash) on eligible template-update PRs; write mode only.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -2491,7 +2689,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.auto_merge and args.dry_run:
+        parser.error("--auto-merge cannot be combined with --dry-run")
+    if args.auto_merge and args.migrate:
+        parser.error("--auto-merge cannot be combined with --migrate")
     env = os.environ.copy()
     if args.write:
         if not env.get("GH_TOKEN", "").strip():
@@ -2624,6 +2827,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         template_ref=template_ref,
                         env=env,
                         workspace=workspace,
+                        auto_merge=args.auto_merge,
+                        requested_template_ref=args.template_ref,
                     )
             except RepositoryProcessError as exc:
                 failures += 1
@@ -2654,7 +2859,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for line in feature_summary(results):
         print(line)
     print(f"configuration-gaps: {configuration_gap_count(results)}")
-    run = run_metadata("dry-run" if args.dry_run else "write", template_ref, env, args.template_ref)
+    run = run_metadata("dry-run" if args.dry_run else "write", template_ref, env, args.template_ref, args.auto_merge)
     if args.markdown_report:
         args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
         args.markdown_report.write_text(markdown_report(results, counts, run), encoding="utf-8")
