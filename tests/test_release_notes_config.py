@@ -53,6 +53,7 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             return subprocess.run(
                 [sys.executable, "-I", "-c", step["run"]],
                 env={"CONFIG_FILE": str(path)},
+                cwd=temporary,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -63,6 +64,10 @@ class ReleaseNotesConfigTests(unittest.TestCase):
             with self.subTest(path=path):
                 result = self.run_dependency_section_guard(self.load_config(path))
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dependency_section_guard_ignores_whether_the_release_has_dependency_commits(self) -> None:
+        result = self.run_dependency_section_guard(self.load_config(TEMPLATE_CONFIG_PATH))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_dependency_section_guard_accepts_top_level_sections(self) -> None:
         sections = self.load_config(CONFIG_PATH)["packages"]["."]["changelog-sections"]
