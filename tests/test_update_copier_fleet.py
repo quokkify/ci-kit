@@ -196,6 +196,75 @@ class SingleManifestSeedingTests(TestCase):
                     self.assertEqual(json.loads(manifest.read_text()), existing)
 
 
+class ReleaseDependencySectionTests(TestCase):
+    def repair(self, config: dict, answers: str = "release_please: true\n") -> tuple[bool, dict]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / fleet.ANSWERS_FILE).write_text(answers, encoding="utf-8")
+            path = root / ".github/release-please/config.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(config), encoding="utf-8")
+            changed = fleet.ensure_release_dependency_sections(root)
+            return changed, json.loads(path.read_text(encoding="utf-8"))
+
+    def template_sections(self) -> list[dict]:
+        return json.loads(fleet.TEMPLATE_RELEASE_CONFIG.read_text(encoding="utf-8"))["packages"]["."]["changelog-sections"]
+
+    def test_adds_template_sections_when_release_please_defaults_apply(self) -> None:
+        changed, config = self.repair({"release-type": "simple", "packages": {".": {"package-name": "skills"}}})
+        self.assertTrue(changed)
+        self.assertEqual(config["packages"]["."]["changelog-sections"], self.template_sections())
+        self.assertEqual(config["packages"]["."]["package-name"], "skills")
+
+    def test_appends_or_unhides_deps_and_keeps_custom_sections(self) -> None:
+        changed, config = self.repair({"packages": {
+            "a": {"changelog-sections": [{"type": "feat", "section": "Features"}]},
+            "b": {"changelog-sections": [{"type": "deps", "section": "Deps", "hidden": True}]},
+        }})
+        self.assertTrue(changed)
+        self.assertEqual(config["packages"]["a"]["changelog-sections"], [
+            {"type": "feat", "section": "Features"},
+            {"type": "deps", "section": "📦 Dependencies"},
+        ])
+        self.assertEqual(config["packages"]["b"]["changelog-sections"], [{"type": "deps", "section": "Deps"}])
+
+    def test_overrides_only_the_package_whose_inherited_sections_lack_deps(self) -> None:
+        top = [{"type": "fix", "section": "Fixes"}]
+        changed, config = self.repair({"changelog-sections": top, "packages": {
+            ".": {}, "web": {"changelog-sections": [{"type": "deps", "section": "Deps"}]},
+        }})
+        self.assertTrue(changed)
+        self.assertEqual(config["changelog-sections"], top)
+        self.assertEqual(config["packages"]["."]["changelog-sections"], [*top, {"type": "deps", "section": "📦 Dependencies"}])
+        self.assertEqual(config["packages"]["web"], {"changelog-sections": [{"type": "deps", "section": "Deps"}]})
+
+    def test_leaves_valid_or_disabled_configs_untouched(self) -> None:
+        valid = {"packages": {".": {"changelog-sections": self.template_sections()}}}
+        self.assertEqual(self.repair(valid), (False, valid))
+        broken = {"packages": {".": {}}}
+        self.assertEqual(self.repair(broken, "release_please: false\n"), (False, broken))
+
+    def test_fails_closed_on_config_without_packages(self) -> None:
+        with self.assertRaises(fleet.FleetUpdateError):
+            self.repair({"release-type": "simple"})
+
+    def test_repaired_config_passes_the_release_workflow_guard(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/release-please.yml").read_text())
+        guard = next(
+            step["run"] for step in workflow["jobs"]["validate"]["steps"]
+            if step.get("name") == "Require a visible dependencies changelog section"
+        )
+        _, config = self.repair({"packages": {".": {}, "web": {"changelog-sections": []}}})
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "-I", "-c", guard], env={"CONFIG_FILE": str(path)},
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
 class ProjectOwnedToolkitRefTests(TestCase):
     """The generated contract requires every toolkit reference to match toolkit_version."""
 
@@ -1041,6 +1110,9 @@ class TemplateUpdateTests(TestCase):
             ), mock.patch.object(
                 fleet, "seed_single_release_manifest",
                 side_effect=lambda *args, **kwargs: events.append("seed-manifest"),
+            ), mock.patch.object(
+                fleet, "ensure_release_dependency_sections",
+                side_effect=lambda *args, **kwargs: events.append("release-sections"),
             ), mock.patch.object(fleet, "restore_answers_format_if_semantically_equal"), mock.patch.object(
                 fleet, "canonicalize_answers_source"
             ), mock.patch.object(fleet, "changed_paths", return_value=[]):
@@ -1051,7 +1123,7 @@ class TemplateUpdateTests(TestCase):
                     env={},
                     repository=fleet.Repository("quokkify/example", "main"),
                 )
-        self.assertEqual(events, ["copier-update", "seed-manifest"])
+        self.assertEqual(events, ["copier-update", "seed-manifest", "release-sections"])
 
         original = (
             "_commit: v2.8.2\n"

@@ -38,6 +38,7 @@ from ci_kit.plan import ANSWERS_RE, Finding
 ANSWERS_FILE = ".copier-answers.yml"
 LEGACY_MODULE = "legacy"
 CI_KIT_TOOLS = Path(__file__).resolve().parents[1] / "tools"
+TEMPLATE_RELEASE_CONFIG = Path(__file__).resolve().parents[1] / "template/.github/release-please/config.json.jinja"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
@@ -1286,6 +1287,44 @@ def verify_release_helper(repository_path: Path, template_source: str, template_
             )
 
 
+def ensure_release_dependency_sections(repository_path: Path) -> bool:
+    """Give every Release Please package a visible deps changelog section.
+
+    The config is project-owned, so Copier never touches it after generation. A
+    config without changelog-sections falls back to Release Please defaults, which
+    drop every deps(...) commit, and the reusable release workflow then refuses it.
+    """
+    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
+    path = repository_path / ".github/release-please/config.json"
+    if answers.get("release_please") is not True or not path.is_file():
+        return False
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict) or not isinstance(config.get("packages"), dict):
+        raise FleetUpdateError(f"cannot repair {path.relative_to(repository_path)}: packages must be a mapping")
+    template = json.loads(TEMPLATE_RELEASE_CONFIG.read_text(encoding="utf-8"))["packages"]["."]["changelog-sections"]
+    changed = False
+    for package in config["packages"].values():
+        if not isinstance(package, dict):
+            continue
+        sections = package.get("changelog-sections", config.get("changelog-sections"))
+        if not isinstance(sections, list):
+            sections = [dict(section) for section in template]
+        elif not any(isinstance(s, dict) and s.get("type") == "deps" and not s.get("hidden") for s in sections):
+            sections = [
+                {k: v for k, v in s.items() if k != "hidden"} if isinstance(s, dict) and s.get("type") == "deps" else s
+                for s in sections
+            ]
+            if not any(isinstance(s, dict) and s.get("type") == "deps" for s in sections):
+                sections.append(next(dict(s) for s in template if s["type"] == "deps"))
+        else:
+            continue
+        package["changelog-sections"] = sections
+        changed = True
+    if changed:
+        path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return changed
+
+
 def seed_single_release_manifest(
     repository_path: Path,
     repository: Repository,
@@ -1462,6 +1501,7 @@ def update_template(
         # Copier requires a pristine checkout. Seed a missing single-project
         # Release Please manifest only after the update has completed.
         seed_single_release_manifest(repository_path, repository, env=env)
+    ensure_release_dependency_sections(repository_path)
     restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
     canonicalize_answers_source(repository_path, template_source)
     if template_ref and RELEASE_TAG_PATTERN.fullmatch(template_ref):

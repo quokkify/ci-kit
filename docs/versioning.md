@@ -30,3 +30,10 @@ Renovate dependency updates use `deps(<manager>)` Conventional Commits (for exam
 in the `📦 Dependencies` section; legacy `chore(deps)` commits stay in
 `🧹 Chores`. Enrich does not move,
 normalize, or synthesize chore/dependency entries.
+The reusable Release Please workflow fails before releasing when a config-backed
+package has no visible `deps` changelog section: without one, Release Please
+falls back to its default sections and silently drops every `deps(...)` commit.
+The check reads only the config, so a release without dependency updates passes.
+The config is project-owned, so the fleet update repairs it after `copier update`:
+a package without sections gets the template sections, and a missing or hidden
+`deps` section is added or unhidden.
