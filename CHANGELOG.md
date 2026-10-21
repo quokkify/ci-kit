@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.4.0](https://github.com/quokkify/ci-kit/compare/v3.3.0...v3.4.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **fleet:** verdict-first fleet update report ([#453](https://github.com/quokkify/ci-kit/issues/453)) ([8865f65](https://github.com/quokkify/ci-kit/commit/8865f659298a53f47375e192b2c2a5add972b8b6))
+* **modules:** add python, node and docker modules ([#452](https://github.com/quokkify/ci-kit/issues/452)) ([a48c11b](https://github.com/quokkify/ci-kit/commit/a48c11bbb6c7ba0a1c96e1461a625da5d6180fbf))
+
+
+### 🐛 Bug Fixes
+
+* **release:** fail when the release config drops deps commits ([#445](https://github.com/quokkify/ci-kit/issues/445)) ([ecaac35](https://github.com/quokkify/ci-kit/commit/ecaac358c9d2219eec94a0c5897268863c9f29c3))
+
 ## [3.3.0](https://github.com/quokkify/ci-kit/compare/v3.2.3...v3.3.0) (2026-10-21)
 
 
