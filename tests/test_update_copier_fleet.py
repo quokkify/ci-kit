@@ -2925,6 +2925,21 @@ class MigrateModeTests(TestCase):
         self.assertEqual(rows, [r"| py | python | A \| B # x |"])
         self.assertNotIn("\n# x", body)
 
+    def test_pull_request_table_escapes_html_comment_openers(self) -> None:
+        validate = (
+            "jobs:\n"
+            "  py:\n    name: \"<!-- hide\"\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v3.1.0\n"
+        )
+        body = self.pull_request_body(validate)
+        self.assertIn("&lt;!-- hide", body)
+        self.assertNotIn("<!-- hide", body)
+
+    def test_pull_request_body_lists_a_commit_line_per_module(self) -> None:
+        body = self.pull_request_body(None)
+        self.assertIn("these migration steps", body)
+        self.assertIn("- add core module", body)
+        self.assertIn("- add python module", body)
+
     def test_pull_request_body_omits_table_without_parseable_validate(self) -> None:
         for validate in (None, "jobs: [unclosed"):
             body = self.pull_request_body(validate)

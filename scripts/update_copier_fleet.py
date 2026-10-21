@@ -2017,7 +2017,7 @@ def read_legacy_jobs(repository_path: Path, legacy: dict[str, Any]) -> list[Lega
 
 
 def table_cell(value: str) -> str:
-    return re.sub(r"[\r\n]+", " ", value).replace("|", "\\|")
+    return re.sub(r"[\r\n]+", " ", value).replace("|", "\\|").replace("<", "&lt;")
 
 
 def migration_modules_section(result: MigrateResult, jobs: Sequence[LegacyJob]) -> str:
@@ -2049,9 +2049,10 @@ def migration_pr_body(
         f"Hands the `{result.area}` area off from the legacy template to the `{result.module}` module "
         f"of [`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) at `{result.ref}`.\n\n"
         "## Commits\n\n"
-        f"The pushed commit squashes two migration steps:\n\n"
+        "The pushed commit squashes these migration steps:\n\n"
         f"- hand off {result.area} to {result.module}\n"
-        f"- add {result.module} module\n\n"
+        + "".join(f"- add {name} module\n" for name in result.modules or [result.module])
+        + "\n"
         + "".join(f"Head: `{sha}`\n" for sha in result.commits)
         + migration_modules_section(result, jobs)
         + "\n## Doctor\n\n```text\n"
