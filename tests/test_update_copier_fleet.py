@@ -2907,6 +2907,30 @@ class MigrateModeTests(TestCase):
         self.assertIn("| legacy job | module | component |", body)
         self.assertIn("| py | python | Python |", body)
 
+    def pull_request_body(self, validate: str | None) -> str:
+        migrated = ci_migrate.MigrateResult("core", "validate", "v3.1.0", ["x"], ["y"], ["a" * 40], modules=["core", "python"])
+        files = {".copier-answers.yml": self.LEGACY}
+        if validate is not None:
+            files[".github/workflows/validate.yml"] = validate
+        _, _, _, _, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, result=migrated, clone=materialize_files(files))
+        return next(c[c.index("--body") + 1] for c in calls if c[:3] == ["gh", "pr", "create"])
+
+    def test_pull_request_table_escapes_job_cells(self) -> None:
+        validate = (
+            "jobs:\n"
+            "  py:\n    name: \"A | B\\n# x\"\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v3.1.0\n"
+        )
+        body = self.pull_request_body(validate)
+        rows = [line for line in body.splitlines() if line.startswith("| py ")]
+        self.assertEqual(rows, [r"| py | python | A \| B # x |"])
+        self.assertNotIn("\n# x", body)
+
+    def test_pull_request_body_omits_table_without_parseable_validate(self) -> None:
+        for validate in (None, "jobs: [unclosed"):
+            body = self.pull_request_body(validate)
+            self.assertIn("Modules: core, python", body)
+            self.assertNotIn("| legacy job |", body)
+
     def test_legacy_commit_other_than_target_needs_update_first(self) -> None:
         outcome, doctor_mock, migrate_mock, push_mock, _ = self.migrate({"legacy": LEGACY_ANSWERS_TEXT})
         self.assertEqual(outcome.status, "needs-update-first")

@@ -2016,13 +2016,17 @@ def read_legacy_jobs(repository_path: Path, legacy: dict[str, Any]) -> list[Lega
         return []
 
 
+def table_cell(value: str) -> str:
+    return re.sub(r"[\r\n]+", " ", value).replace("|", "\\|")
+
+
 def migration_modules_section(result: MigrateResult, jobs: Sequence[LegacyJob]) -> str:
     if not result.modules:
         return ""
     section = "\n## Modules\n\nModules: " + ", ".join(result.modules) + "\n"
     if jobs:
         section += "\n| legacy job | module | component |\n| --- | --- | --- |\n"
-        section += "".join(f"| {job.job_id} | {job.module} | {job.name} |\n" for job in jobs)
+        section += "".join(f"| {table_cell(job.job_id)} | {table_cell(job.module)} | {table_cell(job.name)} |\n" for job in jobs)
     return section
 
 
