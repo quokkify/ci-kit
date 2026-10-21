@@ -364,7 +364,7 @@ class RichNotesTests(TestCase):
         self.assertNotIn("python - <<'PY'", workflow)
         self.assertNotIn("baseRepository", workflow)
         self.assertNotIn("--slurp", workflow)
-        self.assertEqual(workflow.count("uses: actions/checkout@"), 3)
+        self.assertEqual(workflow.count("uses: actions/checkout@"), 4)
         self.assertEqual(workflow.count("name: Prepare enriched release notes"), 1)
         self.assertIn("ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}", workflow)
         self.assertIn('python "$ENRICHMENT_SCRIPT" "${arguments[@]}"', workflow)

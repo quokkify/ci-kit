@@ -61,6 +61,41 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
         run: '[[ "$MODE" == single || "$MODE" == manifest ]] || { echo "mode must be single or manifest" >&2; exit 2; }'
+      - name: Check out repository
+        if: ${{ inputs.mode == 'manifest' || inputs.config-backed-single }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.target-branch }}
+          persist-credentials: false
+      - name: Require a visible dependencies changelog section
+        if: ${{ inputs.mode == 'manifest' || inputs.config-backed-single }}
+        env:
+          CONFIG_FILE: ${{ inputs.config-file }}
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+
+          path = os.environ["CONFIG_FILE"]
+          with open(path, encoding="utf-8") as handle:
+              config = json.load(handle)
+          default = config.get("changelog-sections")
+          missing = [
+              name
+              for name, package in config.get("packages", {}).items()
+              if not any(
+                  section.get("type") == "deps" and not section.get("hidden")
+                  for section in package.get("changelog-sections", default) or []
+              )
+          ]
+          if missing:
+              print(
+                  f"::error file={path}::Release Please would drop deps commits for {', '.join(missing)}: "
+                  'add a visible {"type": "deps", "section": "📦 Dependencies"} entry to changelog-sections, '
+                  "as in the ci-kit template's .github/release-please/config.json"
+              )
+              sys.exit(1)
 
   single:
     if: ${{ inputs.mode == 'single' }}

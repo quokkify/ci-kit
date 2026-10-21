@@ -4,9 +4,12 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / ".github/release-please/config.json"
@@ -33,6 +36,61 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 name + ": ${{ inputs.config-backed-single && inputs." + name + " || '' }}",
                 workflow,
             )
+
+    def run_dependency_section_guard(self, config: dict) -> subprocess.CompletedProcess[str]:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/release-please.yml").read_text())
+        steps = {step.get("name"): step for step in workflow["jobs"]["validate"]["steps"]}
+        step = steps["Require a visible dependencies changelog section"]
+        checkout = steps["Check out repository"]
+        self.assertEqual(step["shell"], "python")
+        self.assertEqual(step["if"], "${{ inputs.mode == 'manifest' || inputs.config-backed-single }}")
+        self.assertEqual(checkout["if"], step["if"])
+        # Release Please reads the config from target-branch, so the guard must too.
+        self.assertEqual(checkout["with"]["ref"], "${{ inputs.target-branch }}")
+        with tempfile.TemporaryDirectory(prefix="deps-section-guard-") as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, "-I", "-c", step["run"]],
+                env={"CONFIG_FILE": str(path)},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_dependency_section_guard_accepts_toolkit_and_template_configs(self) -> None:
+        for path in (CONFIG_PATH, TEMPLATE_CONFIG_PATH):
+            with self.subTest(path=path):
+                result = self.run_dependency_section_guard(self.load_config(path))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dependency_section_guard_accepts_top_level_sections(self) -> None:
+        sections = self.load_config(CONFIG_PATH)["packages"]["."]["changelog-sections"]
+        result = self.run_dependency_section_guard(
+            {"changelog-sections": sections, "packages": {".": {}, "api": {}}}
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_dependency_section_guard_rejects_default_or_hidden_deps(self) -> None:
+        cases = {
+            "release-please defaults": {"packages": {".": {"package-name": "skills"}}},
+            "hidden deps": {"packages": {".": {"changelog-sections": [
+                {"type": "fix", "section": "Fixes"},
+                {"type": "deps", "section": "Dependencies", "hidden": True},
+            ]}}},
+            "one package without deps": {
+                "changelog-sections": [{"type": "deps", "section": "Dependencies"}],
+                "packages": {".": {}, "web": {"changelog-sections": [{"type": "feat", "section": "Features"}]}},
+            },
+        }
+        for name, config in cases.items():
+            with self.subTest(name):
+                result = self.run_dependency_section_guard(config)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("::error file=", result.stdout)
+                self.assertIn("would drop deps commits", result.stdout)
+        result = self.run_dependency_section_guard(cases["one package without deps"])
+        self.assertIn("for web:", result.stdout)
 
     def test_dependency_mapping_and_documentation_release_contract(self) -> None:
         for path in (CONFIG_PATH, TEMPLATE_CONFIG_PATH):
