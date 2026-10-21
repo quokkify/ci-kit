@@ -594,8 +594,29 @@ def validate_toolkit_workflow_errors(
                 "unit-tests matrix must set fail-fast: false",
             )
             require(
-                unit_shards == list(range(1, shard_count + 1)) and shard_count >= 1,
+                isinstance(unit_matrix, dict) and set(unit_matrix) == {"shard"},
+                "unit-tests matrix must define only the shard axis",
+            )
+            require(
+                isinstance(unit_shards, list)
+                and all(type(value) is int for value in unit_shards)
+                and unit_shards == list(range(1, shard_count + 1))
+                and shard_count >= 1,
                 "unit-tests matrix shard must list 1..N",
+            )
+            require(
+                "continue-on-error" not in job
+                and not any(isinstance(step, dict) and "continue-on-error" in step for step in steps),
+                "unit-tests job and steps must not set continue-on-error",
+            )
+            require(
+                not any(
+                    isinstance(step, dict)
+                    and "if" in step
+                    and "scripts/run_test_suites.py" in str(step.get("run", ""))
+                    for step in steps
+                ),
+                "unit-tests suite step must not be conditional",
             )
             require(
                 isinstance(job.get("timeout-minutes"), int),
@@ -797,6 +818,20 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
     mutated = clone()
     mutated["jobs"]["unit-tests"]["strategy"]["matrix"]["shard"] = [1, 2, 3]
     require_rejection(mutated, "unit-tests job must run only its focused", "shard matrix and command mismatch")
+
+    mutated = clone()
+    mutated["jobs"]["unit-tests"]["strategy"]["matrix"]["exclude"] = [{"shard": 4}]
+    require_rejection(mutated, "must define only the shard axis", "matrix exclude")
+
+    mutated = clone()
+    mutated["jobs"]["unit-tests"]["continue-on-error"] = True
+    require_rejection(mutated, "must not set continue-on-error", "unit-tests continue-on-error")
+
+    mutated = clone()
+    for step in mutated["jobs"]["unit-tests"]["steps"]:
+        if "scripts/run_test_suites.py" in str(step.get("run", "")):
+            step["if"] = False
+    require_rejection(mutated, "suite step must not be conditional", "conditional suite step")
 
     mutated = clone()
     lint_step = step_by_name(mutated, "lint", "Validate toolkit policies and templates")

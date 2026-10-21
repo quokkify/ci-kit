@@ -75,13 +75,19 @@ def list_shards(root: Path, count: int) -> int:
 
 
 def run_suites(root: Path = ROOT, shard: tuple[int, int] | None = None) -> int:
-    if os.environ.get(NESTED_MARKER) == "1":
+    nested = os.environ.get(NESTED_MARKER) == "1"
+    if nested and shard:
+        print(f"ERROR: {NESTED_MARKER}=1 would silently skip the sharded suites", file=sys.stderr)
+        return 1
+    if nested:
         print("nested validation: skipping suites that re-enter scripts/validate.py")
         return 0
     try:
         suites = discover_suites(root)
         if shard:
             suites = shard_suites(suites, shard[1])[shard[0] - 1]
+            if not suites:
+                raise ValueError(f"shard {shard[0]}/{shard[1]} is empty")
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

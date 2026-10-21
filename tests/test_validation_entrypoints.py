@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from unittest import TestCase, main
+from unittest.mock import patch
 
 import yaml
 
@@ -115,11 +116,21 @@ class SuiteRunnerTests(TestCase):
                 self.assertNotEqual(self.run_runner("--shard", value).returncode, 0)
         self.assertNotEqual(self.run_runner("--list-shards", "3").returncode, 0)
 
-    def test_nested_validation_skips_with_shard(self) -> None:
+    def test_nested_validation_fails_with_shard(self) -> None:
         (self.root / "tests/test_failure.py").write_text("raise SystemExit(7)\n")
         result = self.run_runner("--shard", "1/1", nested=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("nested validation:", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("silently skip", result.stderr)
+        self.assertNotIn("nested validation:", result.stdout)
+
+    def test_empty_shard_fails(self) -> None:
+        self.write_passing_suites("test_a.py")
+        module = importlib.util.spec_from_file_location("run_test_suites", self.root / "scripts/run_test_suites.py")
+        runner = importlib.util.module_from_spec(module)
+        module.loader.exec_module(runner)
+        with patch.dict(os.environ), patch.object(runner, "shard_suites", return_value=[[], []]):
+            os.environ.pop("PROJECT_TOOLKIT_NESTED_VALIDATION", None)
+            self.assertEqual(runner.run_suites(self.root, (1, 2)), 1)
 
     def test_heaviest_weighted_suites_land_in_different_shards(self) -> None:
         self.write_passing_suites("test_ci_kit_drift.py", "test_migration_lifecycle.py", "test_unweighted.py")
