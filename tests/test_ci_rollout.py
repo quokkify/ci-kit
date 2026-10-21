@@ -287,6 +287,15 @@ class RolloutTests(unittest.TestCase):
                 self.assertFalse(verify.called)
                 self.assertEqual(run.call_args.args[0][-len(arguments):], arguments)
 
+    def test_auto_merge_is_refused_until_the_pilot_gate_is_wired(self):
+        for arguments in (["--write", "--public-only", "--auto-merge"], ["--write", "--auto-merge", "--repo", "quokkify/q4j"]):
+            with self.subTest(arguments=arguments), patch.object(rollout.subprocess, "run") as run, \
+                 patch.object(rollout.fleet, "resolve_template_ref") as resolve:
+                with self.assertRaisesRegex(gate.GateError, "auto-merge is not wired into the pilot gate yet"):
+                    rollout.rollout(arguments)
+                run.assert_not_called()
+                resolve.assert_not_called()
+
     def test_pilots_precede_fanout_and_recheck_before_fanout(self):
         events = []
 
