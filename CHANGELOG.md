@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.0](https://github.com/quokkify/ci-kit/compare/v3.4.0...v3.5.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **migration:** migrate repositories with language components ([#454](https://github.com/quokkify/ci-kit/issues/454)) ([0f29424](https://github.com/quokkify/ci-kit/commit/0f29424af81a22aae8febb75821f0b666b65348d))
+
 ## [3.4.0](https://github.com/quokkify/ci-kit/compare/v3.3.0...v3.4.0) (2026-10-21)
 
 
