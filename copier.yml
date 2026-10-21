@@ -40,7 +40,7 @@ _skip_if_exists:
 module:
   type: str
   help: Template module to apply. legacy keeps the single combined template.
-  choices: [legacy, core, java]
+  choices: [legacy, core, java, python, node, docker]
   default: legacy
 
 project_name:
@@ -100,6 +100,78 @@ java_components:
     {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
     {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
     {% if (component.java_version | string) not in ['17', '21', '25'] %}java_version must be one of 17, 21, 25.{% endif %}
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+python_components:
+  when: "{{ module == 'python' }}"
+  type: yaml
+  help: "Python components such as [{id: backend-python, name: Backend Python, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the python-ci workflow inputs in snake_case; every *_version must be a string."
+  default: >-
+    {% if _commit is defined and python_components is defined %}{{ python_components }}{% else %}[{id: app-python, name: Application Python, path: .}]{% endif %}
+  validator: >-
+    {% set allowed_keys = ['build_command', 'cache_dependencies', 'id', 'install_command', 'lint_command', 'name', 'package_manager', 'path', 'pip_version', 'poetry_version', 'python_version', 'requirements_file', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'timeout_minutes', 'upload_test_artifacts', 'uv_version'] %}
+    {% if python_components is string or python_components is mapping or python_components is not sequence or not python_components %}python_components must be a non-empty YAML list of mappings.{% else %}
+    {% set python_state = namespace(ids=[]) %}
+    {% for component in python_components %}
+    {% if component is not mapping %}Every python component must be a mapping with id, name, and path.{% else %}
+    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
+    {% if component.id in python_state.ids %}Component ids must be unique: {{ component.id }}.{% endif %}
+    {% if component.id is string %}{% set python_state.ids = python_state.ids + [component.id] %}{% endif %}
+    {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
+    {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
+    {% for key, value in component.items() %}
+    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% endfor %}
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+node_components:
+  when: "{{ module == 'node' }}"
+  type: yaml
+  help: "Node components such as [{id: backend-node, name: Backend Node, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the node-ci workflow inputs in snake_case; every *_version must be a string."
+  default: >-
+    {% if _commit is defined and node_components is defined %}{{ node_components }}{% else %}[{id: app-node, name: Application Node, path: .}]{% endif %}
+  validator: >-
+    {% set allowed_keys = ['build_command', 'cache_dependencies', 'corepack_version', 'id', 'install_command', 'lint_command', 'name', 'node_version', 'package_manager', 'path', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'timeout_minutes', 'upload_test_artifacts'] %}
+    {% if node_components is string or node_components is mapping or node_components is not sequence or not node_components %}node_components must be a non-empty YAML list of mappings.{% else %}
+    {% set node_state = namespace(ids=[]) %}
+    {% for component in node_components %}
+    {% if component is not mapping %}Every node component must be a mapping with id, name, and path.{% else %}
+    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
+    {% if component.id in node_state.ids %}Component ids must be unique: {{ component.id }}.{% endif %}
+    {% if component.id is string %}{% set node_state.ids = node_state.ids + [component.id] %}{% endif %}
+    {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
+    {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
+    {% for key, value in component.items() %}
+    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% endfor %}
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+docker_images:
+  when: "{{ module == 'docker' }}"
+  type: yaml
+  help: "Docker images such as [{id: app-docker, context: ., dockerfile: Dockerfile}]. id is the stable GitHub Actions job identifier; name, context, dockerfile and target are optional and mirror the docker-build workflow inputs."
+  default: >-
+    {% if _commit is defined and docker_images is defined %}{{ docker_images }}{% else %}[{id: app-docker}]{% endif %}
+  validator: >-
+    {% set allowed_keys = ['context', 'dockerfile', 'id', 'name', 'target'] %}
+    {% if docker_images is string or docker_images is mapping or docker_images is not sequence or not docker_images %}docker_images must be a non-empty YAML list of mappings.{% else %}
+    {% set docker_state = namespace(ids=[]) %}
+    {% for component in docker_images %}
+    {% if component is not mapping %}Every docker image must be a mapping with an id.{% else %}
+    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every image requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
+    {% if component.id in docker_state.ids %}Image ids must be unique: {{ component.id }}.{% endif %}
+    {% if component.id is string %}{% set docker_state.ids = docker_state.ids + [component.id] %}{% endif %}
+    {% if 'name' in component and (component.name is not string or not (component.name | trim)) %}name must be a non-empty string.{% endif %}
+    {% if 'context' in component and (component.context is not string or '..' in component.context.split('/') or (component.context | regex_search('[*?\\[]'))) %}context must be a string without .. segments or glob characters.{% endif %}
+    {% for key, value in component.items() %}
+    {% if key not in allowed_keys %}Unsupported image key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% endfor %}
     {% endif %}
     {% endfor %}
     {% endif %}

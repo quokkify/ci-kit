@@ -1,0 +1,5 @@
+schema_version: 1
+components:
+{%- for component in docker_images %}
+  - {{ component | to_json(ensure_ascii=False) }}
+{%- endfor %}

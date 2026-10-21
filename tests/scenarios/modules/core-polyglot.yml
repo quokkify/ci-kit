@@ -1,0 +1,19 @@
+core:
+  project_name: fixture-modules
+  toolkit_version: v1.0.0
+java:
+  java_components:
+    - id: app-java
+      name: Application Java
+      path: .
+      java_version: "21"
+python:
+  python_components:
+    - id: app-python
+      name: Application Python
+      path: .
+node:
+  node_components:
+    - id: app-node
+      name: Application Node
+      path: .
