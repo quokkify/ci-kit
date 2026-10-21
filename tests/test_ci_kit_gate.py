@@ -13,7 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
-from ci_kit.gate import evaluate, render_summary
+from ci_kit.gate import _failing_step, evaluate, render_summary
 
 REF = "0123456789abcdef0123"
 
@@ -152,6 +152,12 @@ class GateTests(unittest.TestCase):
     def test_pipe_in_step_name_is_escaped(self):
         found = failed_java("a | b")
         self.assertIn("a \\| b", render_summary(found))
+
+
+class GateJobNameTests(unittest.TestCase):
+    def test_gate_matches_language_job_name(self):
+        jobs = [{"name": "ci / python (App Python) / ci", "conclusion": "failure", "steps": [{"name": "Run tests", "conclusion": "failure"}]}]
+        self.assertEqual(_failing_step(jobs, "python"), "Run tests")
 
 
 class GateCliTests(unittest.TestCase):

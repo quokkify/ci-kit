@@ -2,9 +2,16 @@ import re
 import unittest
 from pathlib import Path
 
+import sys
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+
+from ci_kit.inputs import input_name, module_fields
 
 
 def load(rel):
@@ -17,9 +24,9 @@ class ModularValidateWorkflowTests(unittest.TestCase):
 
     def test_jobs_and_gate_contract(self):
         jobs = self.wf["jobs"]
-        self.assertEqual(set(jobs), {"plan", "core-checks", "java", "gate"})
+        self.assertEqual(set(jobs), {"plan", "core-checks", "java", "python", "node", "docker", "gate"})
         self.assertEqual(jobs["gate"]["if"], "always()")
-        self.assertEqual(set(jobs["gate"]["needs"]), {"plan", "core-checks", "java"})
+        self.assertEqual(set(jobs["gate"]["needs"]), {"plan", "core-checks", "java", "python", "node", "docker"})
 
     def test_gate_needs_cover_every_other_job(self):
         jobs = self.wf["jobs"]
@@ -91,6 +98,41 @@ class ModularValidateWorkflowTests(unittest.TestCase):
         self.assertEqual(job["name"], "java (${{ matrix.component.name }})")
         self.assertEqual(job["uses"], "./.github/workflows/java-ci.yml")
         self.assertIs(job["strategy"]["fail-fast"], False)
+
+    def test_language_jobs_pass_every_field_without_fallbacks(self):
+        for job_id in ("java", "python", "node"):
+            job = self.wf["jobs"][job_id]
+            expected = {"working-directory": "${{ matrix.component.path }}"} | {
+                input_name(f): f"${{{{ matrix.component.{f} }}}}" for f in module_fields(job_id)
+            }
+            self.assertEqual(job["with"], expected, job_id)
+            self.assertEqual(job["name"], f"{job_id} (${{{{ matrix.component.name }}}})")
+            self.assertEqual(job["uses"], f"./.github/workflows/{job_id}-ci.yml")
+            self.assertEqual(job["if"], f"needs.plan.outputs.{job_id} != '[]'")
+            self.assertEqual(job["strategy"]["matrix"]["component"], f"${{{{ fromJSON(needs.plan.outputs.{job_id}) }}}}")
+
+    def test_docker_job_shape(self):
+        job = self.wf["jobs"]["docker"]
+        self.assertEqual(job["name"], "docker (${{ matrix.component.name }})")
+        self.assertEqual(job["uses"], "./.github/workflows/docker-build.yml")
+        self.assertEqual(job["if"], "needs.plan.outputs.docker != '[]'")
+        self.assertIs(job["strategy"]["fail-fast"], False)
+        self.assertEqual(job["with"], {
+            "context": "${{ matrix.component.context }}",
+            "dockerfile": "${{ matrix.component.dockerfile }}",
+            "target": "${{ matrix.component.target }}",
+            "push": False,
+        })
+
+    def test_no_or_fallback_in_with(self):
+        for job in self.wf["jobs"].values():
+            for value in (job.get("with") or {}).values():
+                self.assertNotIn("||", str(value))
+
+    def test_plan_exposes_every_module_output(self):
+        outputs = self.wf["jobs"]["plan"]["outputs"]
+        for name in ("java", "python", "node", "docker"):
+            self.assertEqual(outputs[name], f"${{{{ steps.plan.outputs.{name} }}}}")
 
 
 if __name__ == "__main__":
