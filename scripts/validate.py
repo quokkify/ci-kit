@@ -20,6 +20,7 @@ from pathlib import Path
 
 import yaml
 
+from run_test_suites import SUITE_WEIGHTS, discover_suites, shard_suites
 from validate_helpers import action_reference_errors, load_yaml_or_error
 
 from validate_python_fixture import validate_python_fixture
@@ -31,6 +32,11 @@ PARSER.add_argument(
     "--static",
     action="store_true",
     help="run shared policy, template, and static checks without language fixtures",
+)
+PARSER.add_argument(
+    "--skip-suites",
+    action="store_true",
+    help="skip the unit suite runner, which CI runs as sharded unit-tests jobs",
 )
 ARGS = PARSER.parse_args() if __name__ == "__main__" else PARSER.parse_args([])
 
@@ -158,6 +164,7 @@ def release_workflow_errors(path: Path) -> list[str]:
 
     job = caller_jobs[0]
     require(job.get("needs") == "verify-release", "release must depend on its CI gate")
+    require("if" not in job, "release must not bypass its CI gate with an if condition")
     gate = jobs.get("verify-release", {})
     require(gate.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "read"}, "release gate must be read-only")
     require(gate.get("timeout-minutes") == 35, "release gate must have a bounded job timeout")
@@ -446,6 +453,7 @@ def validate_toolkit_workflow_errors(
         == {
             "detect-runner",
             "lint",
+            "unit-tests",
             "gitleaks",
             "python",
             "node",
@@ -453,8 +461,13 @@ def validate_toolkit_workflow_errors(
             "modules",
             "validation-complete",
         },
-        "must define detect-runner, lint, gitleaks, language, and aggregate jobs",
+        "must define detect-runner, lint, unit-tests, gitleaks, language, and aggregate jobs",
     )
+    unit_job = jobs.get("unit-tests")
+    unit_strategy = unit_job.get("strategy") if isinstance(unit_job, dict) else None
+    unit_matrix = unit_strategy.get("matrix") if isinstance(unit_strategy, dict) else None
+    unit_shards = unit_matrix.get("shard") if isinstance(unit_matrix, dict) else None
+    shard_count = len(unit_shards) if isinstance(unit_shards, list) else 0
     selector = jobs.get("detect-runner")
     require(isinstance(selector, dict), "detect-runner job must be a mapping")
     if isinstance(selector, dict):
@@ -477,7 +490,12 @@ def validate_toolkit_workflow_errors(
     expected = {
         "lint": {
             "setups": {"actions/setup-python", "actions/setup-node"},
-            "command": "python scripts/validate.py --static",
+            "command": "python scripts/validate.py --static --skip-suites",
+            "needs": {"detect-runner"},
+        },
+        "unit-tests": {
+            "setups": {"actions/setup-python", "actions/setup-node"},
+            "command": f"python scripts/run_test_suites.py --shard ${{{{ matrix.shard }}}}/{shard_count}",
             "needs": {"detect-runner"},
         },
         "gitleaks": {
@@ -565,6 +583,63 @@ def validate_toolkit_workflow_errors(
                 contract["command"] in commands,
                 f"{name} job must run only its focused validation entrypoint",
             )
+        if name != "unit-tests":
+            require(
+                not any("scripts/run_test_suites.py" in command for command in commands),
+                f"{name} job must not run unit suites outside the unit-tests matrix",
+            )
+        if name == "unit-tests":
+            require(
+                isinstance(unit_strategy, dict) and unit_strategy.get("fail-fast") is False,
+                "unit-tests matrix must set fail-fast: false",
+            )
+            require(
+                isinstance(unit_matrix, dict) and set(unit_matrix) == {"shard"},
+                "unit-tests matrix must define only the shard axis",
+            )
+            require(
+                isinstance(unit_shards, list)
+                and all(type(value) is int for value in unit_shards)
+                and unit_shards == list(range(1, shard_count + 1))
+                and shard_count >= 1,
+                "unit-tests matrix shard must list 1..N",
+            )
+            require(
+                "continue-on-error" not in job
+                and not any(isinstance(step, dict) and "continue-on-error" in step for step in steps),
+                "unit-tests job and steps must not set continue-on-error",
+            )
+            require(
+                not any(
+                    isinstance(step, dict)
+                    and "if" in step
+                    and "scripts/run_test_suites.py" in str(step.get("run", ""))
+                    for step in steps
+                ),
+                "unit-tests suite step must not be conditional",
+            )
+            require(
+                isinstance(job.get("timeout-minutes"), int),
+                "unit-tests job must set a timeout",
+            )
+            try:
+                suites = discover_suites(ROOT)
+                shards = shard_suites(suites, shard_count)
+            except ValueError as exc:
+                require(False, f"unit-tests shards cannot partition the suites: {exc}")
+            else:
+                flattened = [suite for shard in shards for suite in shard]
+                require(
+                    all(shards)
+                    and len(flattened) == len(set(flattened))
+                    and set(flattened) == set(suites),
+                    "unit-tests shards must be non-empty, disjoint, and cover every suite",
+                )
+                stale = sorted(set(SUITE_WEIGHTS) - {suite.name for suite in suites})
+                require(
+                    not stale,
+                    f"SUITE_WEIGHTS lists suites that do not exist: {', '.join(stale)}",
+                )
         if name == "java":
             java_steps = [
                 step
@@ -660,7 +735,8 @@ def validate_toolkit_workflow_errors(
         needs = aggregate.get("needs")
         require(
             isinstance(needs, list)
-            and set(needs) == {"detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"},
+            and set(needs)
+            == {"detect-runner", "lint", "unit-tests", "gitleaks", "python", "node", "java", "modules"},
             "validate aggregate must depend on every required stage",
         )
         require(
@@ -673,7 +749,7 @@ def validate_toolkit_workflow_errors(
             "validate aggregate must use a fixed fallback runner",
         )
         aggregate_text = json.dumps(aggregate)
-        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"):
+        for stage in ("detect-runner", "lint", "unit-tests", "gitleaks", "python", "node", "java", "modules"):
             require(
                 f"needs.{stage}.result" in aggregate_text,
                 f"validate aggregate must fail closed on {stage}",
@@ -699,7 +775,7 @@ def runner_selection_allows_self_hosted(
 
 def validation_aggregate_succeeds(results: dict[str, str]) -> bool:
     """Model the aggregate job's requirement that every stage succeeds."""
-    required = {"detect-runner", "lint", "gitleaks", "python", "node", "java", "modules"}
+    required = {"detect-runner", "lint", "unit-tests", "gitleaks", "python", "node", "java", "modules"}
     return set(results) == required and all(result == "success" for result in results.values())
 
 
@@ -733,7 +809,34 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
 
     mutated = clone()
     del mutated["jobs"]["gitleaks"]
-    require_rejection(mutated, "must define detect-runner, lint, gitleaks", "missing gitleaks job")
+    require_rejection(mutated, "must define detect-runner, lint, unit-tests", "missing gitleaks job")
+
+    mutated = clone()
+    del mutated["jobs"]["unit-tests"]
+    require_rejection(mutated, "must define detect-runner, lint, unit-tests", "missing unit-tests job")
+
+    mutated = clone()
+    mutated["jobs"]["unit-tests"]["strategy"]["matrix"]["shard"] = [1, 2, 3]
+    require_rejection(mutated, "unit-tests job must run only its focused", "shard matrix and command mismatch")
+
+    mutated = clone()
+    mutated["jobs"]["unit-tests"]["strategy"]["matrix"]["exclude"] = [{"shard": 4}]
+    require_rejection(mutated, "must define only the shard axis", "matrix exclude")
+
+    mutated = clone()
+    mutated["jobs"]["unit-tests"]["continue-on-error"] = True
+    require_rejection(mutated, "must not set continue-on-error", "unit-tests continue-on-error")
+
+    mutated = clone()
+    for step in mutated["jobs"]["unit-tests"]["steps"]:
+        if "scripts/run_test_suites.py" in str(step.get("run", "")):
+            step["if"] = False
+    require_rejection(mutated, "suite step must not be conditional", "conditional suite step")
+
+    mutated = clone()
+    lint_step = step_by_name(mutated, "lint", "Validate toolkit policies and templates")
+    lint_step["run"] = "python scripts/validate.py --static"
+    require_rejection(mutated, "lint job must run only its focused", "lint running unit suites")
 
     mutated = clone()
     mutated["jobs"]["gitleaks"]["needs"] = []
@@ -781,9 +884,17 @@ def validate_toolkit_workflow_negative_probes(path: Path) -> list[str]:
     )
     require_rejection(mutated, "fail closed on gitleaks", "aggregate result bypass")
 
+    mutated = clone()
+    aggregate_step = step_by_name(mutated, "validation-complete", "Validate stage results")
+    aggregate_script = str(aggregate_step.get("run", ""))
+    aggregate_step["run"] = "\n".join(
+        line for line in aggregate_script.splitlines() if "needs.unit-tests.result" not in line
+    )
+    require_rejection(mutated, "fail closed on unit-tests", "unit-tests aggregate result bypass")
+
     successful_results = {
         stage: "success"
-        for stage in ("detect-runner", "lint", "gitleaks", "python", "node", "java", "modules")
+        for stage in ("detect-runner", "lint", "unit-tests", "gitleaks", "python", "node", "java", "modules")
     }
     if not validation_aggregate_succeeds(successful_results):
         errors.append(f"{path.relative_to(ROOT)}: aggregate positive probe rejected success")
@@ -2975,7 +3086,8 @@ if GENERATED_RENOVATE_CONFIGS:
 
 # The runner discovers suites and marks their child environment so tests that
 # invoke this validator do not recursively start the suite runner again.
-run([sys.executable, "scripts/run_test_suites.py"])
+if not ARGS.skip_suites:
+    run([sys.executable, "scripts/run_test_suites.py"])
 run(["bash", "-n", "scripts/rollout_ci_kit.sh"])
 
 if not ARGS.static:

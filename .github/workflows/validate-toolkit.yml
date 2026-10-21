@@ -61,7 +61,7 @@ jobs:
           # Lets the shared-preset coverage check read the preset through the API
           # instead of skipping on the unauthenticated rate limit.
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/validate.py --static
+        run: python scripts/validate.py --static --skip-suites
       - name: Test ruleset reconciler
         run: python tests/test_reconcile_ruleset.py
       - name: Validate Renovate configuration
@@ -122,6 +122,48 @@ jobs:
             echo 'Checkout unexpectedly persisted authentication configuration' >&2
             exit 1
           fi
+
+  unit-tests:
+    name: Unit tests (shard ${{ matrix.shard }}/4)
+    needs: detect-runner
+    runs-on: ${{ fromJson(needs.detect-runner.outputs.runs_on) }}
+    if: ${{ github.event_name != 'pull_request_target' }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.15"
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.22.0"
+      - name: Install pinned static-validation dependencies
+        run: python -m pip install PyYAML==6.0.3 copier==9.19.1 jsonschema==4.26.0
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLo "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo actionlint_checksums.txt "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep -F " actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint_checksums.txt | sha256sum -c -
+          tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 actionlint "$HOME/.local/bin/actionlint"
+      - name: Run unit suites
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/run_test_suites.py --shard ${{ matrix.shard }}/4
 
   gitleaks:
     name: Gitleaks
@@ -251,7 +293,7 @@ jobs:
 
   validation-complete:
     name: Validation pipeline complete
-    needs: [detect-runner, lint, gitleaks, python, node, java, modules]
+    needs: [detect-runner, lint, unit-tests, gitleaks, python, node, java, modules]
     runs-on: ubuntu-latest
     if: ${{ always() && github.event_name != 'pull_request_target' }}
     timeout-minutes: 5
@@ -261,6 +303,7 @@ jobs:
         run: |
           if [[ "${{ needs.detect-runner.result }}" != "success" ||
                 "${{ needs.lint.result }}" != "success" ||
+                "${{ needs.unit-tests.result }}" != "success" ||
                 "${{ needs.gitleaks.result }}" != "success" ||
                 "${{ needs.python.result }}" != "success" ||
                 "${{ needs.node.result }}" != "success" ||

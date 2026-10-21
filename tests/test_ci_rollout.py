@@ -59,11 +59,11 @@ class ReleaseGateTests(unittest.TestCase):
 
     def test_preflight_verifies_merged_pending_candidate(self):
         candidate = {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": OTHER}
-        with patch.object(gate, "api", side_effect=[{"sha": SHA}, candidate, {"sha": SHA}]), \
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, [], candidate, {"sha": SHA}]), \
              patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]) as pages, \
              patch.object(gate, "release_ready", return_value=True) as ready:
             self.assertTrue(gate.preflight_ready(REPO, SHA))
-            self.assertEqual(ready.call_args_list[1].args, (REPO, OTHER))
+            self.assertEqual([call.args for call in ready.call_args_list], [(REPO, OTHER)])
             self.assertIn("labels=autorelease%3A%20pending", pages.call_args.args[0])
 
     def test_bad_candidate_and_advanced_main_stop(self):
@@ -73,15 +73,57 @@ class ReleaseGateTests(unittest.TestCase):
 
     def test_candidate_ci_failure_and_late_main_advance_stop(self):
         candidate = {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": OTHER}
-        with patch.object(gate, "api", side_effect=[{"sha": SHA}, candidate]), \
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, [], candidate]), \
              patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]), \
-             patch.object(gate, "release_ready", side_effect=[True, False]):
+             patch.object(gate, "release_ready", return_value=False):
             self.assertFalse(gate.preflight_ready(REPO, SHA))
-        with patch.object(gate, "api", side_effect=[{"sha": SHA}, {"sha": OTHER}]), \
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, [], {"sha": OTHER}]), \
              patch.object(gate, "pages", return_value=[]), \
              patch.object(gate, "release_ready", return_value=True):
             with self.assertRaises(gate.GateError):
                 gate.preflight_ready(REPO, SHA)
+
+    def test_ordinary_push_without_candidates_does_not_wait(self):
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, [], {"sha": SHA}]), \
+             patch.object(gate, "pages", return_value=[]), \
+             patch.object(gate, "release_ready") as ready:
+            self.assertTrue(gate.preflight_ready(REPO, SHA))
+            ready.assert_not_called()
+        ordinary = [{"merged_at": "2026-01-01T00:00:00Z", "head": {"ref": "feature/x"}}]
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, ordinary, {"sha": SHA}]), \
+             patch.object(gate, "pages", return_value=[]), \
+             patch.object(gate, "release_ready") as ready:
+            self.assertTrue(gate.preflight_ready(REPO, SHA))
+            ready.assert_not_called()
+
+    def test_release_merge_trigger_without_candidates_is_waited(self):
+        release = [{"merged_at": "2026-01-01T00:00:00Z", "head": {"ref": "release-please--branches--main"}}]
+        for ready_result in (True, False):
+            with self.subTest(ready=ready_result), \
+                 patch.object(gate, "api", side_effect=[{"sha": SHA}, release, {"sha": SHA}]), \
+                 patch.object(gate, "pages", return_value=[]), \
+                 patch.object(gate, "release_ready", return_value=ready_result) as ready:
+                self.assertEqual(gate.preflight_ready(REPO, SHA), ready_result)
+                ready.assert_called_once_with(REPO, SHA)
+
+    def test_unmerged_release_pull_on_trigger_does_not_wait(self):
+        release = [{"merged_at": None, "head": {"ref": "release-please--branches--main"}}]
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, release, {"sha": SHA}]), \
+             patch.object(gate, "pages", return_value=[]), \
+             patch.object(gate, "release_ready") as ready:
+            self.assertTrue(gate.preflight_ready(REPO, SHA))
+            ready.assert_not_called()
+
+    def test_trigger_that_is_the_candidate_is_waited_once(self):
+        candidate = {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": SHA}
+        release = [{"merged_at": "2026-01-01T00:00:00Z", "head": {"ref": "release-please--branches--main"}}]
+        for trigger_pulls in ([], release):
+            with self.subTest(trigger_pulls=trigger_pulls), \
+                 patch.object(gate, "api", side_effect=[{"sha": SHA}, trigger_pulls, candidate, {"sha": SHA}]), \
+                 patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]), \
+                 patch.object(gate, "release_ready", return_value=True) as ready:
+                self.assertTrue(gate.preflight_ready(REPO, SHA))
+                ready.assert_called_once_with(REPO, SHA)
 
     def test_post_tag_checks_the_resolved_commit(self):
         with patch.object(sys, "argv", ["gate", "--repository", REPO, "--ref", "v1.2.3"]), \
@@ -89,7 +131,7 @@ class ReleaseGateTests(unittest.TestCase):
              patch.object(gate, "release_ready", return_value=True) as ready:
             self.assertEqual(gate.main(), 0)
             self.assertEqual(ready.call_args.args, (REPO, OTHER))
-        with patch.object(gate, "api", side_effect=[{"sha": SHA}, {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": "bad"}]), \
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, [], {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": "bad"}]), \
              patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]), \
              patch.object(gate, "release_ready", return_value=True):
             with self.assertRaises(gate.GateError):

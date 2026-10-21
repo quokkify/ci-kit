@@ -102,8 +102,13 @@ def preflight_ready(repository: str, sha: str) -> bool:
     current = api(f"repos/{repository}/commits/main")
     if not isinstance(current, dict) or current.get("sha") != sha:
         raise GateError("Main advanced since this release run started; rerun on the current revision")
-    if not release_ready(repository, sha):
-        return False
+    trigger_pulls = api(f"repos/{repository}/commits/{sha}/pulls?per_page=100")
+    if not isinstance(trigger_pulls, list) or not all(isinstance(item, dict) for item in trigger_pulls):
+        raise GateError("Malformed trigger commit pull request response")
+    waits = [sha] if any(
+        item.get("merged_at") and str(item.get("head", {}).get("ref", "")).startswith("release-please--")
+        for item in trigger_pulls
+    ) else []
     candidates = pages(f"repos/{repository}/issues?state=closed&labels=autorelease%3A%20pending")
     for issue in candidates:
         if "pull_request" not in issue:
@@ -116,7 +121,10 @@ def preflight_ready(repository: str, sha: str) -> bool:
         candidate_sha = pull.get("merge_commit_sha")
         if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
             raise GateError("Pending release PR has no exact merged revision")
-        if not release_ready(repository, candidate_sha):
+        if candidate_sha not in waits:
+            waits.append(candidate_sha)
+    for revision in waits:
+        if not release_ready(repository, revision):
             return False
     # API reads above can take time. An advanced branch must not pass preflight.
     current = api(f"repos/{repository}/commits/main")
