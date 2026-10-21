@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/quokkify/ci-kit/compare/v3.2.3...v3.3.0) (2026-10-21)
+
+
+### ✨ Features
+
+* **migration:** switch required checks in an unmanaged repository ruleset ([#446](https://github.com/quokkify/ci-kit/issues/446)) ([66863d6](https://github.com/quokkify/ci-kit/commit/66863d606cdba703726a05b37ceaea8eabbc261f))
+
 ## [3.2.3](https://github.com/quokkify/ci-kit/compare/v3.2.2...v3.2.3) (2026-10-21)
 
 
