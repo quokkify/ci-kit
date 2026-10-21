@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
+from ci_kit.legacy_jobs import MappingError
 from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
 from ci_kit.plan import Finding, build_plan
 from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo, mkdtemp
@@ -37,15 +38,19 @@ class CheckNamesTests(unittest.TestCase):
         repo = legacy_scenario_repo(template(), "allure-external")
         self.assertEqual(legacy_check_names(repo / VALIDATE), ["Shared template contract"])
 
-    def test_reusable_workflow_jobs_are_refused(self):
+    def test_component_jobs_get_exact_contexts(self):
         repo = legacy_scenario_repo(template(), "java")
-        with self.assertRaisesRegex(ValueError, "reusable workflow"):
-            legacy_check_names(repo / VALIDATE)
+        self.assertEqual(legacy_check_names(repo / VALIDATE), ["Shared template contract", "Application Java / ci"])
 
-    def test_job_id_used_when_name_missing(self):
+    def test_docker_job_context(self):
+        repo = legacy_scenario_repo(template(), "docker")
+        self.assertEqual(legacy_check_names(repo / VALIDATE)[-1], "docker / build")
+
+    def test_job_without_mapping_is_refused(self):
         path = mkdtemp("names-") / "validate.yml"
-        path.write_text("name: V\non: push\njobs:\n  alpha:\n    runs-on: x\n  beta:\n    name: Beta Job\n    runs-on: x\n")
-        self.assertEqual(legacy_check_names(path), ["alpha", "Beta Job"])
+        path.write_text("name: V\non: push\njobs:\n  alpha:\n    runs-on: x\n")
+        with self.assertRaisesRegex(MappingError, "alpha"):
+            legacy_check_names(path)
 
 
 class PreconditionTests(unittest.TestCase):
@@ -116,12 +121,14 @@ class PreconditionTests(unittest.TestCase):
         self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
         self.assertEqual(git(repo, "status", "--porcelain"), "")
 
-    def test_reusable_workflow_job_without_components_is_005(self):
-        repo = legacy_scenario_repo(template(), "allure-external", overrides={"docker": True})
+    def test_job_without_mapping_is_005(self):
+        repo = legacy_scenario_repo(template(), "allure-external")
         head = git(repo, "rev-parse", "HEAD")
-        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        error = MappingError("job complete does not call a reusable workflow", "complete")
+        with mock.patch("ci_kit.migrate.legacy_check_names", side_effect=error):
+            result = migrate(repo, "core", "v99.0.0", src_override=self.src)
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
-        self.assertIn("docker", result.findings[0].message)
+        self.assertIn("complete", result.findings[0].message)
         self.assertEqual(result.commits, [])
         self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
 

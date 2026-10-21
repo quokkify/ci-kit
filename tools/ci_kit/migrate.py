@@ -11,6 +11,7 @@ import yaml
 from .drift import DIFF_LINES, RENDER_TIMEOUT, TRUSTED_SRC_RE, RenderError, _copier, _diff, _normalize, render_module
 from .handoff import AREAS, area_for_module
 from .legacy import ANSWERS, load_answers
+from .legacy_jobs import check_contexts
 from .plan import Finding, build_plan, discover
 from .update import _git, _rejects, commit_all, copier_update_command
 
@@ -74,17 +75,7 @@ def parse_marker(body: str) -> dict:
 
 
 def legacy_check_names(validate_yml: Path) -> list[str]:
-    data = yaml.safe_load(Path(validate_yml).read_text())
-    jobs = data.get("jobs") if isinstance(data, dict) else None
-    if not isinstance(jobs, dict):
-        return []
-    names = []
-    for job_id, job in jobs.items():
-        if isinstance(job, dict) and "uses" in job:
-            raise ValueError(f"job {job_id} calls a reusable workflow; its check names cannot be derived")
-        name = job.get("name") if isinstance(job, dict) else None
-        names.append(str(name) if name else str(job_id))
-    return names
+    return check_contexts(yaml.safe_load(Path(validate_yml).read_text()))
 
 
 def copier_copy_command(module: str, to: str, src: str) -> list[str]:
