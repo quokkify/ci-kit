@@ -17,15 +17,19 @@ EXCLUDED_SUITES: frozenset[str] = frozenset()
 
 
 SUITE_WEIGHTS: dict[str, int] = {
-    "test_ci_kit_drift.py": 37,
-    "test_migration_lifecycle.py": 36,
-    "test_ci_kit_update.py": 34,
-    "test_ci_kit_migrate.py": 34,
-    "test_module_selector.py": 31,
-    "test_modules_lifecycle.py": 25,
-    "test_ci_kit_plan.py": 24,
-    "test_composite_actions.py": 15,
+    "test_ci_kit_update.py": 42,
+    "test_migration_lifecycle.py": 40,
+    "test_ci_kit_migrate.py": 38,
+    "test_module_selector.py": 30,
+    "test_modules_lifecycle.py": 30,
+    "test_ci_kit_drift.py": 28,
+    "test_ci_kit_plan.py": 27,
+    "test_ci_kit_legacy.py": 15,
     "test_allure_publisher.py": 14,
+    "test_update_copier_fleet.py": 13,
+    "test_composite_actions.py": 12,
+    "test_modules_render.py": 9,
+    "test_release_notes_config.py": 7,
 }
 DEFAULT_WEIGHT = 3
 
