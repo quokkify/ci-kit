@@ -9,14 +9,16 @@ from pathlib import Path
 import yaml
 
 from .drift import DIFF_LINES, RENDER_TIMEOUT, TRUSTED_SRC_RE, RenderError, _copier, _diff, _normalize, render_module
+from .equivalence import VALIDATE_PATH, equivalence_findings
 from .handoff import AREAS, area_for_module
 from .legacy import ANSWERS, load_answers
+from .legacy_jobs import LegacyJob, MappingError, check_contexts, component_job_ids, legacy_to_modules, parse_jobs
 from .plan import Finding, build_plan, discover
 from .update import _git, _rejects, commit_all, copier_update_command
 
 MARKER = "<!-- ci-kit-migrate -->"
 CHECKS_AFTER = {"core": ["ci / gate"]}
-PAYLOAD_KEYS = ("module", "area", "ref", "checks_before", "checks_after", "commits", "findings")
+PAYLOAD_KEYS = ("module", "area", "ref", "checks_before", "checks_after", "commits", "findings", "modules")
 
 
 @dataclass
@@ -28,6 +30,7 @@ class MigrateResult:
     checks_after: list[str] = field(default_factory=list)
     commits: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
+    modules: list[str] = field(default_factory=list)
 
 
 def result_payload(result: MigrateResult) -> dict:
@@ -42,6 +45,7 @@ def result_payload(result: MigrateResult) -> dict:
             {"code": f.code, "module": f.module, "message": f.message, "path": f.path}
             for f in result.findings
         ],
+        "modules": result.modules,
     }
 
 
@@ -74,26 +78,22 @@ def parse_marker(body: str) -> dict:
 
 
 def legacy_check_names(validate_yml: Path) -> list[str]:
-    data = yaml.safe_load(Path(validate_yml).read_text())
-    jobs = data.get("jobs") if isinstance(data, dict) else None
-    if not isinstance(jobs, dict):
-        return []
-    names = []
-    for job_id, job in jobs.items():
-        if isinstance(job, dict) and "uses" in job:
-            raise ValueError(f"job {job_id} calls a reusable workflow; its check names cannot be derived")
-        name = job.get("name") if isinstance(job, dict) else None
-        names.append(str(name) if name else str(job_id))
-    return names
+    return check_contexts(yaml.safe_load(Path(validate_yml).read_text()))
 
 
-def copier_copy_command(module: str, to: str, src: str) -> list[str]:
-    if to.startswith("-") or src.startswith("-"):
-        raise ValueError(f"option-like ref or source: {to if to.startswith('-') else src}")
+def copier_copy_command(module: str, to: str, src: str, data: dict[str, object] | None = None) -> list[str]:
+    values = {
+        key: value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        for key, value in (data or {}).items()
+    }
+    for item in (to, src, *values, *values.values()):
+        if item.startswith("-"):
+            raise ValueError(f"option-like ref, source or data: {item}")
     return [
         *_copier(), "copy", "--defaults", "--quiet",
         "-a", f".copier-answers.{module}.yml",
         "-d", f"module={module}", "-d", f"toolkit_version={to}",
+        *[arg for key, value in values.items() for arg in ("-d", f"{key}={value}")],
         "--vcs-ref", to, "--", src, ".",
     ]
 
@@ -111,6 +111,34 @@ def _run(command: list[str], repo: Path) -> str | None:
     return None
 
 
+def _without_components(text: str, toolkit_version: str) -> dict:
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError("not a mapping")
+    jobs = data.get("jobs")
+    if isinstance(jobs, dict):
+        skip = component_job_ids(data, toolkit_version)
+        data = {**data, "jobs": {key: value for key, value in jobs.items() if str(key) not in skip}}
+    return data
+
+
+def _validate_difference(path: str, wanted: bytes, actual: bytes, toolkit_version: str) -> str | None:
+    try:
+        expected = _without_components(_normalize(wanted), toolkit_version)
+        current = _without_components(_normalize(actual), toolkit_version)
+    except (yaml.YAMLError, ValueError) as error:
+        return f"{path} cannot be compared with the legacy render: {error}"
+    if expected == current:
+        return None
+    dump = lambda data: json.dumps(data, indent=1, default=str)
+    return f"{path} differs from the legacy render\n{_diff(path, dump(expected), dump(current))}"
+
+
+def _toolkit_version(legacy: dict | None) -> str:
+    legacy = legacy or {}
+    return str(legacy.get("toolkit_version") or legacy.get("_commit") or "")
+
+
 def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src_override: str | None) -> list[Finding]:
     answers_path = repo / ANSWERS
     with tempfile.TemporaryDirectory() as tmp:
@@ -118,6 +146,7 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
             files = render_module(answers_path, Path(tmp) / "render", src_override)
         except RenderError as error:
             return [Finding("CIK-MIGRATE-003", module, str(error), ANSWERS)]
+    toolkit_version = _toolkit_version(load_answers(repo)[0])
     findings = []
     for path in area_paths:
         target = repo / path
@@ -125,6 +154,10 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
             findings.append(Finding("CIK-MIGRATE-003", module, f"{path} is not rendered by the legacy template", path))
         elif not target.is_file():
             findings.append(Finding("CIK-MIGRATE-003", module, f"{path} is missing from the repo", path))
+        elif path == VALIDATE_PATH:
+            message = _validate_difference(path, files[path], target.read_bytes(), toolkit_version)
+            if message:
+                findings.append(Finding("CIK-MIGRATE-003", module, message, path))
         else:
             actual, wanted = _normalize(target.read_bytes()), _normalize(files[path])
             if actual != wanted:
@@ -160,8 +193,6 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     legacy, error = load_answers(repo)
     if legacy is None:
         return fail("CIK-MIGRATE-002", error or f"cannot read {ANSWERS}", ANSWERS)
-    if area_name == "validate" and legacy.get("components"):
-        return fail("CIK-MIGRATE-005", "repository has language components; migrate after language modules exist", ANSWERS)
     if str(legacy.get("_commit") or "") != to:
         return fail("CIK-MIGRATE-002", f"legacy _commit is {legacy.get('_commit')}, not {to}; run ci-kit update --module legacy --to {to} first", ANSWERS)
     handed = legacy.get("handed_off", [])
@@ -172,16 +203,29 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     src = str(legacy.get("_src_path") or "")
     if src_override is None and not TRUSTED_SRC_RE.fullmatch(src):
         return fail("CIK-MIGRATE-002", f"untrusted template source: {src}", ANSWERS)
+    jobs: list[LegacyJob] = []
+    checks: list[str] = []
+    validate = repo / area.legacy_paths[0]
+    try:
+        data = yaml.safe_load(validate.read_text()) if validate.is_file() else None
+    except yaml.YAMLError:
+        data = None
+    if isinstance(data, dict):
+        try:
+            jobs = parse_jobs(data, _toolkit_version(legacy))
+            checks = check_contexts(data)
+        except MappingError as error:
+            return fail(
+                "CIK-MIGRATE-005",
+                f"{error}; it cannot be mapped to a module, move it to a project-owned workflow in a preparatory pull request",
+                area.legacy_paths[0],
+            )
     findings = _contract_findings(repo, module, area.legacy_paths, src_override)
     if findings:
         result.findings = findings
         return result
 
-    validate = repo / area.legacy_paths[0]
-    try:
-        result.checks_before = legacy_check_names(validate) if validate.is_file() else []
-    except ValueError as error:
-        return fail("CIK-MIGRATE-005", f"{error}; migrate after its owner module exists", area.legacy_paths[0])
+    declarations = legacy_to_modules(jobs)
     head = _git(repo, "rev-parse", "HEAD")
     commits: list[str] = []
 
@@ -206,14 +250,23 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
         sha = commit_all(repo, f"chore(ci-kit): hand off {area_name} to {module}")
         if sha:
             commits.append(sha)
-        problem = _run(copier_copy_command(module, to, src_override or src), repo)
-        if problem:
-            return abort(f"copier copy failed: {problem}")
-        sha = commit_all(repo, f"chore(ci-kit): add {module} module")
-        if sha:
-            commits.append(sha)
+        for name, answers in declarations:
+            problem = _run(copier_copy_command(name, to, src_override or src, answers), repo)
+            if problem:
+                return abort(f"copier copy of {name} failed: {problem}")
+            sha = commit_all(repo, f"chore(ci-kit): add {name} module")
+            if sha:
+                commits.append(sha)
     except (ValueError, RuntimeError) as error:
         return abort(str(error))
+    plan = build_plan(repo, src_override=src_override)
+    mismatches = equivalence_findings(jobs, plan)
+    if mismatches:
+        _rollback(repo, head)
+        result.findings = mismatches
+        return result
+    result.checks_before = checks
+    result.modules = [name for name, _ in declarations]
     result.commits = commits
-    result.findings = build_plan(repo, src_override=src_override).findings
+    result.findings = plan.findings
     return result

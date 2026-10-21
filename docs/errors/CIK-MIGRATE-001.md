@@ -4,7 +4,7 @@
 
 ## Cause
 
-Tracked changes or untracked files exist. Migration makes two commits and must start from a clean tree. The same code is reported when the directory is not a git repository, `git status` fails, or the `git` binary cannot be run (the message says which).
+Tracked changes or untracked files exist. Migration makes the hand-off commit plus one commit per module and must start from a clean tree. The same code is reported when the directory is not a git repository, `git status` fails, or the `git` binary cannot be run (the message says which).
 
 ## Fix
 

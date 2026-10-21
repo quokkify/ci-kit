@@ -38,7 +38,11 @@ The fleet inventory and the health report classify every repository by its answe
 
 ## Migrating one repository
 
-Update and migrate never share a PR. The repository must already be on the target ref (`needs-update-first` otherwise). Repositories with language `components` cannot migrate yet (see [Blockers](#blockers)).
+Update and migrate never share a PR. The repository must already be on the target ref (`needs-update-first` otherwise).
+
+The module set is derived from the jobs of the legacy `validate.yml`: a job calling a ci-kit language workflow becomes a component of `java`, `python` or `node`, a `docker` job becomes a `docker` component, and `core` is always installed. Modules are installed in the order core, java, python, node, docker, one commit each. Hand-edited `with:` inputs of those jobs are carried into the module declarations. After the commits, an equivalence check compares every migrated component with its legacy job (effective workflow inputs) and the set of jobs; on a mismatch the changes are rolled back and `CIK-MIGRATE-005` is reported.
+
+A job that cannot be mapped (hand-added steps, `needs`, `if`, an aggregator job such as `complete`, an unknown input) is `CIK-MIGRATE-005`. Fix it in a preparatory pull request first: move the hand-added steps or aggregator job into a project-owned workflow with its own required check, switch the required checks to it, merge, then migrate.
 
 1. Dry run, then the real run:
 
@@ -47,8 +51,8 @@ Update and migrate never share a PR. The repository must already be on the targe
    python scripts/update_copier_fleet.py --repo OWNER/REPO --migrate core
    ```
 
-   The dry run reports `would-migrate` for a repository it would migrate, without pushing. The real run opens a PR on `ci-kit/migrate-core` that removes legacy `validate.yml` and adds the `core` module. For pilot rings use `rollout_copier_fleet.py --migrate core` (pilots: `MIGRATE_PILOTS` in that script).
-2. Wait for the PR check `ci / gate` to be green.
+   The dry run reports `would-migrate` for a repository it would migrate, without pushing. The real run opens a PR on `ci-kit/migrate-core` that removes legacy `validate.yml` and adds `core` and the modules derived from its jobs. For pilot rings use `rollout_copier_fleet.py --migrate core` (pilots: `MIGRATE_PILOTS` in that script).
+2. Wait for the PR check `ci / gate` to be green. The migration marker records `checks_before`: `Shared template contract` plus the exact contexts of the legacy jobs, `<job name> / ci` for each language component and `docker / build` for docker, and `checks_after`: `ci / gate`.
 3. Preview the required-checks switch, then apply it:
 
    ```console
@@ -98,13 +102,13 @@ Copier does not support downgrades, so rollback is a revert:
 Fleet statuses in migrate mode:
 
 - `would-migrate`: dry run only; the migration succeeded in a scratch clone and nothing was pushed.
-- `not-applicable`: no legacy answers, module already installed, or area already handed off. Also repositories with language `components` (detail `language components`, checked before cloning) and repositories whose `validate.yml` has another reusable-workflow job such as `docker` (`CIK-MIGRATE-005`, detail is its message): the `core` module would drop those jobs. They stay on the legacy template until the language-module waves; these do not fail the run.
+- `not-applicable`: no legacy answers, module already installed, or area already handed off.
 - `needs-update-first`: legacy `_commit` differs from the target ref. Run the normal fleet update first, or `ci-kit update --repo . --module legacy --to <ref>`, then migrate.
-- `migrate-rejected`: `ci-kit doctor` findings or a `CIK-MIGRATE-*` refusal other than `CIK-MIGRATE-005`. No branch, commit or PR is created and the run exits 1. The `detail` lists the codes; the JSON report holds `repositories[].migration` with findings and doctor output.
+- `migrate-rejected`: `ci-kit doctor` findings or a `CIK-MIGRATE-*` refusal, including `CIK-MIGRATE-005`. No branch, commit or PR is created and the run exits 1. The `detail` lists the codes; the JSON report holds `repositories[].migration` with findings and doctor output.
 
-Run directly, `ci-kit migrate` runs the `ci-kit plan` checks on the result after its two commits. If they report findings, the command exits 1 but keeps both commits in the repository; inspect them and undo with `git reset --hard HEAD~2` if needed. The fleet migrates in a throwaway clone, so a rejected migration leaves nothing behind there.
+Run directly, `ci-kit migrate` runs the `ci-kit plan` checks on the result after its commits (the hand-off commit plus one commit per module). If they report findings, the command exits 1 but keeps the commits in the repository; inspect them and undo with `git reset --hard <pre-migration HEAD>` (the parent of the first commit `ci-kit migrate` printed, `<first-sha>^`; or record `git rev-parse HEAD` before migrating) if needed. The fleet migrates in a throwaway clone, so a rejected migration leaves nothing behind there.
 
-`CIK-MIGRATE-003` means a file the module takes over (`.github/workflows/validate.yml`) was hand-edited and differs from the legacy render at the recorded `_commit`; the finding message holds the diff. Revert the edit to the rendered content, or move the custom logic into a project-owned workflow, then migrate again. See [CIK-MIGRATE-003](errors/CIK-MIGRATE-003.md); related runbooks: [001](errors/CIK-MIGRATE-001.md) (dirty tree), [002](errors/CIK-MIGRATE-002.md) (legacy `_commit` != target), [004](errors/CIK-MIGRATE-004.md) (nothing to hand off), [005](errors/CIK-MIGRATE-005.md) (language components or reusable-workflow jobs).
+`CIK-MIGRATE-003` means a file the module takes over (`.github/workflows/validate.yml`) was hand-edited and differs from the legacy render at the recorded `_commit`; the finding message holds the diff. For `validate.yml` the check is narrowed: `with:` edits of component jobs are migrated into the module declarations, while triggers, `permissions`, `concurrency`, `template-contract` and non-component jobs must still match the render. Revert such an edit to the rendered content, or move the custom logic into a project-owned workflow, then migrate again. See [CIK-MIGRATE-003](errors/CIK-MIGRATE-003.md); related runbooks: [001](errors/CIK-MIGRATE-001.md) (dirty tree), [002](errors/CIK-MIGRATE-002.md) (legacy `_commit` != target), [004](errors/CIK-MIGRATE-004.md) (nothing to hand off), [005](errors/CIK-MIGRATE-005.md) (jobs or inputs a module cannot reproduce, or an equivalence mismatch).
 
 ## The `Validate` name
 

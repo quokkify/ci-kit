@@ -187,6 +187,17 @@ def component_less_scenarios() -> list[str]:
     return names
 
 
+def component_scenarios() -> list[str]:
+    import yaml
+
+    names = []
+    for path in sorted((ROOT / "tests/scenarios").glob("*.yml")):
+        data = yaml.safe_load(path.read_text())
+        if isinstance(data, dict) and (data.get("components") or data.get("docker")):
+            names.append(path.stem)
+    return names
+
+
 def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0", overrides: dict | None = None) -> Path:
     import yaml
 

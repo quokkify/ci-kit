@@ -78,6 +78,12 @@ class NextChecksTests(TestCase):
     def test_idempotent_when_already_applied(self):
         self.assertEqual(module.next_checks(["Gitleaks", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=False), ["Gitleaks", "ci / gate"])
 
+    def test_component_checks_replaced_and_foreign_context_kept(self):
+        self.assertEqual(
+            module.next_checks(["Lint / docker", "Shared template contract", "App Python / ci"], ["Shared template contract", "App Python / ci"], ["ci / gate"], revert=False),
+            ["Lint / docker", "ci / gate"],
+        )
+
     def test_revert(self):
         self.assertEqual(module.next_checks(["Gitleaks", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True), ["Gitleaks", "Shared template contract"])
 
@@ -115,19 +121,23 @@ class LegacyChecksTests(TestCase):
         with self.assertRaises(module.Refusal):
             self.read(None)
 
-    def test_reusable_workflow_job_refused(self):
-        with self.assertRaisesRegex(module.Refusal, "docker.*reusable workflow"):
+    def test_job_without_mapping_refused(self):
+        with self.assertRaisesRegex(module.Refusal, "job a has no ci-kit"):
             self.read(encoded("jobs:\n  a:\n    name: Alpha\n  docker:\n    uses: quokkify/ci-kit/.github/workflows/docker-build.yml@v1.0.0\n"))
+
+    def test_component_jobs_give_exact_contexts(self):
+        text = "jobs:\n  template-contract:\n    name: Shared template contract\n  app:\n    name: App Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v1.0.0\n  docker:\n    uses: quokkify/ci-kit/.github/workflows/docker-build.yml@v1.0.0\n"
+        self.assertEqual(self.read(encoded(text)), ["Shared template contract", "App Python / ci", "docker / build"])
 
     def test_job_names_and_endpoint(self):
         seen = []
 
         def fake(endpoint):
             seen.append(endpoint)
-            return encoded("jobs:\n  a:\n    name: Alpha\n  b:\n    runs-on: x\n")
+            return encoded("jobs:\n  a:\n    name: Alpha\n    uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v1.0.0\n")
 
         with patch.object(module, "api_request", fake):
-            self.assertEqual(module.legacy_checks_at("o/r", BASE), ["Alpha", "b"])
+            self.assertEqual(module.legacy_checks_at("o/r", BASE), ["Alpha / ci"])
         self.assertIn(".github/workflows/validate.yml", seen[0])
         self.assertIn(f"?ref={BASE}", seen[0])
 
