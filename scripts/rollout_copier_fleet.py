@@ -42,14 +42,12 @@ def pilot_migration(repository: str, pr: int) -> tuple[tuple[str, ...], str]:
 
 def run_update(arguments: list[str], report: Path) -> dict:
     command = [sys.executable, str(Path(__file__).with_name("update_copier_fleet.py")),
-               *arguments, "--json-report", str(report), "--markdown-report", str(report.with_suffix(".md"))]
+               *arguments, "--json-report", str(report)]
     result = subprocess.run(command, check=False)
     if not report.is_file():
         raise GateError(f"Fleet updater stopped with exit code {result.returncode}; see {report}")
     payload = json.loads(report.read_text())
     payload["_exit_code"] = result.returncode
-    markdown = report.with_suffix(".md")
-    payload["_markdown"] = markdown.read_text() if markdown.is_file() else ""
     return payload
 
 
@@ -97,6 +95,8 @@ def rollout(arguments: list[str]) -> None:
     gates = []
     verified = []
     fanout_started = False
+    stopped = None
+    fanout_failed = False
     try:
         with tempfile.TemporaryDirectory(prefix="toolkit-canary-") as temporary:
             directory = Path(temporary)
@@ -148,14 +148,20 @@ def rollout(arguments: list[str]) -> None:
             stage_reports.append(report)
             repositories.extend(report["repositories"])
             if report.get("_exit_code", 0):
+                fanout_failed = True
                 raise GateError("Remaining fleet updater failed; inspect the partial report")
+    except BaseException as exc:
+        if not fanout_failed:
+            stopped = re.sub(r"\S*toolkit-canary-\S*", "the stage report", str(exc)) or type(exc).__name__
+        raise
     finally:
         counts = {}
         for item in repositories:
             counts[item["status"]] = counts.get(item["status"], 0) + 1
-        report = {"schema_version": max((stage.get("schema_version", 3) for stage in stage_reports), default=3),
+        report = {"schema_version": max([6, *(stage.get("schema_version", 3) for stage in stage_reports)]),
                   "summary": counts, "repositories": repositories,
-                  "rollout": {"target": target, "pilots": gates, "fanout_started": fanout_started}}
+                  "rollout": {"target": target, "pilots": gates, "fanout_started": fanout_started, "stopped": stopped},
+                  "run": fleet.run_metadata("write", target, os.environ.copy(), args.template_ref)}
         for key in ("configuration_gaps", "configuration_mismatches"):
             report[key] = sum(stage.get(key, 0) for stage in stage_reports)
         # Retain additive top-level report metadata (for example health-policy
@@ -169,11 +175,12 @@ def rollout(arguments: list[str]) -> None:
             args.json_report.write_text(json.dumps(report, indent=2) + "\n")
         if args.markdown_report:
             args.markdown_report.parent.mkdir(parents=True, exist_ok=True)
-            lines = ["## Copier pilot rollout", "", f"Target: `{target}`", ""]
-            lines.extend(f"- {gate['repository']}: verified `{gate['revision']}`" for gate in gates)
-            lines.extend(["", f"Repositories processed: {len(repositories)}. See the JSON artifact and logs for detail."])
-            lines.extend(stage["_markdown"] for stage in stage_reports if stage.get("_markdown"))
-            args.markdown_report.write_text("\n".join(lines) + "\n")
+            try:
+                markdown = fleet.markdown_report(fleet.results_from_report(report), counts, report["run"], report["rollout"])
+            except Exception as exc:
+                markdown = (f"## Copier fleet: ❌ action required — {'rollout stopped' if stopped else 'report rendering failed'}\n\n"
+                            f"The summary could not be rendered ({type(exc).__name__}); see the job log and JSON report.\n")
+            args.markdown_report.write_text(markdown)
 
 
 def main() -> int:

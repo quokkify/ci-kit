@@ -266,16 +266,18 @@ class HealthTests(TestCase):
         result = api.collect({"reason": "| injected\n# <script>`[evil](url)", "expires_on": "2026-10-01"})
         item = fleet.Result("acme/demo", "pull-request", "PR created", health=result)
         parsed = json.loads(fleet.json_report([item], {"pull-request": 1}))
-        self.assertEqual(parsed["schema_version"], 5)
+        self.assertEqual(parsed["schema_version"], 6)
         self.assertEqual(parsed["repositories"][0]["status"], "pull-request")
         self.assertEqual(parsed["repositories"][0]["health"], result)
         markdown = fleet.markdown_report([item], {"pull-request": 1})
-        self.assertIn("Copier fleet audit", markdown)
-        self.assertIn("Adoption and branch health", markdown)
+        self.assertIn("## Copier fleet:", markdown)
+        row = next(line for line in markdown.splitlines() if line.startswith("| [demo]") and "injected" in line)
+        self.assertEqual(row.count("|"), 5)
         self.assertNotIn("<script>", markdown)
         self.assertNotIn("\n# <script>", markdown)
-        self.assertIn("\\| injected", markdown)
-        self.assertIn("&lt;script&gt;", markdown)
+        self.assertNotIn("\\|", markdown)
+        self.assertIn("&#124; injected", markdown)
+        self.assertIn("&#60;script&#62;", markdown)
 
 
 if __name__ == "__main__":
