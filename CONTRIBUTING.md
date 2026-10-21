@@ -32,6 +32,14 @@ Each file is loaded through unittest in an isolated process, including files wit
 a `unittest.main()` entrypoint. You can run the runner directly for focused
 verification. Missing suites and files without test cases fail closed.
 
+CI runs the suites as four parallel `unit-tests` matrix shards, each invoked as
+`python scripts/run_test_suites.py --shard I/4`; `--list-shards 4` prints the layout.
+Shards are balanced by the `SUITE_WEIGHTS` table in the runner (approximate seconds
+per suite); update it when suite durations shift noticeably. New suites need no edit
+and land in exactly one shard at the default weight. `validate.py` fails when the
+shards do not cover every suite once or when a weight names a missing suite, and
+`python scripts/validate.py --skip-suites` skips the runner for jobs that shard it.
+
 CodeQL scans toolkit scripts, tests, shipped actions, and executable workflows.
 The Actions analysis also renders all `tests/scenarios/*.yml` from the current
 working tree before initialization. Generated YAML is temporarily placed under
