@@ -61,6 +61,18 @@ class PlanTests(unittest.TestCase):
         found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
         self.assertEqual([(f.module, f.path) for f in found], [("python", ".ci/modules/python.yml")])
 
+    def test_duplicate_component_id_within_a_module_is_core_005(self):
+        repo = modules_repo({"python": [{"id": "a", "name": "A", "path": "."}, {"id": "a", "name": "B", "path": "."}]})
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
+        self.assertEqual([(f.module, f.path) for f in found], [("python", ".ci/modules/python.yml")])
+        self.assertIn("declared more than once", found[0].message)
+
+    def test_duplicate_component_name_within_a_module_is_core_005(self):
+        repo = modules_repo({"node": [{"id": "a", "name": "Same", "path": "."}, {"id": "b", "name": "Same", "path": "."}]})
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
+        self.assertEqual([(f.module, f.path) for f in found], [("node", ".ci/modules/node.yml")])
+        self.assertIn("name Same is used by more than one component", found[0].message)
+
     def test_numeric_version_is_core_004(self):
         repo = modules_repo({"node": [{"id": "web", "name": "Web", "path": ".", "node_version": 24}]})
         self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])

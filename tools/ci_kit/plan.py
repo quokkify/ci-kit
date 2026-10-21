@@ -107,10 +107,19 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
 
     seen: dict[str, str] = {}
     for module in sorted(loaded):
+        module_ids: set[str] = set()
+        module_names: set[str] = set()
         for component in loaded[module].get("components", []):
             owner = seen.setdefault(component["id"], module)
             if owner != module:
                 findings.append(Finding("CIK-CORE-005", module, f"component id {component['id']} is already declared by module {owner}", f".ci/modules/{module}.yml"))
+            elif component["id"] in module_ids:
+                findings.append(Finding("CIK-CORE-005", module, f"component id {component['id']} is declared more than once in module {module}", f".ci/modules/{module}.yml"))
+            module_ids.add(component["id"])
+            name = component.get("name", component["id"])
+            if name in module_names:
+                findings.append(Finding("CIK-CORE-005", module, f"component name {name} is used by more than one component in module {module}", f".ci/modules/{module}.yml"))
+            module_names.add(name)
 
     modules = sorted(loaded)
     module_owned: set[str] = set()
