@@ -40,6 +40,12 @@ def pilot_migration(repository: str, pr: int) -> tuple[tuple[str, ...], str]:
     return tuple(checks), head
 
 
+def merged_repositories(repositories: list[dict]) -> list[dict]:
+    """Drop a stage's `excluded` entry for a repository another stage processed."""
+    processed = {item["repository"] for item in repositories if item["status"] != "excluded"}
+    return [item for item in repositories if item["status"] != "excluded" or item["repository"] not in processed]
+
+
 def run_update(arguments: list[str], report: Path) -> dict:
     command = [sys.executable, str(Path(__file__).with_name("update_copier_fleet.py")),
                *arguments, "--json-report", str(report)]
@@ -157,6 +163,7 @@ def rollout(arguments: list[str]) -> None:
             stopped = re.sub(r"\S*toolkit-canary-\S*", "the stage report", str(exc)) or type(exc).__name__
         raise
     finally:
+        repositories = merged_repositories(repositories)
         counts = {}
         for item in repositories:
             counts[item["status"]] = counts.get(item["status"], 0) + 1

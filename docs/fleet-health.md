@@ -75,13 +75,15 @@ dry-run drift only; `🔀 N PRs open` when PRs are only in flight; otherwise
 fanout results. The context line shows mode, time, job log and target only
 from the `run` block, never guessed, plus excluded repositories and the PRs
 waiting on CI or ready to merge, and the PRs auto-merging or merged by
-`--auto-merge`. Those PRs are not attention rows.
+`--auto-merge`. Those PRs are not attention rows. An open pilot PR whose head
+matches a successful pilot gate shows `CI ✅ · pilot gate`; this is render-only,
+the JSON keeps the raw PR evidence and the gate result in `rollout.pilots`.
 
 `Needs your attention` has one row per repository, ordered conflict, failure,
 PR with failed CI, auto-merge failed, failing CI on `main`, configuration gap, needs update first,
 drift, unrecognized status; any status the report does not know is shown with
-its raw value. Re-run commands (for failed repositories, repeating an explicit
-template ref) and raw errors follow in a collapsed block. `not-managed`,
+its raw value. Re-run commands (for failed repositories and, in dry runs, the
+write-mode command for drift, repeating an explicit template ref) and raw errors follow in a collapsed block. `not-managed`,
 `not-applicable` and `foreign-template` repositories appear only in the fleet
 table and do not count as managed. The collapsed fleet table lists Template,
 CI on `main` (passed/required checks, with `?` for checks without exact-revision
