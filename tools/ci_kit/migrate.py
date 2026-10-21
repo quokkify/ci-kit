@@ -11,10 +11,11 @@ import yaml
 from .drift import DIFF_LINES, RENDER_TIMEOUT, TRUSTED_SRC_RE, RenderError, _copier, _diff, _normalize, render_module
 from .handoff import AREAS, area_for_module
 from .legacy import ANSWERS, load_answers
-from .legacy_jobs import check_contexts
+from .legacy_jobs import check_contexts, component_job_ids
 from .plan import Finding, build_plan, discover
 from .update import _git, _rejects, commit_all, copier_update_command
 
+VALIDATE_PATH = ".github/workflows/validate.yml"
 MARKER = "<!-- ci-kit-migrate -->"
 CHECKS_AFTER = {"core": ["ci / gate"]}
 PAYLOAD_KEYS = ("module", "area", "ref", "checks_before", "checks_after", "commits", "findings")
@@ -102,6 +103,29 @@ def _run(command: list[str], repo: Path) -> str | None:
     return None
 
 
+def _without_components(text: str, toolkit_version: str) -> dict:
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError("not a mapping")
+    jobs = data.get("jobs")
+    if isinstance(jobs, dict):
+        skip = component_job_ids(data, toolkit_version)
+        data = {**data, "jobs": {key: value for key, value in jobs.items() if str(key) not in skip}}
+    return data
+
+
+def _validate_difference(path: str, wanted: bytes, actual: bytes, toolkit_version: str) -> str | None:
+    try:
+        expected = _without_components(_normalize(wanted), toolkit_version)
+        current = _without_components(_normalize(actual), toolkit_version)
+    except (yaml.YAMLError, ValueError) as error:
+        return f"{path} cannot be compared with the legacy render: {error}"
+    if expected == current:
+        return None
+    dump = lambda data: json.dumps(data, indent=1, default=str)
+    return f"{path} differs from the legacy render\n{_diff(path, dump(expected), dump(current))}"
+
+
 def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src_override: str | None) -> list[Finding]:
     answers_path = repo / ANSWERS
     with tempfile.TemporaryDirectory() as tmp:
@@ -109,6 +133,9 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
             files = render_module(answers_path, Path(tmp) / "render", src_override)
         except RenderError as error:
             return [Finding("CIK-MIGRATE-003", module, str(error), ANSWERS)]
+    legacy, _ = load_answers(repo)
+    legacy = legacy or {}
+    toolkit_version = str(legacy.get("toolkit_version") or legacy.get("_commit") or "")
     findings = []
     for path in area_paths:
         target = repo / path
@@ -116,6 +143,10 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
             findings.append(Finding("CIK-MIGRATE-003", module, f"{path} is not rendered by the legacy template", path))
         elif not target.is_file():
             findings.append(Finding("CIK-MIGRATE-003", module, f"{path} is missing from the repo", path))
+        elif path == VALIDATE_PATH:
+            message = _validate_difference(path, files[path], target.read_bytes(), toolkit_version)
+            if message:
+                findings.append(Finding("CIK-MIGRATE-003", module, message, path))
         else:
             actual, wanted = _normalize(target.read_bytes()), _normalize(files[path])
             if actual != wanted:

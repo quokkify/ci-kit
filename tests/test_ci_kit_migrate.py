@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
 from ci_kit.legacy_jobs import MappingError
-from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
+from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, _contract_findings, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
+from ci_kit.handoff import AREAS
 from ci_kit.plan import Finding, build_plan
 from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo, mkdtemp
 
@@ -51,6 +52,48 @@ class CheckNamesTests(unittest.TestCase):
         path.write_text("name: V\non: push\njobs:\n  alpha:\n    runs-on: x\n")
         with self.assertRaisesRegex(MappingError, "alpha"):
             legacy_check_names(path)
+
+
+class ValidateContractTests(unittest.TestCase):
+    def findings(self, repo: Path) -> list[Finding]:
+        return _contract_findings(repo, "core", AREAS["validate"].legacy_paths, str(template()))
+
+    def edit(self, repo: Path, old: str, new: str) -> None:
+        path = repo / VALIDATE
+        text = path.read_text()
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new, 1))
+        git(repo, "commit", "-qam", "edit")
+
+    def test_hand_edited_component_with_is_not_003(self):
+        repo = legacy_scenario_repo(template(), "polyglot")
+        self.edit(repo, 'working-directory: "backend"', 'working-directory: "backend/api"\n      extra-input: "1"')
+        self.assertEqual(self.findings(repo), [])
+
+    def test_extra_contract_step_is_003(self):
+        repo = legacy_scenario_repo(template(), "allure-external")
+        data = yaml.safe_load((repo / VALIDATE).read_text())
+        data["jobs"]["template-contract"]["steps"].append({"name": "Sneaky extra step", "run": "true"})
+        (repo / VALIDATE).write_text(yaml.safe_dump(data, sort_keys=False))
+        git(repo, "commit", "-qam", "edit")
+        found = self.findings(repo)
+        self.assertEqual([f.code for f in found], ["CIK-MIGRATE-003"])
+        self.assertIn("Sneaky extra step", found[0].message)
+
+    def test_trigger_edit_is_003(self):
+        repo = legacy_scenario_repo(template(), "allure-external")
+        data = yaml.safe_load((repo / VALIDATE).read_text())
+        data[True]["push"]["branches"] = ["develop"]
+        (repo / VALIDATE).write_text(yaml.safe_dump(data, sort_keys=False))
+        git(repo, "commit", "-qam", "edit")
+        self.assertEqual([f.code for f in self.findings(repo)], ["CIK-MIGRATE-003"])
+
+    def test_unparseable_validate_is_003(self):
+        repo = legacy_scenario_repo(template(), "allure-external")
+        (repo / VALIDATE).write_text("jobs: [unclosed\n")
+        git(repo, "commit", "-qam", "edit")
+        found = self.findings(repo)
+        self.assertEqual([f.code for f in found], ["CIK-MIGRATE-003"])
 
 
 class PreconditionTests(unittest.TestCase):
