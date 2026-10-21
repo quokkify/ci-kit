@@ -40,20 +40,23 @@ The fleet never merges PRs and never edits rulesets. Required checks change only
 
 ### What `migration_checks.py` changes
 
-It edits only the managed ruleset `ci-kit/security/<owner>/<repo>`. It reads the migrate marker (`<!-- ci-kit-migrate -->` followed by a json block) from the PR body, computes `current - checks_before + checks_after` (reversed with `--revert`), and calls the `reconcile_ruleset.py` logic at the PR head SHA. Reconcile rewrites the whole managed ruleset, including `strict_required_status_checks_policy` and the pull_request parameters, to the values it would write for a normal reconcile. Run it only when nobody else is editing that ruleset: it reads and then writes, so a concurrent edit can be lost.
+It edits one ruleset: the managed ruleset `ci-kit/security/<owner>/<repo>` when it exists, otherwise the repository ruleset that requires checks on the base branch (see below). It reads the migrate marker (`<!-- ci-kit-migrate -->` followed by a json block) from the PR body, computes `current - checks_before + checks_after` (reversed with `--revert`), and calls the `reconcile_ruleset.py` logic at the PR head SHA. Reconcile rewrites the whole managed ruleset, including `strict_required_status_checks_policy` and the pull_request parameters, to the values it would write for a normal reconcile. Run it only when nobody else is editing that ruleset: it reads and then writes, so a concurrent edit can be lost.
+
+Without a managed ruleset (every consumer today has only a hand-made ruleset such as `main`), the target is the one ruleset that owns the effective required checks on the base branch, as reported by GitHub's branch rules. It is patched, not reconciled: the PUT resends its `name`, `target`, `enforcement`, `conditions`, `bypass_actors` and `rules` exactly as read and changes only the `required_status_checks` list. Kept checks keep their `integration_id`; added checks are sent without one. Only added checks must be published at the PR head SHA (at `--revision` for `--revert`). Right before the PUT the ruleset is read again and the command refuses if `updated_at` changed; after the PUT the readback must equal what was sent. An already applied switch is a `noop` with no write.
 
 The PR body is not trusted for check names: `checks_after` must equal the module's `CHECKS_AFTER` (`core`: `ci / gate`) and `checks_before` must equal the job names of `validate.yml` at the PR base SHA (at `--revision` for `--revert`). Reconcile runs at the PR head SHA, or at `--revision` for `--revert`. The command refuses (exit 1, nothing changed) when:
 
 - the marker is missing or malformed, or the PR head/base cannot be read;
 - `checks_after` differs from `CHECKS_AFTER`, or `checks_before` differs from the legacy `validate.yml` jobs;
 - `validate.yml` is missing, unreadable or defines no jobs, or has a job that calls a reusable workflow (`uses:`; its check context `<job name> / <called job>` cannot be derived);
-- the managed ruleset does not exist, is not `active`, does not target `refs/heads/<base branch>`, has no or a duplicated `required_status_checks` rule, a malformed rule, several code-scanning rules, or a code-scanning rule that is not a single CodeQL tool with a known threshold and the `security_alerts_threshold` reconcile would write;
-- a required check is bound to an integration (re-sending it would unbind it);
+- there is no managed ruleset and the base branch has zero or several rulesets requiring checks, classic branch protection, a required check without a ruleset id, or the one ruleset is not a repository ruleset, has duplicated check contexts, not `active`, hides `bypass_actors` from the token, has no or a duplicated `required_status_checks` rule, or changed between the read and the PUT;
+- the managed ruleset is not `active`, does not target `refs/heads/<base branch>`, has no or a duplicated `required_status_checks` rule, a malformed rule, several code-scanning rules, or a code-scanning rule that is not a single CodeQL tool with a known threshold and the `security_alerts_threshold` reconcile would write;
+- a required check in the managed ruleset is bound to an integration (re-sending it would unbind it);
 - the effective required checks cannot be read ("required checks unavailable"), or their status is unknown;
 - a check being replaced is required by classic branch protection or another ruleset;
 - the new set would be empty.
 
-Exit 2 is a reconcile/API error, a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, or `--revert` without `--revision <40-hex SHA>`). A PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`.
+Exit 2 is a reconcile/API error (a message starting `PUT applied` means the ruleset was written but its readback did not match: inspect it before re-running), a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, or `--revert` without `--revision <40-hex SHA>`). For the managed ruleset, a PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`. The output names the edited ruleset (`ruleset.id`, `ruleset.name`, `ruleset.managed`).
 
 ## Rollback
 
