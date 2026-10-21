@@ -235,6 +235,7 @@ class MainTests(TestCase):
 
     def test_managed_ruleset_missing_refused(self):
         FakeClient.listing = []
+        self.policy = policy(status="unprotected")
         code, _, err = self.run_main(["--pr", "o/r#5"])
         self.assertEqual(code, 1)
         self.assertIn("ci-kit/security/o/r", err)
@@ -380,6 +381,184 @@ class MainTests(TestCase):
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = module.main(["--pr", "o/r#5"])
         self.assertEqual(code, 2)
+
+
+UNMANAGED_ID = 21
+BYPASS = [{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}]
+
+
+def unmanaged_detail(*contexts, integration_id=None, **overrides):
+    detail = {"id": UNMANAGED_ID, "node_id": "RRS_1", "name": "main", "target": "branch", "source_type": "Repository", "source": "o/r",
+              "enforcement": "active", "updated_at": "2026-10-01T00:00:00Z",
+              "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "bypass_actors": list(BYPASS),
+              "rules": [{"type": "deletion"}, {"type": "pull_request", "parameters": {"required_approving_review_count": 0}},
+                        status_rule(*contexts, integration_id=integration_id)]}
+    detail.update(overrides)
+    return detail
+
+
+class UnmanagedClient:
+    def __init__(self, detail, published=("Gitleaks", "Shared template contract", "ci / gate"), changed=None, readback=None):
+        self.detail, self.published, self.changed, self.readback = detail, published, changed, readback
+        self.reads = 0
+        self.put = None
+
+    def request(self, method, path, payload=None):
+        if path.startswith("/repos/o/r/rulesets?"):
+            return [{"id": UNMANAGED_ID, "name": "main"}]
+        if "/check-runs?" in path:
+            return {"check_runs": [{"name": name} for name in self.published], "total_count": len(self.published)}
+        if "/statuses?" in path:
+            return []
+        if path == f"/repos/o/r/rulesets/{UNMANAGED_ID}":
+            if method == "PUT":
+                self.put = payload
+                return {"id": UNMANAGED_ID}
+            assert method == "GET", method
+            if self.put is not None:
+                return self.readback(self.put) if self.readback else {**self.detail, **self.put, "updated_at": "2026-10-02T00:00:00Z"}
+            self.reads += 1
+            return self.changed if self.changed is not None and self.reads > 1 else self.detail
+        raise AssertionError(path)
+
+
+class UnmanagedRulesetTests(TestCase):
+    def setUp(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("Shared template contract", ruleset_id=UNMANAGED_ID))
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"))
+        self.legacy_refs = []
+
+    def run_main(self, argv):
+        def fake_legacy(repo, ref):
+            self.legacy_refs.append(ref)
+            return ["Shared template contract"]
+
+        def no_reconcile(*args, **kwargs):
+            raise AssertionError("reconcile must not run for an unmanaged ruleset")
+
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(module, "pr_view", lambda r, n: {"body": MARKER_BODY, "headRefOid": HEAD, "baseRefName": "main", "baseRefOid": BASE}), \
+                patch.object(module, "legacy_checks_at", fake_legacy), patch.object(module, "required_checks", lambda request, repository, branch: self.policy), \
+                patch.object(module, "GitHubClient", lambda token: self.client), patch.object(module, "reconcile", no_reconcile), \
+                patch.dict(os.environ, {"GH_TOKEN": "t"}), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = module.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def put_contexts(self):
+        rule = next(rule for rule in self.client.put["rules"] if rule["type"] == "required_status_checks")
+        return rule["parameters"]["required_status_checks"]
+
+    def refused(self, argv=("--pr", "o/r#5"), needle=None):
+        code, _, err = self.run_main(list(argv))
+        self.assertEqual(code, 1, err)
+        self.assertIsNone(self.client.put)
+        if needle:
+            self.assertIn(needle, err)
+
+    def test_forward_patches_only_required_checks(self):
+        code, out, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.put_contexts(), [{"context": "Gitleaks", "integration_id": None}, {"context": "ci / gate"}])
+        detail = unmanaged_detail("Gitleaks", "Shared template contract")
+        self.assertEqual(set(self.client.put), {"name", "target", "enforcement", "conditions", "bypass_actors", "rules"})
+        for key in ("name", "target", "enforcement", "conditions", "bypass_actors"):
+            self.assertEqual(self.client.put[key], detail[key])
+        self.assertEqual(self.client.put["rules"][:2], detail["rules"][:2])
+        report = json.loads(out)
+        self.assertEqual(report["ruleset"], {"id": UNMANAGED_ID, "name": "main", "managed": False})
+        self.assertEqual(report["after"], ["Gitleaks", "ci / gate"])
+        self.assertEqual(report["action"], "update")
+        self.assertEqual(self.legacy_refs, [BASE])
+
+    def test_integration_binding_of_kept_checks_preserved(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract", integration_id=15368))
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.put_contexts(), [{"context": "Gitleaks", "integration_id": 15368}, {"context": "ci / gate"}])
+
+    def test_dry_run_writes_nothing(self):
+        code, out, err = self.run_main(["--pr", "o/r#5", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertIsNone(self.client.put)
+        self.assertEqual(json.loads(out)["after"], ["Gitleaks", "ci / gate"])
+
+    def test_revert_restores_legacy_check(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("ci / gate", ruleset_id=UNMANAGED_ID))
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "ci / gate"))
+        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.legacy_refs, [REV])
+        self.assertEqual(self.put_contexts(), [{"context": "Gitleaks", "integration_id": None}, {"context": "Shared template contract"}])
+
+    def test_already_applied_is_noop(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("ci / gate", ruleset_id=UNMANAGED_ID))
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "ci / gate"))
+        code, out, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 0, err)
+        self.assertIsNone(self.client.put)
+        self.assertEqual(json.loads(out)["action"], "noop")
+
+    def test_no_ruleset_requires_checks_refused(self):
+        self.policy = policy(status="unprotected")
+        self.refused(needle="ci-kit/security/o/r")
+
+    def test_several_rulesets_refused(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("Shared template contract", ruleset_id=22))
+        self.refused(needle="exactly one")
+
+    def test_classic_protection_refused(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("Shared template contract", ruleset_id=UNMANAGED_ID),
+                             entry("Other", source="classic-protection"))
+        self.refused(needle="classic")
+
+    def test_unknown_status_refused(self):
+        self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), status="unknown")
+        self.refused(needle="unknown")
+
+    def test_organization_ruleset_refused(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract", source_type="Organization"))
+        self.refused(needle="Organization")
+
+    def test_inactive_ruleset_refused(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract", enforcement="evaluate"))
+        self.refused(needle="enforcement")
+
+    def test_hidden_bypass_actors_refused(self):
+        detail = unmanaged_detail("Gitleaks", "Shared template contract")
+        del detail["bypass_actors"]
+        self.client = UnmanagedClient(detail)
+        self.refused(needle="bypass_actors")
+
+    def test_duplicated_required_checks_rule_refused(self):
+        detail = unmanaged_detail("Gitleaks", "Shared template contract")
+        detail["rules"].append(status_rule("Extra"))
+        self.client = UnmanagedClient(detail)
+        self.refused(needle="required_status_checks")
+
+    def test_concurrent_edit_refused(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"),
+                                      changed=unmanaged_detail("Gitleaks", "Shared template contract", updated_at="2026-10-01T00:00:01Z"))
+        self.refused(needle="changed")
+
+    def test_readback_mismatch_exit_2(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"),
+                                      readback=lambda put: {**put, "id": UNMANAGED_ID, "bypass_actors": []})
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 2)
+        self.assertIn("readback", err)
+
+    def test_only_added_checks_must_be_published(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"), published=("ci / gate",))
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 0, err)
+        self.assertIsNotNone(self.client.put)
+
+    def test_unpublished_new_check_exit_2_without_write(self):
+        self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "Shared template contract"), published=("Gitleaks",))
+        code, _, err = self.run_main(["--pr", "o/r#5"])
+        self.assertEqual(code, 2)
+        self.assertIn("ci / gate", err)
+        self.assertIsNone(self.client.put)
 
 
 class IdempotencyTests(TestCase):
