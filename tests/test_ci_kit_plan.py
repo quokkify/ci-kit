@@ -176,6 +176,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual({key: entry[key] for key in ("id", "name", "path", "java_version")}, {"id": "app-java", "name": "Application Java", "path": ".", "java_version": "21"})
         self.assertEqual(set(entry), {"id", "name", "path", *module_fields("java")})
 
+    def test_plan_outputs_every_matrix(self):
+        repo = modules_repo({"python": [{"id": "app", "name": "App", "path": "."}]})
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out"
+            self.run_cli("plan", "--repo", str(repo), "--github-output", str(target))
+            lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
+        self.assertEqual([entry["id"] for entry in json.loads(lines["python"])], ["app"])
+        self.assertEqual(json.loads(lines["node"]), [])
+        self.assertEqual(json.loads(lines["docker"]), [])
+        self.assertEqual(json.loads(lines["java"]), [])
+
     def test_plan_writes_codes_and_commits_outputs(self):
         repo = rendered_repo("core", "java")
         with tempfile.TemporaryDirectory() as tmp:
