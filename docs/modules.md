@@ -16,6 +16,8 @@ A language declaration is `schema_version: 1` plus `components`, one mapping per
 
 The language version is optional in a declaration, but new projects pin it: the default answers of `python` and `node` set `python_version` and `node_version` to the workflow default. If a declaration omits it, the workflow default applies and can change with a ci-kit release. A docker `dockerfile` is resolved from the repository root, not from `context`.
 
+`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts.
+
 ```yaml
 schema_version: 1
 components:
