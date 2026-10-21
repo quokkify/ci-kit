@@ -2001,6 +2001,7 @@ def run_ci_kit_migrate(repository_path: Path, module: str, target_ref: str, *, e
             for item in payload.get("findings", [])
             if isinstance(item, dict)
         ],
+        modules=[str(item) for item in payload.get("modules", [])],
     )
 
 

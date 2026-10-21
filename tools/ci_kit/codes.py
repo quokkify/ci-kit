@@ -21,6 +21,6 @@ CODES: dict[str, str] = {
     "CIK-MIGRATE-002": "Migration refused: legacy answers do not match the target ref",
     "CIK-MIGRATE-003": "Migration refused: handed-off files differ from the legacy render",
     "CIK-MIGRATE-004": "Migration refused: module already installed or area already handed off",
-    "CIK-MIGRATE-005": "Migration refused: repository has language components or reusable-workflow jobs",
+    "CIK-MIGRATE-005": "Migration refused: a legacy validate job or input cannot be mapped to a module",
     "CIK-UPDATE-001": "Module update failed or left conflicts",
 }

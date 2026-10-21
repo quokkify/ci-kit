@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
-from ci_kit.legacy_jobs import MappingError
+from ci_kit.legacy_jobs import MappingError, legacy_to_modules
 from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, _contract_findings, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
 from ci_kit.handoff import AREAS
 from ci_kit.plan import Finding, build_plan
@@ -154,26 +154,45 @@ class PreconditionTests(unittest.TestCase):
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-004"])
         self.assert_untouched()
 
-    def test_language_components_are_005(self):
-        repo = legacy_scenario_repo(template(), "python")
+    def edit_job(self, repo: Path, job_id: str, **changes: object) -> None:
+        data = yaml.safe_load((repo / VALIDATE).read_text())
+        data["jobs"].setdefault(job_id, {}).update(changes)
+        (repo / VALIDATE).write_text(yaml.safe_dump(data, sort_keys=False))
+        git(repo, "commit", "-qam", "edit")
+
+    def assert_005(self, repo: Path, job_id: str) -> None:
         head = git(repo, "rev-parse", "HEAD")
         result = migrate(repo, "core", "v99.0.0", src_override=self.src)
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
-        self.assertIn("language components", result.findings[0].message)
+        self.assertIn(job_id, result.findings[0].message)
+        self.assertEqual(result.findings[0].path, VALIDATE)
         self.assertEqual(result.commits, [])
         self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
         self.assertEqual(git(repo, "status", "--porcelain"), "")
 
-    def test_job_without_mapping_is_005(self):
-        repo = legacy_scenario_repo(template(), "allure-external")
-        head = git(repo, "rev-parse", "HEAD")
-        error = MappingError("job complete does not call a reusable workflow", "complete")
-        with mock.patch("ci_kit.migrate.legacy_check_names", side_effect=error):
-            result = migrate(repo, "core", "v99.0.0", src_override=self.src)
-        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
-        self.assertIn("complete", result.findings[0].message)
-        self.assertEqual(result.commits, [])
-        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+    def test_unmappable_job_is_005_and_tree_untouched(self):
+        self.edit_job(self.repo, "complete", **{"runs-on": "ubuntu-latest", "steps": [{"run": "true"}]})
+        self.assert_005(self.repo, "complete")
+
+    def test_component_job_keys_outside_mapping_are_005(self):
+        for key, value in (("if", "always()"), ("needs", ["template-contract"]), ("secrets", "inherit")):
+            with self.subTest(key=key):
+                repo = legacy_scenario_repo(template(), "python")
+                self.edit_job(repo, "app-python", **{key: value})
+                self.assert_005(repo, "app-python")
+
+    def test_component_job_with_foreign_ref_is_005(self):
+        repo = legacy_scenario_repo(template(), "python")
+        self.edit_job(repo, "app-python", uses="quokkify/ci-kit/.github/workflows/python-ci.yml@v98.0.0")
+        self.assert_005(repo, "app-python")
+
+    def test_005_is_reported_before_003(self):
+        repo = legacy_scenario_repo(template(), "python")
+        path = repo / VALIDATE
+        path.write_text(path.read_text().replace("Shared template contract", "My contract"))
+        git(repo, "commit", "-qam", "edit")
+        self.edit_job(repo, "app-python", needs=["template-contract"])
+        self.assert_005(repo, "app-python")
 
     def test_missing_git_is_001(self):
         with mock.patch.dict("os.environ", {"PATH": str(mkdtemp("nopath-"))}):
@@ -223,6 +242,17 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(result.commits, [])
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-002"])
 
+    def test_copy_command_passes_compact_json_data(self):
+        command = copier_copy_command("python", "v1", "src", {"python_components": [{"id": "a", "path": "."}]})
+        self.assertIn("-a", command)
+        self.assertEqual(command[command.index("-a") + 1], ".copier-answers.python.yml")
+        self.assertIn('python_components=[{"id":"a","path":"."}]', command)
+        self.assertIn("module=python", command)
+        with self.assertRaises(ValueError):
+            copier_copy_command("python", "v1", "src", {"python_components": "-x"})
+        with self.assertRaises(ValueError):
+            copier_copy_command("python", "v1", "src", {"-x": "1"})
+
     def test_copy_command_refuses_option_like_ref(self):
         with self.assertRaises(ValueError):
             copier_copy_command("core", "--evil", "src")
@@ -243,10 +273,99 @@ class MigrateTests(unittest.TestCase):
         result = migrate(mkdtemp("nogit-"), "core", "v99.0.0", src_override=self.src)
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
 
+    def test_component_less_installs_only_core(self):
+        result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(result.modules, ["core"])
+
+
+class MultiModuleTests(unittest.TestCase):
+    def setUp(self):
+        self.src = str(template())
+
+    def test_polyglot_migrates_with_one_commit_per_module(self):
+        repo = legacy_scenario_repo(template(), "polyglot")
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.modules, ["core", "java", "python", "node"])
+        self.assertEqual(
+            subjects(repo)[:5],
+            ["chore(ci-kit): add node module", "chore(ci-kit): add python module", "chore(ci-kit): add java module",
+             "chore(ci-kit): add core module", "chore(ci-kit): hand off validate to core"],
+        )
+        self.assertEqual(len(result.commits), 5)
+        self.assertEqual(result.checks_before[0], "Shared template contract")
+        self.assertEqual(
+            result.checks_before[1:], ["Backend Python / ci", "Frontend Node / ci", "Worker Java / ci"],
+        )
+        plan = build_plan(repo, src_override=self.src)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual([entry["path"] for entry in plan.matrices["python"]], ["backend"])
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+
+    def test_hand_edited_with_is_carried_over(self):
+        repo = legacy_scenario_repo(template(), "python")
+        data = yaml.safe_load((repo / VALIDATE).read_text())
+        data["jobs"]["app-python"]["with"].update({"test-command": "pytest -q", "run-build": True})
+        (repo / VALIDATE).write_text(yaml.safe_dump(data, sort_keys=False))
+        git(repo, "commit", "-qam", "edit")
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(result.findings, [])
+        entry = build_plan(repo, src_override=self.src).matrices["python"][0]
+        self.assertEqual((entry["test_command"], entry["run_build"]), ("pytest -q", True))
+
+    def test_docker_scenario_migrates(self):
+        repo = legacy_scenario_repo(template(), "docker")
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.modules, ["core", "python", "docker"])
+        self.assertIn("docker / build", result.checks_before)
+
+    def test_docker_without_components_installs_docker(self):
+        repo = legacy_scenario_repo(template(), "docker", overrides={"components": []})
+        result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.modules, ["core", "docker"])
+        self.assertEqual(result.checks_before, ["Shared template contract", "docker / build"])
+        self.assertTrue((repo / ".copier-answers.docker.yml").is_file())
+
+    def test_equivalence_difference_rolls_back(self):
+        repo = legacy_scenario_repo(template(), "python")
+        head = git(repo, "rev-parse", "HEAD")
+
+        def flipped(jobs):
+            declarations = legacy_to_modules(jobs)
+            for _, data in declarations[1:]:
+                for entries in data.values():
+                    entries[0]["test_command"] = "pytest --flipped"
+            return declarations
+
+        with mock.patch("ci_kit.migrate.legacy_to_modules", side_effect=flipped):
+            result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
+        self.assertIn("test-command", result.findings[0].message)
+        self.assertEqual(result.commits, [])
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+
+    def test_language_module_copy_failure_rolls_back(self):
+        repo = legacy_scenario_repo(template(), "polyglot")
+        head = git(repo, "rev-parse", "HEAD")
+        real = copier_copy_command
+
+        def failing(module, *args, **kwargs):
+            return ["false"] if module == "python" else real(module, *args, **kwargs)
+
+        with mock.patch("ci_kit.migrate.copier_copy_command", side_effect=failing):
+            result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-UPDATE-001"])
+        self.assertEqual(result.commits, [])
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+
 
 class MarkerTests(unittest.TestCase):
     def result(self) -> MigrateResult:
-        return MigrateResult("core", "validate", "v3.2.0", ["Shared template contract"], ["ci / gate"], ["a", "b"], [])
+        return MigrateResult("core", "validate", "v3.2.0", ["Shared template contract"], ["ci / gate"], ["a", "b"], [], ["core"])
 
     def test_round_trip_has_exact_keys(self):
         body = "intro\n\n" + render_marker(self.result()) + "\n\ntrailer"
@@ -254,7 +373,7 @@ class MarkerTests(unittest.TestCase):
         self.assertEqual(
             data,
             {"module": "core", "area": "validate", "ref": "v3.2.0", "checks_before": ["Shared template contract"],
-             "checks_after": ["ci / gate"], "commits": ["a", "b"], "findings": []},
+             "checks_after": ["ci / gate"], "commits": ["a", "b"], "findings": [], "modules": ["core"]},
         )
         self.assertTrue(render_marker(self.result()).startswith(MARKER + "\n```json\n"))
 
