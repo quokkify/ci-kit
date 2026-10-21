@@ -102,8 +102,6 @@ def preflight_ready(repository: str, sha: str) -> bool:
     current = api(f"repos/{repository}/commits/main")
     if not isinstance(current, dict) or current.get("sha") != sha:
         raise GateError("Main advanced since this release run started; rerun on the current revision")
-    if not release_ready(repository, sha):
-        return False
     candidates = pages(f"repos/{repository}/issues?state=closed&labels=autorelease%3A%20pending")
     for issue in candidates:
         if "pull_request" not in issue:

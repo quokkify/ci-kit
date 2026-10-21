@@ -63,7 +63,7 @@ class ReleaseGateTests(unittest.TestCase):
              patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]) as pages, \
              patch.object(gate, "release_ready", return_value=True) as ready:
             self.assertTrue(gate.preflight_ready(REPO, SHA))
-            self.assertEqual(ready.call_args_list[1].args, (REPO, OTHER))
+            self.assertEqual([call.args for call in ready.call_args_list], [(REPO, OTHER)])
             self.assertIn("labels=autorelease%3A%20pending", pages.call_args.args[0])
 
     def test_bad_candidate_and_advanced_main_stop(self):
@@ -75,13 +75,28 @@ class ReleaseGateTests(unittest.TestCase):
         candidate = {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": OTHER}
         with patch.object(gate, "api", side_effect=[{"sha": SHA}, candidate]), \
              patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]), \
-             patch.object(gate, "release_ready", side_effect=[True, False]):
+             patch.object(gate, "release_ready", return_value=False):
             self.assertFalse(gate.preflight_ready(REPO, SHA))
         with patch.object(gate, "api", side_effect=[{"sha": SHA}, {"sha": OTHER}]), \
              patch.object(gate, "pages", return_value=[]), \
              patch.object(gate, "release_ready", return_value=True):
             with self.assertRaises(gate.GateError):
                 gate.preflight_ready(REPO, SHA)
+
+    def test_ordinary_push_without_candidates_does_not_wait(self):
+        with patch.object(gate, "api", return_value={"sha": SHA}), \
+             patch.object(gate, "pages", return_value=[]), \
+             patch.object(gate, "release_ready") as ready:
+            self.assertTrue(gate.preflight_ready(REPO, SHA))
+            ready.assert_not_called()
+
+    def test_trigger_that_is_the_candidate_is_waited_once(self):
+        candidate = {"merged": True, "base": {"ref": "main"}, "merge_commit_sha": SHA}
+        with patch.object(gate, "api", side_effect=[{"sha": SHA}, candidate, {"sha": SHA}]), \
+             patch.object(gate, "pages", return_value=[{"number": 9, "pull_request": {}}]), \
+             patch.object(gate, "release_ready", return_value=True) as ready:
+            self.assertTrue(gate.preflight_ready(REPO, SHA))
+            ready.assert_called_once_with(REPO, SHA)
 
     def test_post_tag_checks_the_resolved_commit(self):
         with patch.object(sys, "argv", ["gate", "--repository", REPO, "--ref", "v1.2.3"]), \

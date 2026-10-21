@@ -164,6 +164,7 @@ def release_workflow_errors(path: Path) -> list[str]:
 
     job = caller_jobs[0]
     require(job.get("needs") == "verify-release", "release must depend on its CI gate")
+    require("if" not in job, "release must not bypass its CI gate with an if condition")
     gate = jobs.get("verify-release", {})
     require(gate.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "read"}, "release gate must be read-only")
     require(gate.get("timeout-minutes") == 35, "release gate must have a bounded job timeout")
