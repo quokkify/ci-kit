@@ -142,12 +142,25 @@ class ParseTests(unittest.TestCase):
             "no uses": {"name": "Complete", "runs-on": "ubuntu-latest"},
             "docker push": {"uses": uses("docker-build"), "with": {"push": True}},
             "docker input": {"uses": uses("docker-build"), "with": {"tags": "x"}},
+            "input expression": {"uses": uses("python-ci"), "with": {"test-command": "${{ vars.TEST_CMD }}"}},
+            "name expression": {"uses": uses("python-ci"), "name": "${{ github.event_name }} App"},
         }
         for label, job in cases.items():
             with self.subTest(label), self.assertRaises(MappingError) as raised:
                 parse_jobs(with_job(job), VERSION)
             self.assertEqual(raised.exception.job_id, "job")
             self.assertIn("job", str(raised.exception))
+
+    def test_expression_refusals_name_the_input_and_the_name(self):
+        with self.assertRaisesRegex(MappingError, "input test-command uses a GitHub expression"):
+            parse_jobs(with_job({"uses": uses("python-ci"), "with": {"test-command": "${{ vars.X }}"}}), VERSION)
+        with self.assertRaisesRegex(MappingError, "name uses a GitHub expression"):
+            parse_jobs(with_job({"uses": uses("python-ci"), "name": "${{ github.event_name }} App"}), VERSION)
+
+    def test_explicit_empty_build_command_is_kept(self):
+        data = with_job({"uses": uses("node-ci"), "with": {"build-command": ""}})
+        _, node = legacy_to_modules(parse_jobs(data, VERSION))[1]
+        self.assertEqual(node["node_components"][0]["build_command"], "")
 
     def test_refusal_names_the_offending_key(self):
         with self.assertRaisesRegex(MappingError, "bogus"):

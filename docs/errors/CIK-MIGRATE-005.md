@@ -8,7 +8,8 @@
 
 - it has keys other than `name`, `uses` and `with` (`if`, `needs`, `secrets`, `permissions`, `strategy`, `steps`, `runs-on`, ...);
 - it has no `uses:`, or `uses:` is not a known ci-kit workflow, or its ref differs from `toolkit_version`;
-- a `with:` input is not a field of the module (for `docker`, any input except `context`, `dockerfile`, `target` and `push: false`), or a version is a floating-point number.
+- a `with:` input is not a field of the module (for `docker`, any input except `context`, `dockerfile`, `target` and `push: false`), or an input has the wrong type (for example a float such as `3.10`, or an unquoted `true` for a command);
+- an input value or the job `name` uses a GitHub expression (`${{ ... }}`), which modules cannot reproduce.
 
 A module cannot reproduce such a job, and dropping it would silently lose CI behaviour. The message names the job and the key or input. Nothing was changed.
 

@@ -50,6 +50,15 @@ class EquivalenceTests(unittest.TestCase):
         self.assertIn("app", found[0].message)
         self.assertIn("run-build", found[0].message)
 
+    def test_explicit_empty_build_command_against_default_is_005(self):
+        job = LegacyJob("web", "Web", "node", {"build-command": ""})
+        default = fill("node", {"id": "web", "name": "Web", "path": "."})
+        found = equivalence_findings([job], plan(node=[default]))
+        self.assertEqual([f.code for f in found], ["CIK-MIGRATE-005"])
+        self.assertIn("build-command", found[0].message)
+        explicit = fill("node", {"id": "web", "name": "Web", "path": ".", "build_command": ""})
+        self.assertEqual(equivalence_findings([job], plan(node=[explicit])), [])
+
     def test_working_directory_differs(self):
         found = equivalence_findings([python_job(**{"working-directory": "backend"})], plan(python=[python_entry()]))
         self.assertEqual([f.code for f in found], ["CIK-MIGRATE-005"])

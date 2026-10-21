@@ -53,6 +53,8 @@ def component_job_ids(data: dict, toolkit_version: str) -> set[str]:
 
 
 def _value(job_id: str, key: str, value: object, kind: str) -> object:
+    if isinstance(value, str) and "${{" in value:
+        raise MappingError(f"job {job_id}: input {key} uses a GitHub expression", job_id)
     if kind == "string" and isinstance(value, (str, int)) and not isinstance(value, bool):
         return str(value)
     if kind == "boolean" and isinstance(value, bool):
@@ -97,6 +99,8 @@ def _parse_job(job_id: str, job: object, toolkit_version: str) -> LegacyJob:
     name = job.get("name")
     if name is not None and not isinstance(name, str):
         raise MappingError(f"job {job_id}: key name must be a string", job_id)
+    if name and "${{" in name:
+        raise MappingError(f"job {job_id}: name uses a GitHub expression", job_id)
     return LegacyJob(str(job_id), name or str(job_id), module, _parse_with(str(job_id), module, job.get("with")))
 
 
