@@ -131,7 +131,7 @@ class ModuleRenderTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_java_component_rejects_bad_input(self) -> None:
-        for bad in ({"path": "../x"}, {"path": "a/*"}, {"id": "gate"}, {"java_version": "8"}):
+        for bad in ({"path": "../x"}, {"path": "a/*"}, {"id": "gate"}, {"java_version": "8"}, {"bogus": 1}):
             with self.subTest(bad=bad):
                 self.assertNotEqual(self.copy_java(bad).returncode, 0)
 
@@ -184,8 +184,8 @@ class ModuleRenderTests(unittest.TestCase):
         result, dest = self.copy("java", f"java_components={json.dumps([component])}")
         self.assertEqual(result.returncode, 0, result.stderr)
         text = (dest / ".ci/modules/java.yml").read_text()
-        self.assertIn('    distribution: "temurin"\n', text)
-        self.assertIn("    run_lint: false\n", text)
+        self.assertIn('    "distribution": "temurin"\n', text)
+        self.assertIn('    "run_lint": false\n', text)
         self.assertEqual(yaml.safe_load(text)["components"], [component])
 
     def test_python_component_renders_extra_keys(self) -> None:
@@ -218,9 +218,22 @@ class ModuleRenderTests(unittest.TestCase):
                 result, _ = self.copy(module, f"{key}={json.dumps([base[module], base[module]])}")
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_components_reject_duplicate_names_within_a_module(self) -> None:
+        cases = {
+            "java": ("java_components", [{**DEFAULT_COMPONENT, "id": "a"}, {**DEFAULT_COMPONENT, "id": "b"}]),
+            "python": ("python_components", [{"id": "a", "name": "Same", "path": "."}, {"id": "b", "name": "Same", "path": "."}]),
+            "node": ("node_components", [{"id": "a", "name": "Same", "path": "."}, {"id": "b", "name": "Same", "path": "."}]),
+            "docker": ("docker_images", [{"id": "a", "name": "Same"}, {"id": "b", "name": "Same"}]),
+        }
+        for module, (key, components) in cases.items():
+            with self.subTest(module=module):
+                result, _ = self.copy(module, f"{key}={json.dumps(components)}")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Component names must be unique", result.stdout + result.stderr)
+
     def test_validator_allowed_keys_match_schemas(self) -> None:
         config = yaml.safe_load((ROOT / "copier.yml").read_text())
-        for module, question in (("python", "python_components"), ("node", "node_components"), ("docker", "docker_images")):
+        for module, question in (("java", "java_components"), ("python", "python_components"), ("node", "node_components"), ("docker", "docker_images")):
             with self.subTest(module=module):
                 properties = set(self.load_schema(module, 1)["properties"]["components"]["items"]["properties"])
                 self.assertEqual(properties, {"id", "name", "path", *module_fields(module)} - ({"path"} if module == "docker" else set()))
