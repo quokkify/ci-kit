@@ -14,6 +14,9 @@ jobs:
     outputs:
       modules: ${{ steps.plan.outputs.modules }}
       java: ${{ steps.plan.outputs.java }}
+      python: ${{ steps.plan.outputs.python }}
+      node: ${{ steps.plan.outputs.node }}
+      docker: ${{ steps.plan.outputs.docker }}
       codes: ${{ steps.plan.outputs.codes }}
       commits: ${{ steps.plan.outputs.commits }}
     steps:
@@ -86,10 +89,98 @@ jobs:
     uses: ./.github/workflows/java-ci.yml
     with:
       working-directory: ${{ matrix.component.path }}
+      build-command: ${{ matrix.component.build_command }}
+      build-tool: ${{ matrix.component.build_tool }}
+      cache-dependencies: ${{ matrix.component.cache_dependencies }}
+      cache-jdk: ${{ matrix.component.cache_jdk }}
+      distribution: ${{ matrix.component.distribution }}
+      gradle-console: ${{ matrix.component.gradle_console }}
+      install-command: ${{ matrix.component.install_command }}
       java-version: ${{ matrix.component.java_version }}
+      lint-command: ${{ matrix.component.lint_command }}
+      run-build: ${{ matrix.component.run_build }}
+      run-lint: ${{ matrix.component.run_lint }}
+      run-tests: ${{ matrix.component.run_tests }}
+      test-artifact-name: ${{ matrix.component.test_artifact_name }}
+      test-artifact-path: ${{ matrix.component.test_artifact_path }}
+      test-command: ${{ matrix.component.test_command }}
+      timeout-minutes: ${{ matrix.component.timeout_minutes }}
+      upload-test-artifacts: ${{ matrix.component.upload_test_artifacts }}
+
+  python:
+    name: python (${{ matrix.component.name }})
+    needs: plan
+    if: needs.plan.outputs.python != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.plan.outputs.python) }}
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      working-directory: ${{ matrix.component.path }}
+      build-command: ${{ matrix.component.build_command }}
+      cache-dependencies: ${{ matrix.component.cache_dependencies }}
+      install-command: ${{ matrix.component.install_command }}
+      lint-command: ${{ matrix.component.lint_command }}
+      package-manager: ${{ matrix.component.package_manager }}
+      pip-version: ${{ matrix.component.pip_version }}
+      poetry-version: ${{ matrix.component.poetry_version }}
+      python-version: ${{ matrix.component.python_version }}
+      requirements-file: ${{ matrix.component.requirements_file }}
+      run-build: ${{ matrix.component.run_build }}
+      run-lint: ${{ matrix.component.run_lint }}
+      run-tests: ${{ matrix.component.run_tests }}
+      test-artifact-name: ${{ matrix.component.test_artifact_name }}
+      test-artifact-path: ${{ matrix.component.test_artifact_path }}
+      test-command: ${{ matrix.component.test_command }}
+      timeout-minutes: ${{ matrix.component.timeout_minutes }}
+      upload-test-artifacts: ${{ matrix.component.upload_test_artifacts }}
+      uv-version: ${{ matrix.component.uv_version }}
+
+  node:
+    name: node (${{ matrix.component.name }})
+    needs: plan
+    if: needs.plan.outputs.node != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.plan.outputs.node) }}
+    uses: ./.github/workflows/node-ci.yml
+    with:
+      working-directory: ${{ matrix.component.path }}
+      build-command: ${{ matrix.component.build_command }}
+      cache-dependencies: ${{ matrix.component.cache_dependencies }}
+      corepack-version: ${{ matrix.component.corepack_version }}
+      install-command: ${{ matrix.component.install_command }}
+      lint-command: ${{ matrix.component.lint_command }}
+      node-version: ${{ matrix.component.node_version }}
+      package-manager: ${{ matrix.component.package_manager }}
+      run-build: ${{ matrix.component.run_build }}
+      run-lint: ${{ matrix.component.run_lint }}
+      run-tests: ${{ matrix.component.run_tests }}
+      test-artifact-name: ${{ matrix.component.test_artifact_name }}
+      test-artifact-path: ${{ matrix.component.test_artifact_path }}
+      test-command: ${{ matrix.component.test_command }}
+      timeout-minutes: ${{ matrix.component.timeout_minutes }}
+      upload-test-artifacts: ${{ matrix.component.upload_test_artifacts }}
+
+  docker:
+    name: docker (${{ matrix.component.name }})
+    needs: plan
+    if: needs.plan.outputs.docker != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        component: ${{ fromJSON(needs.plan.outputs.docker) }}
+    uses: ./.github/workflows/docker-build.yml
+    with:
+      context: ${{ matrix.component.context }}
+      dockerfile: ${{ matrix.component.dockerfile }}
+      target: ${{ matrix.component.target }}
+      push: false
 
   gate:
-    needs: [plan, core-checks, java]
+    needs: [plan, core-checks, java, python, node, docker]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

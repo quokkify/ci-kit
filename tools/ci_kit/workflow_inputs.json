@@ -1,0 +1,270 @@
+{
+  "docker-build": {
+    "build-args": {
+      "default": "",
+      "type": "string"
+    },
+    "context": {
+      "default": ".",
+      "type": "string"
+    },
+    "dockerfile": {
+      "default": "Dockerfile",
+      "type": "string"
+    },
+    "image-name": {
+      "default": "",
+      "type": "string"
+    },
+    "platforms": {
+      "default": "linux/amd64",
+      "type": "string"
+    },
+    "provenance": {
+      "default": true,
+      "type": "boolean"
+    },
+    "push": {
+      "default": false,
+      "type": "boolean"
+    },
+    "registry": {
+      "default": "ghcr.io",
+      "type": "string"
+    },
+    "sbom": {
+      "default": true,
+      "type": "boolean"
+    },
+    "tags": {
+      "default": "",
+      "type": "string"
+    },
+    "target": {
+      "default": "",
+      "type": "string"
+    },
+    "timeout-minutes": {
+      "default": 30,
+      "type": "number"
+    }
+  },
+  "java-ci": {
+    "build-command": {
+      "default": "",
+      "type": "string"
+    },
+    "build-tool": {
+      "default": "auto",
+      "type": "string"
+    },
+    "cache-dependencies": {
+      "default": true,
+      "type": "boolean"
+    },
+    "cache-jdk": {
+      "default": true,
+      "type": "boolean"
+    },
+    "distribution": {
+      "default": "temurin",
+      "type": "string"
+    },
+    "gradle-console": {
+      "default": "plain",
+      "type": "string"
+    },
+    "install-command": {
+      "default": "",
+      "type": "string"
+    },
+    "java-version": {
+      "default": "17",
+      "type": "string"
+    },
+    "lint-command": {
+      "default": "",
+      "type": "string"
+    },
+    "run-build": {
+      "default": true,
+      "type": "boolean"
+    },
+    "run-lint": {
+      "default": true,
+      "type": "boolean"
+    },
+    "run-tests": {
+      "default": true,
+      "type": "boolean"
+    },
+    "test-artifact-name": {
+      "default": "java-test-artifacts",
+      "type": "string"
+    },
+    "test-artifact-path": {
+      "default": "test-results",
+      "type": "string"
+    },
+    "test-command": {
+      "default": "",
+      "type": "string"
+    },
+    "timeout-minutes": {
+      "default": 30,
+      "type": "number"
+    },
+    "upload-test-artifacts": {
+      "default": false,
+      "type": "boolean"
+    },
+    "working-directory": {
+      "default": ".",
+      "type": "string"
+    }
+  },
+  "node-ci": {
+    "build-command": {
+      "default": "npm run build",
+      "type": "string"
+    },
+    "cache-dependencies": {
+      "default": true,
+      "type": "boolean"
+    },
+    "corepack-version": {
+      "default": "0.36.0",
+      "type": "string"
+    },
+    "install-command": {
+      "default": "",
+      "type": "string"
+    },
+    "lint-command": {
+      "default": "npm run lint",
+      "type": "string"
+    },
+    "node-version": {
+      "default": "22",
+      "type": "string"
+    },
+    "package-manager": {
+      "default": "auto",
+      "type": "string"
+    },
+    "run-build": {
+      "default": false,
+      "type": "boolean"
+    },
+    "run-lint": {
+      "default": true,
+      "type": "boolean"
+    },
+    "run-tests": {
+      "default": true,
+      "type": "boolean"
+    },
+    "test-artifact-name": {
+      "default": "node-test-artifacts",
+      "type": "string"
+    },
+    "test-artifact-path": {
+      "default": "test-results",
+      "type": "string"
+    },
+    "test-command": {
+      "default": "npm test",
+      "type": "string"
+    },
+    "timeout-minutes": {
+      "default": 20,
+      "type": "number"
+    },
+    "upload-test-artifacts": {
+      "default": false,
+      "type": "boolean"
+    },
+    "working-directory": {
+      "default": ".",
+      "type": "string"
+    }
+  },
+  "python-ci": {
+    "build-command": {
+      "default": "",
+      "type": "string"
+    },
+    "cache-dependencies": {
+      "default": true,
+      "type": "boolean"
+    },
+    "install-command": {
+      "default": "",
+      "type": "string"
+    },
+    "lint-command": {
+      "default": "python -m compileall -q .",
+      "type": "string"
+    },
+    "package-manager": {
+      "default": "auto",
+      "type": "string"
+    },
+    "pip-version": {
+      "default": "26.2.1",
+      "type": "string"
+    },
+    "poetry-version": {
+      "default": "2.5.1",
+      "type": "string"
+    },
+    "python-version": {
+      "default": "3.14",
+      "type": "string"
+    },
+    "requirements-file": {
+      "default": "",
+      "type": "string"
+    },
+    "run-build": {
+      "default": false,
+      "type": "boolean"
+    },
+    "run-lint": {
+      "default": true,
+      "type": "boolean"
+    },
+    "run-tests": {
+      "default": true,
+      "type": "boolean"
+    },
+    "test-artifact-name": {
+      "default": "python-test-artifacts",
+      "type": "string"
+    },
+    "test-artifact-path": {
+      "default": "test-results",
+      "type": "string"
+    },
+    "test-command": {
+      "default": "python -m unittest discover",
+      "type": "string"
+    },
+    "timeout-minutes": {
+      "default": 20,
+      "type": "number"
+    },
+    "upload-test-artifacts": {
+      "default": false,
+      "type": "boolean"
+    },
+    "uv-version": {
+      "default": "0.13.4",
+      "type": "string"
+    },
+    "working-directory": {
+      "default": ".",
+      "type": "string"
+    }
+  }
+}

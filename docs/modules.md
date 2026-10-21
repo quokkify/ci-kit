@@ -2,6 +2,28 @@
 
 ci-kit consumers move from the single legacy Copier template to modules (`core` first) without a flag day. Ownership of files is handed over one area at a time, so a repository can run both for a while.
 
+## Available modules
+
+| Module | Declaration | Copier question |
+|---|---|---|
+| `core` | none | `project_name`, `toolkit_version` |
+| `java` | `.ci/modules/java.yml` | `java_components` |
+| `python` | `.ci/modules/python.yml` | `python_components` |
+| `node` | `.ci/modules/node.yml` | `node_components` |
+| `docker` | `.ci/modules/docker.yml` | `docker_images` |
+
+A language declaration is `schema_version: 1` plus `components`, one mapping per component. Required fields: `id` (stable job identifier), `name` (display name), `path` (component directory, no `..` segment or glob characters), and the language version (`java_version` for `java`). Every other field is optional and mirrors an input of the module's reusable workflow in snake_case (for example `run_lint`, `test_command`, `timeout_minutes`); every `*_version` is a string such as `"3.12"`, and unknown keys are rejected. `docker` components need only `id`; `name`, `context`, `dockerfile` and `target` are optional.
+
+The language version is optional in a declaration, but new projects pin it: the default answers of `python` and `node` set `python_version` and `node_version` to the workflow default. If a declaration omits it, the workflow default applies and can change with a ci-kit release. A docker `dockerfile` is resolved from the repository root, not from `context`.
+
+`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts.
+
+```yaml
+schema_version: 1
+components:
+  - {"id": "backend-python", "name": "Backend Python", "path": "backend", "python_version": "3.12", "run_lint": false}
+```
+
 ## States
 
 The fleet inventory and the health report classify every repository by its answers files:

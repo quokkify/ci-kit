@@ -104,6 +104,14 @@ def main() -> int:
         result = doctor(template, clean)
         check("clean core+java render passes doctor", result.returncode == 0, result.stdout + result.stderr)
 
+        languages = tmp / "languages"
+        render(template, languages, "core", scenario["core"])
+        render(template, languages, "python", {"python_components": [{"id": "app-python", "name": "Application Python", "path": ".", "test_command": "pytest", "python_version": "3.12"}]})
+        render(template, languages, "node", {"node_components": [{"id": "app-node", "name": "Application Node", "path": ".", "node_version": "22", "package_manager": "npm"}]})
+        render(template, languages, "docker", {"docker_images": [{"id": "app-docker", "context": ".", "dockerfile": "Dockerfile"}]})
+        result = doctor(template, languages)
+        check("core+python+node+docker render passes doctor", result.returncode == 0, result.stdout + result.stderr)
+
         workflows = sorted((clean / ".github/workflows").glob("*.yml"))
         lint = run(["actionlint", *map(str, workflows)])
         check("rendered caller passes actionlint", bool(workflows) and lint.returncode == 0, lint.stdout + lint.stderr)

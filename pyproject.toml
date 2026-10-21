@@ -20,4 +20,4 @@ package-dir = {"" = "tools"}
 packages = ["ci_kit"]
 
 [tool.setuptools.package-data]
-ci_kit = ["schemas/*.json"]
+ci_kit = ["schemas/*.json", "workflow_inputs.json"]

@@ -11,6 +11,13 @@ TOOLKIT_STEPS = frozenset({
     "Set up Java",
     "Resolve build tool and commands",
     "Upload test artifacts",
+    "Set up Python",
+    "Prepare Python package manager",
+    "Cache Python dependencies",
+    "Set up Node.js",
+    "Prepare Node.js package manager",
+    "Cache Node.js dependencies",
+    "Set up Docker Buildx",
 })
 
 RESULT_LABELS = {"success": "ok", "failure": "fail", "cancelled": "cancelled", "skipped": "skipped"}

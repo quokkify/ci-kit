@@ -1,0 +1,11 @@
+core:
+  project_name: fixture-modules
+  toolkit_version: v1.0.0
+node:
+  node_components:
+    - id: app-node
+      name: Application Node
+      path: .
+docker:
+  docker_images:
+    - id: app-docker

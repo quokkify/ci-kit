@@ -9,6 +9,7 @@ from pathlib import Path
 import jsonschema
 import yaml
 
+from .inputs import WORKFLOWS, fill
 from .modules import MODULES
 
 ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
@@ -104,6 +105,22 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             if required not in loaded:
                 findings.append(Finding("CIK-CORE-003", module, f"module {module} requires module {required}", f".ci/modules/{module}.yml"))
 
+    seen: dict[str, str] = {}
+    for module in sorted(loaded):
+        module_ids: set[str] = set()
+        module_names: set[str] = set()
+        for component in loaded[module].get("components", []):
+            owner = seen.setdefault(component["id"], module)
+            if owner != module:
+                findings.append(Finding("CIK-CORE-005", module, f"component id {component['id']} is already declared by module {owner}", f".ci/modules/{module}.yml"))
+            elif component["id"] in module_ids:
+                findings.append(Finding("CIK-CORE-005", module, f"component id {component['id']} is declared more than once in module {module}", f".ci/modules/{module}.yml"))
+            module_ids.add(component["id"])
+            name = component.get("name", component["id"])
+            if name in module_names:
+                findings.append(Finding("CIK-CORE-005", module, f"component name {name} is used by more than one component in module {module}", f".ci/modules/{module}.yml"))
+            module_names.add(name)
+
     modules = sorted(loaded)
     module_owned: set[str] = set()
     if drift and modules:
@@ -126,5 +143,5 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             module_owned.update(area.legacy_paths)
         findings.extend(handoff_findings(repo, legacy_answers, set(answers)))
         findings.extend(legacy_findings(repo, module_owned))
-    matrices = {module: list(loaded[module].get("components", [])) for module in modules}
+    matrices = {module: [fill(module, component) for component in loaded[module].get("components", [])] for module in modules if module in WORKFLOWS}
     return Plan(modules=modules, matrices=matrices, findings=findings, module_owned=module_owned)

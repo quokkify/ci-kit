@@ -15,7 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
 from ci_kit.plan import build_plan, discover
-from module_test_support import rendered_repo, shared_template_repo
+from ci_kit.inputs import module_fields
+from module_test_support import modules_repo, rendered_repo, shared_template_repo
+
+SCHEMAS = Path(__file__).resolve().parents[1] / "tools" / "ci_kit" / "schemas"
 
 
 def codes(plan) -> list[str]:
@@ -29,12 +32,72 @@ def repo_with_java_decl(text: str) -> Path:
 
 
 class PlanTests(unittest.TestCase):
+    def test_schema_properties_match_workflow_inputs(self):
+        for module in ("java", "python", "node", "docker"):
+            schema = json.loads((SCHEMAS / f"{module}.v1.json").read_text())
+            props = set(schema["properties"]["components"]["items"]["properties"])
+            base = {"id", "name"} | (set() if module == "docker" else {"path"})
+            self.assertEqual(props, base | set(module_fields(module)), module)
+
+    def test_plan_fills_defaults_and_keeps_explicit_false_and_empty(self):
+        repo = modules_repo({"python": [{"id": "app", "name": "App", "path": ".", "run_build": False, "build_command": ""}]})
+        entry = build_plan(repo, drift=False).matrices["python"][0]
+        self.assertIs(entry["run_build"], False)
+        self.assertEqual(entry["build_command"], "")
+        self.assertEqual(entry["python_version"], "3.14")
+        self.assertEqual(set(entry), {"id", "name", "path", *module_fields("python")})
+
+    def test_docker_entry_defaults_name_to_id_and_has_no_path(self):
+        repo = modules_repo({"docker": [{"id": "img"}]})
+        entry = build_plan(repo, drift=False).matrices["docker"][0]
+        self.assertEqual(entry, {"id": "img", "name": "img", "context": ".", "dockerfile": "Dockerfile", "target": ""})
+
+    def test_core_has_no_matrix(self):
+        plan = build_plan(modules_repo({"node": [{"id": "web", "name": "Web", "path": "."}]}), drift=False)
+        self.assertNotIn("core", plan.matrices)
+
+    def test_duplicate_component_id_across_modules_is_core_005(self):
+        repo = modules_repo({"python": [{"id": "app", "name": "A", "path": "."}], "node": [{"id": "app", "name": "B", "path": "."}]})
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
+        self.assertEqual([(f.module, f.path) for f in found], [("python", ".ci/modules/python.yml")])
+
+    def test_duplicate_component_id_within_a_module_is_core_005(self):
+        repo = modules_repo({"python": [{"id": "a", "name": "A", "path": "."}, {"id": "a", "name": "B", "path": "."}]})
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
+        self.assertEqual([(f.module, f.path) for f in found], [("python", ".ci/modules/python.yml")])
+        self.assertIn("declared more than once", found[0].message)
+
+    def test_duplicate_component_name_within_a_module_is_core_005(self):
+        repo = modules_repo({"node": [{"id": "a", "name": "Same", "path": "."}, {"id": "b", "name": "Same", "path": "."}]})
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-005"]
+        self.assertEqual([(f.module, f.path) for f in found], [("node", ".ci/modules/node.yml")])
+        self.assertIn("name Same is used by more than one component", found[0].message)
+
+    def test_schema_rejects_unsafe_paths_and_empty_versions(self):
+        cases = (
+            ("python", {"path": "../x"}), ("python", {"path": "a/../b"}), ("python", {"path": "a/*"}), ("python", {"python_version": ""}),
+            ("node", {"path": ".."}), ("node", {"node_version": ""}),
+            ("java", {"path": "../x"}),
+            ("docker", {"context": "../x"}), ("docker", {"context": "a?"}),
+        )
+        for module, bad in cases:
+            with self.subTest(module=module, bad=bad):
+                base = {"id": "a"} if module == "docker" else {"id": "a", "name": "A", "path": "."}
+                if module == "java":
+                    base["java_version"] = "21"
+                repo = modules_repo({module: [{**base, **bad}]})
+                self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
+    def test_numeric_version_is_core_004(self):
+        repo = modules_repo({"node": [{"id": "web", "name": "Web", "path": ".", "node_version": 24}]})
+        self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
     def test_valid_core_java_repo_has_no_findings(self):
         plan = build_plan(rendered_repo("core", "java"), drift=False)
         self.assertEqual(plan.findings, [])
         self.assertEqual(plan.modules, ["core", "java"])
         self.assertEqual(plan.matrices["java"][0]["id"], "app-java")
-        self.assertEqual(plan.matrices["core"], [])
+        self.assertNotIn("core", plan.matrices)
 
     def test_discover_ignores_legacy_answers(self):
         repo = rendered_repo("core")
@@ -136,7 +199,24 @@ class CliTests(unittest.TestCase):
             lines = target.read_text().splitlines()
         self.assertEqual(code, 0)
         self.assertEqual(lines[0], 'modules=["core","java"]')
-        self.assertEqual(lines[1], 'java=[{"id":"app-java","name":"Application Java","path":".","java_version":"21"}]')
+        entry = json.loads(lines[1].removeprefix("java="))[0]
+        self.assertEqual({key: entry[key] for key in ("id", "name", "path", "java_version")}, {"id": "app-java", "name": "Application Java", "path": ".", "java_version": "21"})
+        self.assertEqual(set(entry), {"id", "name", "path", *module_fields("java")})
+
+    def test_plan_outputs_every_matrix(self):
+        repo = rendered_repo("core", "python")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out"
+            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
+            pairs = [line.split("=", 1) for line in target.read_text().splitlines()]
+        self.assertEqual(code, 0)
+        self.assertEqual([key for key, _ in pairs], ["modules", "java", "python", "node", "docker", "codes", "commits"])
+        lines = dict(pairs)
+        self.assertEqual([entry["id"] for entry in json.loads(lines["python"])], ["app-python"])
+        self.assertEqual(json.loads(lines["node"]), [])
+        self.assertEqual(json.loads(lines["docker"]), [])
+        self.assertEqual(json.loads(lines["java"]), [])
+        self.assertEqual(lines["codes"], "[]")
 
     def test_plan_writes_codes_and_commits_outputs(self):
         repo = rendered_repo("core", "java")

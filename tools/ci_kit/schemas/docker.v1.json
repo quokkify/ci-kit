@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ci-kit docker module declaration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "components"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "components": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": "string",
+            "pattern": "^(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
+          },
+          "dockerfile": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

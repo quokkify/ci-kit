@@ -131,6 +131,20 @@ def _commit_all(repo: Path, message: str) -> None:
     git(repo, "commit", "-q", "-m", message)
 
 
+def modules_repo(declarations: dict[str, list[dict]]) -> Path:
+    import yaml
+
+    repo = mkdtemp("modules-repo-")
+    (repo / ".ci/modules").mkdir(parents=True)
+    for module in ("core", *declarations):
+        (repo / f".copier-answers.{module}.yml").write_text(f"module: {module}\n")
+        data = {"schema_version": 1}
+        if module != "core":
+            data["components"] = declarations[module]
+        (repo / f".ci/modules/{module}.yml").write_text(yaml.safe_dump(data))
+    return repo
+
+
 def lifecycle_template_repo() -> Path:
     repo = make_template_repo(mkdtemp("ci-kit-lifecycle-"))
     decl = repo / "modules/java/template/.ci/modules/java.yml.jinja"
