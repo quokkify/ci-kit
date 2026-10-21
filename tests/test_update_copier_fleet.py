@@ -2542,6 +2542,7 @@ def materialize_files(files: dict[str, str]):
         del env
         destination.mkdir(parents=True, exist_ok=True)
         for name, text in files.items():
+            (destination / name).parent.mkdir(parents=True, exist_ok=True)
             (destination / name).write_text(text, encoding="utf-8")
 
     return materialize
@@ -2874,23 +2875,37 @@ class MigrateModeTests(TestCase):
         outcome, *_ = self.migrate({"legacy": self.LEGACY, "core": CORE_ANSWERS_TEXT})
         self.assertEqual(outcome.status, "not-applicable")
 
-    def test_language_components_are_not_applicable_without_cloning(self) -> None:
-        legacy = LEGACY_ANSWERS_TEXT + "components:\n  - type: python\n    path: .\n"
-        with mock.patch.object(fleet, "clone_repository") as clone_mock:
-            outcome, doctor_mock, migrate_mock, push_mock, calls = self.migrate({"legacy": legacy}, dry_run=False)
-        self.assertEqual((outcome.status, outcome.detail), ("not-applicable", "language components"))
-        for called in (clone_mock, doctor_mock, migrate_mock, push_mock):
-            called.assert_not_called()
-        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+    def test_language_components_reach_migrate(self) -> None:
+        legacy = self.LEGACY + "components:\n  - type: python\n    path: .\n"
+        outcome, doctor_mock, migrate_mock, *_ = self.migrate({"legacy": legacy})
+        self.assertEqual((outcome.status, outcome.detail), ("would-migrate", "validate"))
+        doctor_mock.assert_called_once()
+        migrate_mock.assert_called_once()
 
-    def test_migrate_refusal_for_unowned_jobs_is_not_applicable(self) -> None:
-        finding = ci_migrate.Finding("CIK-MIGRATE-005", "core", "job docker calls a reusable workflow; its check names cannot be derived; migrate after its owner module exists", ".github/workflows/validate.yml")
+    def test_migrate_refusal_for_unowned_jobs_is_rejected(self) -> None:
+        finding = ci_migrate.Finding("CIK-MIGRATE-005", "core", "job docker cannot be mapped to a module", ".github/workflows/validate.yml")
         refused = ci_migrate.MigrateResult("core", "validate", "v3.1.0", findings=[finding])
         outcome, _, _, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, result=refused)
-        self.assertEqual(outcome.status, "not-applicable")
-        self.assertIn("reusable workflow", outcome.detail)
+        self.assertEqual((outcome.status, outcome.detail), ("migrate-rejected", "CIK-MIGRATE-005"))
         push_mock.assert_not_called()
         self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_pull_request_body_lists_modules_and_legacy_jobs(self) -> None:
+        validate = (
+            "jobs:\n"
+            "  py:\n    name: Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v3.1.0\n"
+        )
+        migrated = ci_migrate.MigrateResult("core", "validate", "v3.1.0", ["Python / ci"], ["ci / gate"], ["a" * 40], modules=["core", "python"])
+        _, _, _, _, calls = self.migrate(
+            {"legacy": self.LEGACY},
+            dry_run=False,
+            result=migrated,
+            clone=materialize_files({".copier-answers.yml": self.LEGACY, ".github/workflows/validate.yml": validate}),
+        )
+        body = next(c[c.index("--body") + 1] for c in calls if c[:3] == ["gh", "pr", "create"])
+        self.assertIn("Modules: core, python", body)
+        self.assertIn("| legacy job | module | component |", body)
+        self.assertIn("| py | python | Python |", body)
 
     def test_legacy_commit_other_than_target_needs_update_first(self) -> None:
         outcome, doctor_mock, migrate_mock, push_mock, _ = self.migrate({"legacy": LEGACY_ANSWERS_TEXT})
@@ -3137,7 +3152,7 @@ class MigrateCommandLineTests(TestCase):
         self.assertEqual(data["repositories"][0]["migration"], {"findings": []})
 
     def test_not_applicable_repository_does_not_fail_the_run(self) -> None:
-        skipped = fleet.Result("quokkify/knowledge", "not-applicable", "language components")
+        skipped = fleet.Result("quokkify/knowledge", "not-applicable", "module already installed")
         status, *_ = self.run_main(["--dry-run", "--repo", "quokkify/knowledge", "--migrate", "core", "--template-ref", "v3.1.0"], outcome=skipped)
         self.assertEqual(status, 0)
 

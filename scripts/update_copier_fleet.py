@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.drift import TRUSTED_SRC_RE
 from ci_kit.handoff import AREAS, area_for_module
+from ci_kit.legacy_jobs import LegacyJob, parse_jobs
 from ci_kit.migrate import MigrateResult, render_marker
 from ci_kit.modules import MODULES
 from ci_kit.plan import ANSWERS_RE, Finding
@@ -2005,6 +2006,26 @@ def run_ci_kit_migrate(repository_path: Path, module: str, target_ref: str, *, e
     )
 
 
+def read_legacy_jobs(repository_path: Path, legacy: dict[str, Any]) -> list[LegacyJob]:
+    try:
+        data = yaml.safe_load((repository_path / ".github" / "workflows" / "validate.yml").read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return []
+        return parse_jobs(data, str(legacy.get("toolkit_version") or legacy.get("_commit") or ""))
+    except (OSError, ValueError, yaml.YAMLError):
+        return []
+
+
+def migration_modules_section(result: MigrateResult, jobs: Sequence[LegacyJob]) -> str:
+    if not result.modules:
+        return ""
+    section = "\n## Modules\n\nModules: " + ", ".join(result.modules) + "\n"
+    if jobs:
+        section += "\n| legacy job | module | component |\n| --- | --- | --- |\n"
+        section += "".join(f"| {job.job_id} | {job.module} | {job.name} |\n" for job in jobs)
+    return section
+
+
 def migration_title(result: MigrateResult) -> str:
     return f"chore(ci-kit): hand off {result.area} to {result.module} module"
 
@@ -2015,6 +2036,7 @@ def migration_pr_body(
     *,
     doctor: str = "",
     number: int | str = "<n>",
+    jobs: Sequence[LegacyJob] = (),
 ) -> str:
     checks_before = ", ".join(f"`{name}`" for name in result.checks_before) or "none"
     checks_after = ", ".join(f"`{name}`" for name in result.checks_after) or "none"
@@ -2027,6 +2049,7 @@ def migration_pr_body(
         f"- hand off {result.area} to {result.module}\n"
         f"- add {result.module} module\n\n"
         + "".join(f"Head: `{sha}`\n" for sha in result.commits)
+        + migration_modules_section(result, jobs)
         + "\n## Doctor\n\n```text\n"
         + (doctor or "ok")
         + "\n```\n\n"
@@ -2051,6 +2074,7 @@ def ensure_migration_pull_request(
     result: MigrateResult,
     doctor: str,
     env: dict[str, str],
+    jobs: Sequence[LegacyJob] = (),
 ) -> str:
     name = repository.name_with_owner
     existing = gh_json(
@@ -2064,13 +2088,13 @@ def ensure_migration_pull_request(
             [
                 "gh", "pr", "create", "--repo", name, "--base", repository.default_branch,
                 "--head", branch, "--title", migration_title(result),
-                "--body", migration_pr_body(result, name, doctor=doctor),
+                "--body", migration_pr_body(result, name, doctor=doctor, jobs=jobs),
             ],
             env=env,
         ).stdout.strip()
     number = url.rstrip("/").rsplit("/", 1)[-1]
     run(
-        ["gh", "pr", "edit", url, "--repo", name, "--body", migration_pr_body(result, name, doctor=doctor, number=number)],
+        ["gh", "pr", "edit", url, "--repo", name, "--body", migration_pr_body(result, name, doctor=doctor, number=number, jobs=jobs)],
         env=env,
     )
     return url
@@ -2102,8 +2126,6 @@ def migrate_repository(
     source = normalize_template_source(parse_template_source(raw_answers))
     if source != normalize_template_source(expected_template):
         return Result(name, "foreign-template", source or "unrecognized source")
-    if area == "validate" and parse_answers(raw_answers).get("components"):
-        return Result(name, "not-applicable", "language components")
     applied = parse_answers(raw_answers).get("_commit")
     if applied != target_ref:
         return Result(name, "needs-update-first", f"legacy _commit is {applied}, target is {target_ref}")
@@ -2115,9 +2137,8 @@ def migrate_repository(
         codes = finding_codes(doctor_output) or [f"exit {code}"]
         return Result(name, "migrate-rejected", ", ".join(codes), migration={"doctor": doctor_output, "findings": []})
     base = git_head(destination)
+    legacy_jobs = read_legacy_jobs(destination, parse_answers(raw_answers))
     migrated = run_ci_kit_migrate(destination, module, target_ref, env=env)
-    if [item.code for item in migrated.findings] == ["CIK-MIGRATE-005"]:
-        return Result(name, "not-applicable", migrated.findings[0].message.splitlines()[0])
     if migrated.findings:
         findings = [
             {"code": item.code, "module": item.module, "message": item.message, "path": item.path}
@@ -2134,7 +2155,9 @@ def migrate_repository(
     squash_to_base(destination, base)
     head = push_automation_branch(repository, destination, branch=branch, env=env, message=migration_title(migrated))
     migrated.commits = [head]
-    url = ensure_migration_pull_request(repository, branch=branch, result=migrated, doctor=doctor_output, env=env)
+    url = ensure_migration_pull_request(
+        repository, branch=branch, result=migrated, doctor=doctor_output, env=env, jobs=legacy_jobs,
+    )
     return Result(name, "pull-request", url)
 
 
