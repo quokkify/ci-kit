@@ -18,10 +18,11 @@ from ci_kit.gate import _failing_step, evaluate, render_summary
 REF = "0123456789abcdef0123"
 
 
-def needs(plan="success", core="success", java="success", all=None):
+def needs(plan="success", core="success", java="success", all=None, **extra):
     if all:
         plan = core = java = all
-    return {name: {"result": result, "outputs": {}} for name, result in (("plan", plan), ("core-checks", core), ("java", java))}
+    results = {"plan": plan, "core-checks": core, "java": java, **extra}
+    return {name: {"result": result, "outputs": {}} for name, result in results.items()}
 
 
 def row(rows, module):
@@ -69,6 +70,23 @@ class GateTests(unittest.TestCase):
 
     def test_failed_gradle_test_is_project(self):
         self.assertEqual(row(failed_java("Gradle test with bounded recovery"), "java").category, "project")
+
+    def test_language_module_failures_are_categorized(self):
+        cases = (
+            ("python", "Set up Python", "toolkit"), ("python", "Prepare Python package manager", "toolkit"),
+            ("python", "Cache Python dependencies", "toolkit"), ("python", "Test", "project"),
+            ("python", "Validate inputs", "project"),
+            ("node", "Set up Node.js", "toolkit"), ("node", "Prepare Node.js package manager", "toolkit"),
+            ("node", "Cache Node.js dependencies", "toolkit"), ("node", "Lint", "project"),
+            ("node", "Validate inputs", "project"),
+            ("docker", "Set up Docker Buildx", "toolkit"), ("docker", "Build image", "project"),
+        )
+        for module, step, category in cases:
+            with self.subTest(module=module, step=step):
+                jobs = [{"name": f"ci / {module} (Component) / ci", "conclusion": "failure", "steps": [{"name": step, "conclusion": "failure", "number": 2}]}]
+                _, rows = evaluate(["core", module], needs(**{module: "failure"}), jobs, REF)
+                found = row(rows, module)
+                self.assertEqual((found.category, found.failing_step), (category, step))
 
     def test_first_failed_step_by_number_decides(self):
         jobs = jobs_with_failed_step("Gradle test with bounded recovery", number=7)
