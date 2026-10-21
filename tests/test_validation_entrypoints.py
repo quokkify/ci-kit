@@ -24,13 +24,13 @@ class SuiteRunnerTests(TestCase):
         (self.root / "scripts").mkdir()
         shutil.copy2(ROOT / "scripts/run_test_suites.py", self.root / "scripts/run_test_suites.py")
 
-    def run_runner(self, nested: bool = False) -> subprocess.CompletedProcess[str]:
+    def run_runner(self, *arguments: str, nested: bool = False) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env.pop("PROJECT_TOOLKIT_NESTED_VALIDATION", None)
         if nested:
             env["PROJECT_TOOLKIT_NESTED_VALIDATION"] = "1"
         return subprocess.run(
-            [sys.executable, "scripts/run_test_suites.py"], cwd=self.root,
+            [sys.executable, "scripts/run_test_suites.py", *arguments], cwd=self.root,
             env=env, text=True, capture_output=True, timeout=20,
         )
 
@@ -83,6 +83,56 @@ class SuiteRunnerTests(TestCase):
         result = self.run_runner(nested=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("nested validation:", result.stdout)
+
+    def write_passing_suites(self, *names: str) -> None:
+        for name in names:
+            (self.root / "tests" / name).write_text(
+                "import unittest\nclass Dummy(unittest.TestCase):\n    def test_ok(self):\n        pass\n"
+            )
+
+    def shard_layout(self, count: int) -> list[list[str]]:
+        result = self.run_runner("--list-shards", str(count))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return [line.split(": ", 1)[1].split() for line in result.stdout.splitlines()]
+
+    def test_shards_are_disjoint_complete_and_deterministic(self) -> None:
+        names = [f"test_s{index}.py" for index in range(7)]
+        self.write_passing_suites(*names)
+        layout = self.shard_layout(3)
+        self.assertEqual(sorted(name for shard in layout for name in shard), names)
+        self.assertEqual(layout, self.shard_layout(3))
+        for index in range(1, 4):
+            result = self.run_runner("--shard", f"{index}/3")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in layout[index - 1]:
+                self.assertIn(f"tests/{name}", result.stdout)
+            self.assertEqual(result.stdout.count("+ unittest suite"), len(layout[index - 1]))
+
+    def test_invalid_shard_arguments_fail(self) -> None:
+        self.write_passing_suites("test_a.py", "test_b.py")
+        for value in ("0/3", "4/3", "abc", "1/3", "1/0"):
+            with self.subTest(value=value):
+                self.assertNotEqual(self.run_runner("--shard", value).returncode, 0)
+        self.assertNotEqual(self.run_runner("--list-shards", "3").returncode, 0)
+
+    def test_nested_validation_skips_with_shard(self) -> None:
+        (self.root / "tests/test_failure.py").write_text("raise SystemExit(7)\n")
+        result = self.run_runner("--shard", "1/1", nested=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nested validation:", result.stdout)
+
+    def test_heaviest_weighted_suites_land_in_different_shards(self) -> None:
+        self.write_passing_suites("test_ci_kit_drift.py", "test_migration_lifecycle.py", "test_unweighted.py")
+        layout = self.shard_layout(2)
+        self.assertNotEqual(
+            [index for index, shard in enumerate(layout) if "test_ci_kit_drift.py" in shard],
+            [index for index, shard in enumerate(layout) if "test_migration_lifecycle.py" in shard],
+        )
+
+    def test_unweighted_suite_appears_exactly_once(self) -> None:
+        self.write_passing_suites("test_ci_kit_drift.py", "test_ci_kit_update.py", "test_brand_new.py")
+        layout = self.shard_layout(2)
+        self.assertEqual(sum(shard.count("test_brand_new.py") for shard in layout), 1)
 
 
 class RenderedWorkflowEvidenceTests(TestCase):
