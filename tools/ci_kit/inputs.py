@@ -33,3 +33,23 @@ def field_name(input_name: str) -> str:
 
 def input_name(field: str) -> str:
     return field.replace("_", "-")
+
+
+def module_fields(module: str) -> tuple[str, ...]:
+    from .modules import MODULES
+
+    declared = MODULES[module].fields
+    if declared is not None:
+        return declared
+    table = load_inputs()[WORKFLOWS[module]]
+    return tuple(field_name(name) for name in table if name != "working-directory")
+
+
+def fill(module: str, component: dict) -> dict:
+    table = load_inputs()[WORKFLOWS[module]]
+    entry = {"id": component["id"], "name": component.get("name", component["id"])}
+    if module != "docker":
+        entry["path"] = component["path"]
+    for name in module_fields(module):
+        entry[name] = component[name] if name in component else table[input_name(name)]["default"]
+    return entry
