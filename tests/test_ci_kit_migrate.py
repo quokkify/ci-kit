@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.cli import main
 from ci_kit.legacy_jobs import MappingError, legacy_to_modules
-from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, _contract_findings, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker
+from ci_kit.migrate import CHECKS_AFTER, MARKER, MigrateResult, _contract_findings, copier_copy_command, legacy_check_names, migrate, parse_marker, render_marker, result_payload
 from ci_kit.handoff import AREAS
 from ci_kit.plan import Finding, build_plan
 from module_test_support import git, legacy_scenario_repo, lifecycle_template_repo, mkdtemp
@@ -341,9 +341,12 @@ class MultiModuleTests(unittest.TestCase):
 
         with mock.patch("ci_kit.migrate.legacy_to_modules", side_effect=flipped):
             result = migrate(repo, "core", "v99.0.0", src_override=self.src)
-        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
+        self.assertEqual({f.code for f in result.findings}, {"CIK-MIGRATE-005"})
         self.assertIn("test-command", result.findings[0].message)
         self.assertEqual(result.commits, [])
+        self.assertEqual(result.checks_before, [])
+        self.assertEqual(result.modules, [])
+        self.assertEqual(result_payload(result)["checks_before"], [])
         self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
         self.assertEqual(git(repo, "status", "--porcelain"), "")
 

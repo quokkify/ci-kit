@@ -225,7 +225,6 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
         result.findings = findings
         return result
 
-    result.checks_before = checks
     declarations = legacy_to_modules(jobs)
     head = _git(repo, "rev-parse", "HEAD")
     commits: list[str] = []
@@ -264,8 +263,9 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     mismatches = equivalence_findings(jobs, plan)
     if mismatches:
         _rollback(repo, head)
-        result.findings = [*plan.findings, *mismatches]
+        result.findings = mismatches
         return result
+    result.checks_before = checks
     result.modules = [name for name, _ in declarations]
     result.commits = commits
     result.findings = plan.findings
