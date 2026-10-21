@@ -130,7 +130,7 @@ def preflight_ready(repository: str, sha: str) -> bool:
 # its external code-scanning rule need not appear in the check-runs API.
 PILOT_CHECKS = {
     "quokkify/gh-pages-subdir-action": ("Scan Git history and current tree", "Validation pipeline complete", "Shared template contract"),
-    "quokkify/skills": ("Gitleaks", "App Python / ci", "Shared template contract"),
+    "quokkify/skills": ("gitleaks", "App Python / ci", "Shared template contract"),
     "quokkify/q4j": ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete", "Shared template contract"),
 }
 # Contexts produced only by pull_request workflows. A pilot that is already up to date is verified on its

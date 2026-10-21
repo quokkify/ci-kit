@@ -151,7 +151,7 @@ class PilotGateTests(unittest.TestCase):
 
     def test_legacy_pilot_contexts_are_unchanged(self):
         self.assertEqual(gate.pilot_contexts("quokkify/skills", None),
-                         ("Gitleaks", "App Python / ci", "Shared template contract"))
+                         ("gitleaks", "App Python / ci", "Shared template contract"))
         self.assertEqual(gate.pilot_contexts("quokkify/q4j", 7),
                          ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete",
                           "Shared template contract"))
