@@ -65,6 +65,24 @@ class ModuleRenderTests(unittest.TestCase):
         result, _ = self.copy("java", f"java_components={json.dumps([component])}")
         return result
 
+    def render_with_core(self, module: str, data: str) -> Path:
+        dest = self.render(module, data)
+        args = ["copier", "copy", "--trust", "--defaults", "--vcs-ref", "HEAD", "-a", ".copier-answers.core.yml", "-d", "module=core", str(self.repo), str(dest)]
+        subprocess.run(args, check=True, capture_output=True, text=True)
+        return dest
+
+    def test_declarations_with_unsorted_keys_do_not_drift(self) -> None:
+        cases = {
+            "node": ("node_components", [{"id": "web", "name": "Web", "path": ".", "node_version": "22", "package_manager": "npm"}]),
+            "docker": ("docker_images", [{"id": "img", "context": ".", "dockerfile": "Dockerfile"}]),
+            "java": ("java_components", [{**DEFAULT_COMPONENT, "run_lint": False, "timeout_minutes": 30, "test_command": "gradle test"}]),
+            "python": ("python_components", [{"id": "svc", "name": "Svc", "path": ".", "test_command": "pytest", "python_version": "3.12"}]),
+        }
+        for module, (key, components) in cases.items():
+            with self.subTest(module=module):
+                dest = self.render_with_core(module, f"{key}={json.dumps(components)}")
+                self.assertEqual(build_plan(dest, drift=True, src_override=str(self.repo)).findings, [])
+
     def test_core_renders_exact_file_set(self) -> None:
         self.assertEqual(
             self.rendered_files("core"),

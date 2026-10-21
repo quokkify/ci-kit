@@ -5,7 +5,7 @@ components:
     name: {{ component.name | to_json(ensure_ascii=False) }}
     path: {{ component.path | to_json(ensure_ascii=False) }}
     java_version: {{ component.java_version | string | to_json }}
-{%- for key, value in component.items() if key not in ['id', 'name', 'path', 'java_version'] %}
+{%- for key, value in component | dictsort if key not in ['id', 'name', 'path', 'java_version'] %}
     {{ key }}: {{ value | to_json(ensure_ascii=False) }}
 {%- endfor %}
 {%- endfor %}
