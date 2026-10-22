@@ -2209,7 +2209,7 @@ def ensure_pull_request(
 
 AUTO_MERGE_HEAD_POLL_SECONDS = 2
 AUTO_MERGE_HEAD_POLLS = 3
-AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"
+AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName,statusCheckRollup"
 AUTO_MERGE_SETTLE = timedelta(minutes=10)
 CHECK_PASSING_CONCLUSIONS = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
 CHECK_PENDING_STATES = frozenset({"PENDING", "EXPECTED"})
@@ -2294,13 +2294,15 @@ def enable_auto_merge(
     env: dict[str, str],
     modules: Sequence[dict[str, str]] = (),
     disarmed: bool = False,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> dict[str, str]:
-    """Ask GitHub to squash-merge the automation PR once its ruleset is satisfied."""
+    """Squash-merge the automation PR: through GitHub auto-merge when the repository allows it, directly once checks are green otherwise."""
     number = pull_request_number(repository, url)
     if number is None:
         return {"state": "failed", "reason": "pull request URL does not belong to the repository"}
     name = repository.name_with_owner
     pull_request: dict[str, Any] = {}
+    direct = False
 
     def view() -> dict[str, Any]:
         payload = gh_json(["pr", "view", number, "--repo", name, "--json", AUTO_MERGE_PULL_FIELDS], env=env)
@@ -2309,7 +2311,7 @@ def enable_auto_merge(
         return payload
 
     def evaluate() -> tuple[str, str]:
-        nonlocal pull_request
+        nonlocal pull_request, direct
         pull_request = view()
         if pull_request.get("state") == "MERGED":
             return "merged", "pull request already merged"
@@ -2336,8 +2338,7 @@ def enable_auto_merge(
         settings = gh_json(["api", f"repos/{name}"], env=env)
         if not isinstance(settings, dict) or "allow_auto_merge" not in settings or "allow_squash_merge" not in settings:
             return "failed", "repository auto-merge setting unreadable (token permissions?)"
-        if not settings["allow_auto_merge"]:
-            return "skipped", "repository has auto-merge disabled"
+        direct = not settings["allow_auto_merge"]
         if not settings["allow_squash_merge"]:
             return "skipped", "repository does not allow squash merge"
         if pull_request.get("state") != "OPEN":
@@ -2356,6 +2357,15 @@ def enable_auto_merge(
             pull_request = view()
         if pull_request.get("headRefOid") != expected:
             return "skipped", "pull request head not yet updated"
+        if direct:
+            verdict, why = checks_verdict(pull_request.get("statusCheckRollup"), now())
+            if verdict != "ready":
+                return ("skipped" if verdict == "failed" else "waiting"), why
+            # Never pass --auto here: where auto-merge cannot be armed, gh merges at once and ignores checks.
+            completed = run(["gh", "pr", "merge", number, "--repo", name, "--squash", "--match-head-commit", expected], env=env, check=False)
+            if completed.returncode:
+                return "failed", sanitize_text(completed.stderr.strip() or completed.stdout.strip() or f"gh pr merge exited {completed.returncode}")
+            return "merged", f"merged {expected}"
         if pull_request.get("autoMergeRequest") and not disarmed:
             return "enabled", "auto-merge already enabled"
         completed = run(["gh", "pr", "merge", number, "--repo", name, "--auto", "--squash", "--match-head-commit", expected], env=env, check=False)
@@ -2365,7 +2375,7 @@ def enable_auto_merge(
 
     try:
         state, reason = evaluate()
-        if state in {"skipped", "failed"} and pull_request.get("autoMergeRequest") and not disarmed:
+        if state in {"skipped", "failed"} and not direct and pull_request.get("autoMergeRequest") and not disarmed:
             error = disable_auto_merge(repository, number, env=env)
             if error is None:
                 reason += "; existing auto-merge disabled"

@@ -3470,7 +3470,9 @@ class AutoMergeTests(TestCase):
     OLD_HEAD = "d" * 40
     REPOSITORY = fleet.Repository("quokkify/example", "main")
     VIEW = ["pr", "view", "7", "--repo", "quokkify/example", "--json",
-            "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"]
+            "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName,statusCheckRollup"]
+    NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+    DIRECT = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--squash", "--match-head-commit", HEAD]
     MERGE = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--auto", "--squash", "--match-head-commit", HEAD]
     DISABLE = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--disable-auto"]
     HERMETIC_ENV = {"GH_TOKEN": "t", "GITHUB_TOKEN": "", "GITHUB_EVENT_NAME": "", "GITHUB_SERVER_URL": "",
@@ -3481,7 +3483,11 @@ class AutoMergeTests(TestCase):
 
     def pull(self, **overrides):
         return {"state": "OPEN", "baseRefName": "main", "mergeable": "MERGEABLE", "headRefOid": self.HEAD,
-                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH, **overrides}
+                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH,
+                "statusCheckRollup": [self.check()], **overrides}
+
+    def check(self, name="ci / gate", *, status="COMPLETED", conclusion="SUCCESS", completed="2026-10-22T11:00:00Z"):
+        return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion, "completedAt": completed}
 
     def enable(self, *, settings=None, pulls=None, merge=(0, ""), disable=(0, ""), url=None, **overrides):
         arguments = {"branch": fleet.DEFAULT_BRANCH, "head": self.HEAD, "applied": "v3.2.0", "target": "v3.3.0",
@@ -3504,7 +3510,7 @@ class AutoMergeTests(TestCase):
         with mock.patch.object(fleet, "gh_json", side_effect=fake_gh_json) as gh_mock, \
              mock.patch.object(fleet, "run", side_effect=fake_run) as run_mock, \
              mock.patch.object(fleet.time, "sleep") as sleep_mock:
-            outcome = fleet.enable_auto_merge(self.REPOSITORY, url or self.URL, env={}, **arguments)
+            outcome = fleet.enable_auto_merge(self.REPOSITORY, url or self.URL, env={}, now=lambda: self.NOW, **arguments)
         self.sleep_mock = sleep_mock
         return outcome, [call.args[0] for call in gh_mock.call_args_list], [call.args[0] for call in run_mock.call_args_list]
 
@@ -3532,7 +3538,6 @@ class AutoMergeTests(TestCase):
             ({"applied": "v0.3.5", "target": "v0.4.0"}, "major version bump v0.3.5 → v0.4.0 needs a human"),
             ({"modules": [{"module": "core", "from": "v2.9.0"}]}, "major version bump core v2.9.0 → v3.3.0 needs a human"),
             ({"modules": [{"module": "core", "from": ""}]}, "module core applied version is not a release tag"),
-            ({"settings": self.settings(allow_auto_merge=False)}, "repository has auto-merge disabled"),
             ({"settings": self.settings(allow_squash_merge=False)}, "repository does not allow squash merge"),
             ({"pulls": [self.pull(mergeable="CONFLICTING")]}, "pull request has merge conflicts"),
             ({"pulls": [self.pull(baseRefName="develop")]}, "pull request base is not the default branch"),
@@ -3543,6 +3548,34 @@ class AutoMergeTests(TestCase):
                 outcome, _, commands = self.enable(**overrides)
                 self.assertEqual(outcome, {"state": "skipped", "reason": reason})
                 self.assertEqual(commands, [])
+
+    def test_auto_merge_disabled_merges_green_pull_request_directly(self) -> None:
+        outcome, _, commands = self.enable(settings=self.settings(allow_auto_merge=False))
+        self.assertEqual(outcome, {"state": "merged", "reason": f"merged {self.HEAD}"})
+        self.assertEqual(commands, [self.DIRECT])
+
+    def test_direct_path_waits_for_running_checks(self) -> None:
+        running = self.check(status="IN_PROGRESS", conclusion=None, completed=None)
+        outcome, _, commands = self.enable(settings=self.settings(allow_auto_merge=False), pulls=[self.pull(statusCheckRollup=[running])])
+        self.assertEqual(outcome["state"], "waiting")
+        self.assertEqual(commands, [])
+
+    def test_direct_path_skips_failed_checks(self) -> None:
+        failing = self.check(conclusion="FAILURE")
+        outcome, _, commands = self.enable(settings=self.settings(allow_auto_merge=False), pulls=[self.pull(statusCheckRollup=[failing])])
+        self.assertEqual(outcome, {"state": "skipped", "reason": "failed checks: ci / gate"})
+        self.assertEqual(commands, [])
+
+    def test_direct_merge_rejected_head_is_failed(self) -> None:
+        outcome, _, _ = self.enable(settings=self.settings(allow_auto_merge=False), merge=(1, "head moved"))
+        self.assertEqual(outcome, {"state": "failed", "reason": "head moved"})
+
+    def test_direct_path_never_uses_auto_flag(self) -> None:
+        armed = self.pull(autoMergeRequest={"mergeMethod": "SQUASH"})
+        for pulls in ([self.pull()], [armed], [self.pull(statusCheckRollup=[self.check(conclusion="FAILURE")])]):
+            _, _, commands = self.enable(settings=self.settings(allow_auto_merge=False), pulls=pulls)
+            for command in commands:
+                self.assertNotIn("--auto", command)
 
     def test_minor_patch_and_repair_only_updates_are_eligible(self) -> None:
         for applied, target, modules in (("v3.2.9", "v3.3.0", []), ("v3.3.0", "v3.3.1", []), ("v0.4.0", "v0.4.1", []),
