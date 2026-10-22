@@ -1,5 +1,31 @@
 # Changelog
 
+## [3.8.0](https://github.com/quokkify/ci-kit/compare/v3.7.0...v3.8.0) (2026-10-22)
+
+
+### ✨ Features
+
+* **ci:** manual merge-ready input for the fleet workflow ([#474](https://github.com/quokkify/ci-kit/issues/474)) ([e689482](https://github.com/quokkify/ci-kit/commit/e689482dde1ac63276010a8a84825b44b2770e0c))
+
+
+### 🐛 Bug Fixes
+
+* **migrate:** roll back ignored files the migration created ([#482](https://github.com/quokkify/ci-kit/issues/482)) ([0e27e4e](https://github.com/quokkify/ci-kit/commit/0e27e4e35268e04854a30e16408881cdf8e7e3d0))
+* **migration:** revert re-adds only the checks the switch removed ([#478](https://github.com/quokkify/ci-kit/issues/478)) ([8b2e08a](https://github.com/quokkify/ci-kit/commit/8b2e08af6eb950689b3c986fc73b95fc6ff2e85e))
+* **modules:** reject an empty component *_version at copy time ([#481](https://github.com/quokkify/ci-kit/issues/481)) ([d76cc4c](https://github.com/quokkify/ci-kit/commit/d76cc4c7723ad4ecda0e461fdf4bff5648c4153c))
+* **tests:** report a failed subprocess's captured output ([#477](https://github.com/quokkify/ci-kit/issues/477)) ([af26474](https://github.com/quokkify/ci-kit/commit/af2647457a0fbb2348edfe9f2049e28bf38b5c1c))
+
+
+### ♻️ Refactoring
+
+* **ci-kit:** take module inputs from their single sources ([#484](https://github.com/quokkify/ci-kit/issues/484)) ([b778ddd](https://github.com/quokkify/ci-kit/commit/b778ddd4541c7dcceed5b15e5e722715ada69afc))
+* **rollout:** derive pilot template checks from the pilot revision ([#480](https://github.com/quokkify/ci-kit/issues/480)) ([caafd25](https://github.com/quokkify/ci-kit/commit/caafd25a589a524e28b6d6180d3fa661a421add7))
+
+
+### 🧹 Chores
+
+* stop tracking oh-my-claudecode runtime state ([#476](https://github.com/quokkify/ci-kit/issues/476)) ([79370ec](https://github.com/quokkify/ci-kit/commit/79370ecb17ceff6ee3ad940b1edbe282fd8c730e))
+
 ## [3.7.0](https://github.com/quokkify/ci-kit/compare/v3.6.1...v3.7.0) (2026-10-22)
 
 
