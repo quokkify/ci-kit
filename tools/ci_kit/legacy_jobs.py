@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from .inputs import WORKFLOWS, field_name, load_inputs
+from .migration_marker import CONTRACT_JOB, MappingError, _jobs, _target, check_contexts  # noqa: F401
 from .modules import MODULES
 
-CONTRACT_JOB = "template-contract"
-CONTRACT_CHECK = "Shared template contract"
 JOB_KEYS = ("name", "uses", "with")
 DOCKER_INPUTS = MODULES["docker"].fields
 MODULE_ORDER = ("core", "java", "python", "node", "docker")
@@ -18,14 +16,6 @@ QUESTIONS = {
     "docker": "docker_images",
 }
 JAVA_DEFAULT_VERSION = "17"
-USES_RE = re.compile(r"^quokkify/ci-kit/\.github/workflows/([a-z-]+)\.yml@(\S+)$")
-MODULE_BY_WORKFLOW = {workflow: module for module, workflow in WORKFLOWS.items()}
-
-
-class MappingError(ValueError):
-    def __init__(self, message: str, job_id: str):
-        super().__init__(message)
-        self.job_id = job_id
 
 
 @dataclass(frozen=True)
@@ -34,19 +24,6 @@ class LegacyJob:
     name: str
     module: str
     with_: dict[str, object]
-
-
-def _target(job: object) -> tuple[str, str] | None:
-    uses = job.get("uses") if isinstance(job, dict) else None
-    match = USES_RE.match(uses) if isinstance(uses, str) else None
-    if match and match.group(1) in MODULE_BY_WORKFLOW:
-        return MODULE_BY_WORKFLOW[match.group(1)], match.group(2)
-    return None
-
-
-def _jobs(data: object) -> dict:
-    jobs = data.get("jobs") if isinstance(data, dict) else None
-    return jobs if isinstance(jobs, dict) else {}
 
 
 def component_job_ids(data: dict, toolkit_version: str) -> set[str]:
@@ -131,17 +108,3 @@ def legacy_to_modules(jobs: list[LegacyJob]) -> list[tuple[str, dict]]:
         if entries:
             declarations.append((module, {QUESTIONS[module]: entries}))
     return declarations
-
-
-def check_contexts(data: dict) -> list[str]:
-    contexts = []
-    for job_id, job in _jobs(data).items():
-        if job_id == CONTRACT_JOB:
-            contexts.append(CONTRACT_CHECK)
-            continue
-        target = _target(job)
-        if target is None:
-            raise MappingError(f"job {job_id} has no ci-kit workflow to derive a check name from", str(job_id))
-        name = job.get("name") or str(job_id)
-        contexts.append(f"{name} / {'build' if target[0] == 'docker' else 'ci'}")
-    return contexts

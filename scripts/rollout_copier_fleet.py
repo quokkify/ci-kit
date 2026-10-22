@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import update_copier_fleet as fleet
-from ci_kit.migrate import parse_marker
+from ci_kit.migration_marker import parse_marker
 from verify_ci_gate import (DEFAULT_PILOT_TIMEOUT, GateError, PILOT_CHECKS, PILOT_TIMEOUTS, current_snapshot,
                             release_ready, verify_pilot, wait_until)
 

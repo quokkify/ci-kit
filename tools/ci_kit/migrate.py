@@ -13,12 +13,11 @@ from .drift import DIFF_LINES, RENDER_TIMEOUT, TRUSTED_SRC_RE, RenderError, _cop
 from .equivalence import VALIDATE_PATH, equivalence_findings
 from .handoff import AREAS, area_for_module
 from .legacy import ANSWERS, load_answers
-from .legacy_jobs import LegacyJob, MappingError, check_contexts, component_job_ids, legacy_to_modules, parse_jobs
+from .legacy_jobs import LegacyJob, component_job_ids, legacy_to_modules, parse_jobs
+from .migration_marker import CHECKS_AFTER, MARKER, MappingError, check_contexts, legacy_check_names, parse_marker
 from .plan import Finding, build_plan, discover
 from .update import _git, _rejects, commit_all, copier_update_command
 
-MARKER = "<!-- ci-kit-migrate -->"
-CHECKS_AFTER = {"core": ["ci / gate"]}
 PAYLOAD_KEYS = ("module", "area", "ref", "checks_before", "checks_after", "commits", "findings", "modules")
 
 
@@ -52,34 +51,6 @@ def result_payload(result: MigrateResult) -> dict:
 
 def render_marker(result: MigrateResult) -> str:
     return f"{MARKER}\n```json\n{json.dumps(result_payload(result), indent=2)}\n```"
-
-
-def parse_marker(body: str) -> dict:
-    lines = body.splitlines()
-    try:
-        start = lines.index(MARKER)
-    except ValueError:
-        raise ValueError("migrate marker not found") from None
-    if start + 1 >= len(lines) or lines[start + 1].strip() != "```json":
-        raise ValueError("migrate marker is not followed by a json block")
-    block: list[str] = []
-    for line in lines[start + 2:]:
-        if line.strip() == "```":
-            break
-        block.append(line)
-    else:
-        raise ValueError("migrate json block is not closed")
-    try:
-        data = json.loads("\n".join(block))
-    except json.JSONDecodeError as error:
-        raise ValueError(f"migrate json block is invalid: {error}") from error
-    if not isinstance(data, dict):
-        raise ValueError("migrate json block must be an object")
-    return data
-
-
-def legacy_check_names(validate_yml: Path) -> list[str]:
-    return check_contexts(yaml.safe_load(Path(validate_yml).read_text()))
 
 
 def copier_copy_command(module: str, to: str, src: str, data: dict[str, object] | None = None) -> list[str]:

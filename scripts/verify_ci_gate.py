@@ -163,8 +163,7 @@ def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...]) ->
     """The template's checks at sha: checks_after once validate is handed off, else the legacy validate.yml jobs."""
     import base64
     import yaml
-    from ci_kit.legacy_jobs import check_contexts
-    from ci_kit.migrate import CHECKS_AFTER
+    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts
 
     if "validate" in handed_off:
         return tuple(CHECKS_AFTER["core"])
