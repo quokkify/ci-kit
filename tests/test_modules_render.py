@@ -198,7 +198,19 @@ class ModuleRenderTests(unittest.TestCase):
         component = {"id": "svc", "name": "Svc", "path": ".", "python_version": 3.12}
         result, _ = self.copy("python", f"python_components={json.dumps([component])}")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('python_version must be a string such as "24"', result.stdout + result.stderr)
+        self.assertIn('python_version must be a non-empty string such as "24"', result.stdout + result.stderr)
+
+    def test_component_versions_must_not_be_empty(self) -> None:
+        # The module schema requires minLength 1; Copier must reject an empty version at copy time, not only ci-kit plan.
+        cases = {"python": ("python_version", "pip_version", "poetry_version", "uv_version"), "node": ("node_version", "corepack_version")}
+        for module, keys in cases.items():
+            for key in keys:
+                for value in ("", "  "):
+                    with self.subTest(module=module, key=key, value=value):
+                        component = {"id": "svc", "name": "Svc", "path": ".", key: value}
+                        result, _ = self.copy(module, f"{module}_components={json.dumps([component])}")
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(f'{key} must be a non-empty string such as "24"', result.stdout + result.stderr)
 
     def test_new_modules_reject_bad_input(self) -> None:
         base = {"python": {"id": "a", "name": "A", "path": "."}, "node": {"id": "a", "name": "A", "path": "."}, "docker": {"id": "a"}}
