@@ -6,6 +6,9 @@ new required checks and reconciles the managed ruleset at the PR head SHA. Witho
 a managed ruleset it patches only the required checks of the single repository
 ruleset that requires checks on the base branch.
 
+--revert removes checks_after and re-adds only the --restore contexts: the "removed"
+list the forward switch printed. Each must be in checks_before.
+
 The PR body is never trusted for check lists: checks_after must equal the module's
 CHECKS_AFTER and checks_before must equal the legacy jobs of validate.yml at the PR
 base SHA (at --revision for --revert). A managed-ruleset PUT without bypass_actors is
@@ -43,8 +46,16 @@ class Refusal(RuntimeError):
     """The switch cannot be proven safe; nothing was changed."""
 
 
-def next_checks(current: list[str], before: list[str], after: list[str], *, revert: bool) -> list[str]:
-    remove, add = (after, before) if revert else (before, after)
+def next_checks(current: list[str], before: list[str], after: list[str], *, revert: bool, restore: list[str] | None = None) -> list[str]:
+    if revert:
+        if restore is None:
+            raise ValueError("--revert needs --restore: the checks the forward switch removed")
+        unknown = [item for item in restore if item not in before]
+        if unknown:
+            raise ValueError(f"--restore {unknown} not in checks_before {before}; refusing")
+        remove, add = after, restore
+    else:
+        remove, add = before, after
     result = list(dict.fromkeys([*(item for item in current if item not in set(remove)), *add]))
     if not result:
         raise ValueError("required checks cannot become empty")
@@ -148,14 +159,15 @@ def foreign_owner(entries: list[dict[str, Any]], context: str, managed_id: int) 
     return None
 
 
-def plan(policy: dict[str, Any], managed_id: int, current: list[str], before: list[str], after: list[str], revert: bool) -> list[str]:
+def plan(policy: dict[str, Any], managed_id: int, current: list[str], before: list[str], after: list[str], revert: bool,
+         restore: list[str] | None = None) -> list[str]:
     if policy.get("status") == "unknown":
         raise Refusal(f"required checks status is unknown ({policy.get('reason', 'no reason given')}); refusing")
     for context in (after if revert else before):
         owner = foreign_owner(policy.get("checks", []), context, managed_id)
         if owner:
             raise Refusal(f"{context!r} is required by {owner}, not the managed ruleset; refusing")
-    return next_checks(current, before, after, revert=revert)
+    return next_checks(current, before, after, revert=revert, restore=restore)
 
 
 def unmanaged_ruleset(client: GitHubClient, repo: str, policy: dict[str, Any], name: str) -> tuple[dict[str, Any], list[str]]:
@@ -237,6 +249,8 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--revert", action="store_true")
     command.add_argument("--dry-run", action="store_true")
     command.add_argument("--revision", help="head SHA of the git-revert PR; required with --revert")
+    command.add_argument("--restore", nargs="*", action="extend", metavar="CONTEXT",
+                         help="with --revert: the checks the forward switch removed (its 'removed' output); no value restores none")
     return command
 
 
@@ -247,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         parser().error("--pr must be OWNER/REPO#N")
     if args.revert and not (args.revision and re.fullmatch(r"[0-9a-f]{40}", args.revision)):
         parser().error("--revert requires --revision <40-hex head SHA of the revert PR>")
+    if args.revert != (args.restore is not None):
+        parser().error("--revert requires --restore [CONTEXT ...] (the forward switch's 'removed'), and --restore requires --revert")
     repo, number = match.group(1), int(match.group(2))
     try:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -290,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             ruleset = {"id": existing["id"], "name": name, "managed": True}
         try:
-            new = plan(policy, ruleset["id"], current, before, after, args.revert)
+            new = plan(policy, ruleset["id"], current, before, after, args.revert, args.restore)
         except ValueError as exc:
             raise Refusal(str(exc)) from exc
         if existing is None:
@@ -303,7 +319,9 @@ def main(argv: list[str] | None = None) -> int:
     except ReconcileError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"repo": repo, "branch": branch, "revision": revision, "dry_run": args.dry_run, "ruleset": ruleset, "before": current, "after": new, "action": output.get("action")}, indent=2))
+    print(json.dumps({"repo": repo, "branch": branch, "revision": revision, "dry_run": args.dry_run, "ruleset": ruleset, "before": current, "after": new,
+                      "removed": [item for item in current if item not in new], "added": [item for item in new if item not in current],
+                      "action": output.get("action")}, indent=2))
     return 0
 
 
