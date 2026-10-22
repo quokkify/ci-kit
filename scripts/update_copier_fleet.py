@@ -2746,9 +2746,11 @@ def migration_pr_body(
         "```console\n"
         f"python scripts/migration_checks.py --pr {repository}#{number}\n"
         "```\n\n"
+        "Keep the `removed` list it prints (a `--dry-run` prints the same): the rollback needs it, and a re-run reports `[]`.\n\n"
         "## Rollback\n\n"
         "Revert the squashed commit with `git revert <sha>` and restore the required checks with "
-        f"`python scripts/migration_checks.py --pr {repository}#{number} --revert`.\n\n"
+        f"`python scripts/migration_checks.py --pr {repository}#{number} --revert --revision <revert PR head SHA> "
+        "--restore \"<removed check>\" ...`, quoting each removed check.\n\n"
         + render_marker(result)
         + "\n"
     )

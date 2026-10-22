@@ -60,13 +60,15 @@ A job that cannot be mapped (hand-added steps, `needs`, `if`, an aggregator job 
    python scripts/migration_checks.py --pr OWNER/REPO#N
    ```
 
+   Keep the `removed` list from the output, for example in a PR comment: a rollback needs it, and a re-run reports `[]`. The `--dry-run` output carries the same list, which matters when the real run exits 2 after its PUT and prints no JSON.
+
 4. Merge the PR.
 
 The fleet never merges PRs and never edits rulesets. Required checks change only through `migration_checks.py`, run by a human with `GH_TOKEN` or `GITHUB_TOKEN` (never a CLI argument).
 
 ### What `migration_checks.py` changes
 
-It edits one ruleset: the managed ruleset `ci-kit/security/<owner>/<repo>` when it exists, otherwise the repository ruleset that requires checks on the base branch (see below). It reads the migrate marker (`<!-- ci-kit-migrate -->` followed by a json block) from the PR body, computes `current - checks_before + checks_after` (reversed with `--revert`), and calls the `reconcile_ruleset.py` logic at the PR head SHA. Reconcile rewrites the whole managed ruleset, including `strict_required_status_checks_policy` and the pull_request parameters, to the values it would write for a normal reconcile. Run it only when nobody else is editing that ruleset: it reads and then writes, so a concurrent edit can be lost.
+It edits one ruleset: the managed ruleset `ci-kit/security/<owner>/<repo>` when it exists, otherwise the repository ruleset that requires checks on the base branch (see below). It reads the migrate marker (`<!-- ci-kit-migrate -->` followed by a json block) from the PR body, computes `current - checks_before + checks_after` (with `--revert`: `current - checks_after + --restore`), and calls the `reconcile_ruleset.py` logic at the PR head SHA. Reconcile rewrites the whole managed ruleset, including `strict_required_status_checks_policy` and the pull_request parameters, to the values it would write for a normal reconcile. Run it only when nobody else is editing that ruleset: it reads and then writes, so a concurrent edit can be lost.
 
 Without a managed ruleset (every consumer today has only a hand-made ruleset such as `main`), the target is the one ruleset that owns the effective required checks on the base branch, as reported by GitHub's branch rules. It is patched, not reconciled: the PUT resends its `name`, `target`, `enforcement`, `conditions`, `bypass_actors` and `rules` exactly as read and changes only the `required_status_checks` list. Kept checks keep their `integration_id`; added checks are sent without one. Only added checks must be published at the PR head SHA (at `--revision` for `--revert`). Right before the PUT the ruleset is read again and the command refuses if `updated_at` changed; after the PUT the readback must equal what was sent. An already applied switch is a `noop` with no write.
 
@@ -74,6 +76,7 @@ The PR body is not trusted for check names: `checks_after` must equal the module
 
 - the marker is missing or malformed, or the PR head/base cannot be read;
 - `checks_after` differs from `CHECKS_AFTER`, or `checks_before` differs from the legacy `validate.yml` jobs;
+- a `--restore` context is not in `checks_before`;
 - `validate.yml` is missing, unreadable or defines no jobs, or has a job that calls a reusable workflow (`uses:`; its check context `<job name> / <called job>` cannot be derived);
 - there is no managed ruleset and the base branch has zero or several rulesets requiring checks, classic branch protection, a required check without a ruleset id, or the one ruleset is not a repository ruleset, has duplicated check contexts, not `active`, hides `bypass_actors` from the token, has no or a duplicated `required_status_checks` rule, or changed between the read and the PUT;
 - the managed ruleset is not `active`, does not target `refs/heads/<base branch>`, has no or a duplicated `required_status_checks` rule, a malformed rule, several code-scanning rules, or a code-scanning rule that is not a single CodeQL tool with a known threshold and the `security_alerts_threshold` reconcile would write;
@@ -82,17 +85,17 @@ The PR body is not trusted for check names: `checks_after` must equal the module
 - a check being replaced is required by classic branch protection or another ruleset;
 - the new set would be empty.
 
-Exit 2 is a reconcile/API error (a message starting `PUT applied` means the ruleset was written but its readback did not match: inspect it before re-running), a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, or `--revert` without `--revision <40-hex SHA>`). For the managed ruleset, a PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`. The output names the edited ruleset (`ruleset.id`, `ruleset.name`, `ruleset.managed`).
+Exit 2 is a reconcile/API error (a message starting `PUT applied` means the ruleset was written but its readback did not match: inspect it before re-running), a missing `GH_TOKEN`/`GITHUB_TOKEN`, or an argument error (a malformed `--pr`, `--revert` without `--revision <40-hex SHA>` or `--restore`, or `--restore` without `--revert`). For the managed ruleset, a PUT without `bypass_actors` is assumed to keep existing bypass actors; confirm with `--dry-run`. The output names the edited ruleset (`ruleset.id`, `ruleset.name`, `ruleset.managed`) and lists the checks it `removed` and `added`.
 
 ## Rollback
 
 Copier does not support downgrades, so rollback is a revert:
 
 1. `git revert` the migration PR commit and open a revert PR.
-2. Switch the checks back, using the head SHA of the revert PR:
+2. Switch the checks back, using the head SHA of the revert PR. `--restore` takes the `removed` list of the forward switch, one argument per context. A bare `--restore` restores none, for a switch that removed nothing. The revert always removes `checks_after`, because the reverted repository no longer publishes it:
 
    ```console
-   python scripts/migration_checks.py --pr OWNER/REPO#N --revert --revision <revert PR head SHA>
+   python scripts/migration_checks.py --pr OWNER/REPO#N --revert --revision <revert PR head SHA> --restore "App Python / ci"
    ```
 
 3. Merge the revert PR.

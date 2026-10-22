@@ -3038,7 +3038,8 @@ class MigrationPullRequestBodyTests(TestCase):
             "ci / gate",
             "python scripts/migration_checks.py --pr quokkify/example#<n>",
             "git revert",
-            "--revert",
+            "--revert --revision <revert PR head SHA> --restore",
+            "Keep the `removed` list",
         ):
             self.assertIn(text, body)
         filled = self.body(number=5)

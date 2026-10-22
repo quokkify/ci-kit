@@ -85,7 +85,32 @@ class NextChecksTests(TestCase):
         )
 
     def test_revert(self):
-        self.assertEqual(module.next_checks(["Gitleaks", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True), ["Gitleaks", "Shared template contract"])
+        self.assertEqual(
+            module.next_checks(["Gitleaks", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True, restore=["Shared template contract"]),
+            ["Gitleaks", "Shared template contract"],
+        )
+
+    def test_revert_restores_only_what_the_switch_removed(self):
+        # Regression guard for #459: skills required App Python / ci but never Shared template contract.
+        self.assertEqual(
+            module.next_checks(["CodeQL", "gitleaks", "ci / gate"], ["Shared template contract", "App Python / ci"], ["ci / gate"],
+                               revert=True, restore=["App Python / ci"]),
+            ["CodeQL", "gitleaks", "App Python / ci"],
+        )
+
+    def test_revert_with_nothing_to_restore_removes_checks_after(self):
+        self.assertEqual(
+            module.next_checks(["CodeQL", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True, restore=[]),
+            ["CodeQL"],
+        )
+
+    def test_revert_without_restore_rejected(self):
+        with self.assertRaisesRegex(ValueError, "--restore"):
+            module.next_checks(["Gitleaks", "ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True)
+
+    def test_restore_outside_checks_before_rejected(self):
+        with self.assertRaisesRegex(ValueError, "CodeQL"):
+            module.next_checks(["ci / gate"], ["Shared template contract"], ["ci / gate"], revert=True, restore=["CodeQL"])
 
     def test_duplicates_removed_order_preserved(self):
         self.assertEqual(module.next_checks(["b", "a", "b"], [], ["a", "c", "c"], revert=False), ["b", "a", "c"])
@@ -201,11 +226,45 @@ class MainTests(TestCase):
     def test_revert_swaps(self):
         self.policy = policy(entry("Gitleaks"), entry("ci / gate"))
         FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
-        code, _, _ = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
+        code, _, _ = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV, "--restore", "Shared template contract"])
         self.assertEqual(code, 0)
         self.assertEqual(self.legacy_refs, [REV])
         self.assertEqual(self.reconcile_calls[0]["revision"], REV)
         self.assertEqual(self.reconcile_calls[0]["checks"], ["Gitleaks", "Shared template contract"])
+
+    def test_revert_adds_back_only_restored_checks(self):
+        # Regression guard for #459: the skills switch removed App Python / ci; Shared template contract was never required.
+        legacy = ["Shared template contract", "App Python / ci"]
+        self.body = MARKER_BODY.replace('["Shared template contract"]', json.dumps(legacy))
+        self.legacy = legacy
+        self.policy = policy(entry("CodeQL"), entry("gitleaks"), entry("ci / gate"))
+        FakeClient.detail = make_detail(status_rule("CodeQL", "gitleaks", "ci / gate"))
+        code, out, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV, "--restore", "App Python / ci"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.reconcile_calls[0]["checks"], ["CodeQL", "gitleaks", "App Python / ci"])
+        report = json.loads(out)
+        self.assertEqual((report["removed"], report["added"]), (["ci / gate"], ["App Python / ci"]))
+
+    def test_repeated_restore_flags_collect_every_context(self):
+        legacy = ["Shared template contract", "App Python / ci"]
+        self.body = MARKER_BODY.replace('["Shared template contract"]', json.dumps(legacy))
+        self.legacy = legacy
+        self.policy = policy(entry("Gitleaks"), entry("ci / gate"))
+        FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
+        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--restore", "App Python / ci", "--revision", REV, "--restore", "Shared template contract"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.reconcile_calls[0]["checks"], ["Gitleaks", "App Python / ci", "Shared template contract"])
+
+    def test_forward_report_names_removed_checks_for_the_revert(self):
+        code, out, err = self.run_main(["--pr", "o/r#5", "--dry-run"])
+        self.assertEqual(code, 0, err)
+        report = json.loads(out)
+        self.assertEqual((report["removed"], report["added"]), (["Shared template contract"], ["ci / gate"]))
+
+    def test_restore_outside_checks_before_refused(self):
+        self.policy = policy(entry("Gitleaks"), entry("ci / gate"))
+        FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
+        self.refused(("--pr", "o/r#5", "--revert", "--revision", REV, "--restore", "Gitleaks"), needle="--restore")
 
     def test_only_managed_ruleset_contexts_are_operated_on(self):
         self.policy = policy(entry("Gitleaks"), entry("Shared template contract"), entry("Other", ruleset_id=99), entry("Classic", source="classic-protection"))
@@ -231,7 +290,7 @@ class MainTests(TestCase):
     def test_revert_checks_after_owned_elsewhere_refused(self):
         self.policy = policy(entry("ci / gate"), entry("ci / gate", source="classic-protection"))
         FakeClient.detail = make_detail(status_rule("ci / gate"))
-        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
+        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV, "--restore", "Shared template contract"])
         self.assertEqual(code, 1)
         self.assertIn("classic-protection", err)
         self.assertEqual(self.reconcile_calls, [])
@@ -309,7 +368,15 @@ class MainTests(TestCase):
 
     def test_revert_requires_revision(self):
         with self.assertRaises(SystemExit):
-            self.run_main(["--pr", "o/r#5", "--revert"])
+            self.run_main(["--pr", "o/r#5", "--revert", "--restore"])
+
+    def test_revert_requires_restore(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
+
+    def test_restore_requires_revert(self):
+        with self.assertRaises(SystemExit):
+            self.run_main(["--pr", "o/r#5", "--restore", "Shared template contract"])
 
     def test_integration_bound_check_refused(self):
         FakeClient.detail = make_detail(status_rule("Gitleaks", "Shared template contract", integration_id=15368))
@@ -361,7 +428,7 @@ class MainTests(TestCase):
         self.body = MARKER_BODY.replace('["Shared template contract"]', '[]')
         self.legacy = []
         FakeClient.detail = make_detail(status_rule("Gitleaks", "ci / gate"))
-        self.refused(("--pr", "o/r#5", "--revert", "--revision", REV))
+        self.refused(("--pr", "o/r#5", "--revert", "--revision", REV, "--restore"))
 
     def test_yaml_error_refused(self):
         import yaml
@@ -495,7 +562,7 @@ class UnmanagedRulesetTests(TestCase):
     def test_revert_restores_legacy_check(self):
         self.policy = policy(entry("Gitleaks", ruleset_id=UNMANAGED_ID), entry("ci / gate", ruleset_id=UNMANAGED_ID))
         self.client = UnmanagedClient(unmanaged_detail("Gitleaks", "ci / gate"))
-        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV])
+        code, _, err = self.run_main(["--pr", "o/r#5", "--revert", "--revision", REV, "--restore", "Shared template contract"])
         self.assertEqual(code, 0, err)
         self.assertEqual(self.legacy_refs, [REV])
         self.assertEqual(self.put_contexts(), [{"context": "Gitleaks", "integration_id": None}, {"context": "Shared template contract"}])
