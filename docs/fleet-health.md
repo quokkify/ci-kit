@@ -105,7 +105,11 @@ python scripts/update_copier_fleet.py --write --repo quokkify/skills --auto-merg
 `--auto-merge` (off by default; rejected with `--dry-run` and `--migrate`)
 merges each template-update PR the run created or refreshed, once the PR is
 eligible. Write-mode workflow runs (release-triggered and the Monday run) pass
-it. There are two paths, chosen by the repository's `allow_auto_merge` setting:
+it, but they always pin `--template-ref`, and a PR from a run with an explicit
+template ref is never merged ("target is not a release tag resolved by the
+run"). So write runs create or refresh PRs and report; only the daily
+`--merge-ready` pass merges, and a merge can lag the PR by up to a day. There
+are two paths, chosen by the repository's `allow_auto_merge` setting:
 
 - **Native path** (`allow_auto_merge` on): `gh pr merge <number> --repo <repo>
   --auto --squash --match-head-commit <sha>`. The sha is the commit this run
@@ -122,9 +126,11 @@ it. There are two paths, chosen by the repository's `allow_auto_merge` setting:
   every `statusCheckRollup` entry on the current head is completed with
   `SUCCESS`, `NEUTRAL` or `SKIPPED`; at least one check exists; the last one
   finished at least 10 minutes ago (late-registering workflows get time to
-  appear); and `mergeable` is `MERGEABLE`. Otherwise the PR waits
-  (`waiting`, merged by a later run) or is skipped with a reason such as
-  `failed checks: ...` or `mergeability not yet computed`. GitHub still
+  appear); and `mergeable` is `MERGEABLE`. If check times are missing, the PR
+  waits too. Otherwise the PR waits (`waiting`, merged by a later run, for
+  example `mergeability not yet computed`, running checks or
+  `check times unavailable`) or is skipped with a reason such as
+  `failed checks: ...`, which is reported as a PR with failed CI. GitHub still
   enforces rulesets on a direct merge.
 
 Never run `gh pr merge --auto` on a repository where `allow_auto_merge` cannot
