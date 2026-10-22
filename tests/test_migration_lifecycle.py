@@ -127,6 +127,8 @@ class ComponentMigrationLifecycleTests(unittest.TestCase):
                 updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
                 self.assertEqual(findings, [])
                 self.assertEqual(sorted(u.module for u in updates), sorted(["legacy", *result.modules]))
+                for answers in repo.glob(".copier-answers*.yml"):
+                    self.assertEqual(yaml.safe_load(answers.read_text())["_commit"], "v99.1.0", answers.name)
                 self.assertEqual(list(repo.rglob("*.rej")), [])
                 self.assertEqual(git(repo, "status", "--porcelain").strip(), "")
                 self.assertEqual(build_plan(repo, src_override=self.src).findings, [])
