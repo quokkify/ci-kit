@@ -5,6 +5,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
@@ -76,12 +78,22 @@ class ComponentMigrationLifecycleTests(unittest.TestCase):
             r'(\n    uses: quokkify/ci-kit/\.github/workflows/(?:python|node|java)-ci\.yml@\S+\n    with:\n)',
             r'\1      test-command: "make hand-edited-test"\n',
             text,
-            count=1,
         )
         if count:
             path.write_text(edited)
-            git(repo, "commit", "-qam", "hand-edit component test command")
+            git(repo, "commit", "-qam", "hand-edit component test commands")
         return repo
+
+    def assert_every_component_keeps_the_edit(self, repo: Path) -> None:
+        components = [
+            component
+            for module in ("java", "python", "node")
+            if (repo / f".ci/modules/{module}.yml").is_file()
+            for component in yaml.safe_load((repo / f".ci/modules/{module}.yml").read_text())["components"]
+        ]
+        self.assertTrue(components)
+        for component in components:
+            self.assertEqual(component.get("test_command"), "make hand-edited-test", component["id"])
 
     def test_scenarios_are_discovered(self):
         for name in ("polyglot", "docker", "java", "node"):
@@ -96,8 +108,7 @@ class ComponentMigrationLifecycleTests(unittest.TestCase):
                 result = migrate(repo, "core", "v99.0.0", src_override=self.src)
                 self.assertEqual(result.findings, [])
                 self.assertEqual(len(result.commits), len(result.modules) + 1)
-                declared = "".join(p.read_text() for p in (repo / ".ci/modules").glob("*.yml"))
-                self.assertIn("hand-edited-test", declared)
+                self.assert_every_component_keeps_the_edit(repo)
                 post = git(repo, "rev-parse", "HEAD").strip()
                 updates, findings = run_update(repo, "v99.0.0", src_override=self.src)
                 self.assertEqual(findings, [])
@@ -105,6 +116,26 @@ class ComponentMigrationLifecycleTests(unittest.TestCase):
                 self.assertEqual(git(repo, "rev-parse", "HEAD").strip(), post)
                 git(repo, "revert", "--no-edit", *reversed(result.commits))
                 self.assertEqual(git(repo, "diff", pre, "HEAD").strip(), "")
+
+    def test_migrated_components_update_to_the_next_release(self):
+        # v99.1.0 changes the java declaration render; the hand edits live in module answers and must survive.
+        for scenario in ("polyglot", "docker"):
+            with self.subTest(scenario=scenario):
+                repo = self.edited_repo(scenario)
+                result = migrate(repo, "core", "v99.0.0", src_override=self.src)
+                self.assertEqual(result.findings, [])
+                updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
+                self.assertEqual(findings, [])
+                self.assertEqual(sorted(u.module for u in updates), sorted(["legacy", *result.modules]))
+                for answers in repo.glob(".copier-answers*.yml"):
+                    self.assertEqual(yaml.safe_load(answers.read_text())["_commit"], "v99.1.0", answers.name)
+                self.assertEqual(list(repo.rglob("*.rej")), [])
+                self.assertEqual(git(repo, "status", "--porcelain").strip(), "")
+                self.assertEqual(build_plan(repo, src_override=self.src).findings, [])
+                self.assert_every_component_keeps_the_edit(repo)
+                java = repo / ".ci/modules/java.yml"
+                if "java" in result.modules:
+                    self.assertIn("# rendered by ci-kit v99.1.0", java.read_text())
 
     def test_allure_artifact_names_use_external_prefix(self):
         repo = legacy_scenario_repo(self.template, "allure-polyglot")
