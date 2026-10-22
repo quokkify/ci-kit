@@ -11,8 +11,8 @@
 | | Состояние |
 |---|---|
 | ci-kit | модули `core`, `java`, `python`, `node`, `docker` (#452); `ci-kit migrate` для репозиториев с компонентами (#454); релизы до v3.6.0 |
-| На модулях | 9 из 12 (11 + новый archgate): волна 1 (7 × `core`), knowledge (`core`), skills (`core` + `python`) |
-| Готовы к миграции | marketdesk (подготовка marketdesk#416), q4j (подготовка q4j#778, заглушки убраны q4j#779) |
+| На модулях | 11 из 12 (11 + новый archgate): волна 1 (7 × `core`), knowledge (`core`), skills (`core` + `python`), marketdesk (`core` + `java` + `node` + `docker`, marketdesk#418), q4j (`core`, q4j#781) |
+| Осталось на legacy | archgate (новый, `java:.`; миграция отдельно) |
 | Раскатка v3.6.0 | завершена: 12 из 12 на v3.6.0 (10 fleet PR, archgate#3, knowledge#66), CI на `main` зелёный |
 
 ## 1. Раскатка v3.6.0 и проверка Allure (сделано 2026-10-22)
@@ -57,8 +57,8 @@ gh run view <run-id> --repo quokkify/<repo> --json jobs --jq '.jobs[]|"\(.name):
 ## 2. Завершить волну 2 (spec #4 §9, §11)
 
 - [x] Пауза выдержана: релиз v3.6.0 прошёл fleet `update` по skills и knowledge без ручных правок (skills#137 и knowledge#66 — одним bot-commit, `ci / gate` зелёный).
-- [ ] **marketdesk**: `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/marketdesk --template-ref <текущий тег> --migrate core --write` → зелёный `ci / gate` → `python scripts/migration_checks.py --pr quokkify/marketdesk#<n> --dry-run` (ожидаемо `checks_before`: `Shared template contract`, `MarketDesk / ci`, `Java test automation / ci`, `docker / build`) → без `--dry-run` → merge. Проверить Allure external на `main`.
-- [ ] **q4j**: то же; модуль только `core`, `checks_before` = `Shared template contract`. Required checks q4j от validate не зависят — `migration_checks.py` покажет, что менять нечего.
+- [x] **marketdesk**: `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/marketdesk --template-ref <текущий тег> --migrate core --write` → зелёный `ci / gate` → `python scripts/migration_checks.py --pr quokkify/marketdesk#<n> --dry-run` (ожидаемо `checks_before`: `Shared template contract`, `MarketDesk / ci`, `Java test automation / ci`, `docker / build`) → без `--dry-run` → merge. Проверить Allure external на `main`. Смёржен marketdesk#418; Allure от модульного `Validate`: 987 тестов, как до миграции.
+- [x] **q4j**: то же; модуль только `core`, `checks_before` = `Shared template contract`. Required checks q4j от validate не зависят, но `migration_checks.py` всё равно добавляет `checks_after`: `ci / gate` теперь required, как в волне 1. Смёржен q4j#781.
 - [ ] Пауза: следующий релиз ci-kit проходит fleet `update` по marketdesk и q4j.
 - [ ] Зафиксировать критерии §11 комментарием в #393: (1) никто не на legacy validate; (2) один релиз прошёл fleet по всем 11 без ручных правок; (3) ручное вмешательство — только подготовительные PR и отказы с кодом; (4) Allure-отчёты и Pages skills, marketdesk, q4j публикуются как до миграции.
 
