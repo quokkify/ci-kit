@@ -184,6 +184,10 @@ second step, `Merge ready template updates`, runs `--write --auto-merge
 step failed, because merging ready PRs does not depend on other repositories
 being up to date. A PR that was not ready on one day is merged on a later one.
 
+To run the merge pass by hand, dispatch the workflow with `merge-ready: true`
+and `dry-run: true`. The first step then stays a read-only audit, and the
+second step merges whatever is ready.
+
 To stop one PR, close it, or disarm a native auto-merge with
 `gh pr merge <url> --disable-auto`. A repository is excluded from fleet runs
 with `--exclude`.
