@@ -30,11 +30,11 @@ The fleet inventory and the health report classify every repository by its answe
 
 | State | Meaning |
 |---|---|
-| `legacy` | Only `.copier-answers.yml`; `handed_off` is empty. |
+| `legacy` | Only `.copier-answers.yml`; `handed_off` is empty. The current template refuses it with `CIK-LEGACY-006`. |
 | `hybrid(<areas>)` | Legacy answers plus module answers (`.copier-answers.<module>.yml`); `<areas>` lists `handed_off`. `hybrid()` means modules are installed but nothing is handed off, which `ci-kit plan` reports as `CIK-HANDOFF-002`. |
 | `modules` | Module answers only; the legacy template is gone. |
 
-`handed_off` is a legacy answer: a YAML list of area names (currently `validate`, owned by `core`) whose files legacy stops rendering through `_exclude`. Duplicates and unknown areas are rejected by the Copier validator. Every file has exactly one owner at any moment: `ci-kit plan` reports `CIK-HANDOFF-001` when an area is handed off but its module is missing, `CIK-HANDOFF-002` when a module is installed but legacy still owns its area, and `CIK-HANDOFF-003` for a malformed `handed_off`. Legacy contract checks (`CIK-LEGACY-*`) apply only to legacy-owned files.
+`handed_off` is a legacy answer: a YAML list of area names (currently `validate`, owned by `core`) whose files legacy stops rendering. `validate` is required and is the default for a new copy: the legacy template no longer ships `validate.yml`, so a list without it, or stored answers without the key, are refused by Copier and reported by `ci-kit plan` as `CIK-LEGACY-006` ([runbook](errors/CIK-LEGACY-006.md)). Duplicates and unknown areas are rejected by the Copier validator. Every file has exactly one owner at any moment: `ci-kit plan` reports `CIK-HANDOFF-001` when an area is handed off but its module is missing, `CIK-HANDOFF-002` when a module is installed but legacy still owns its area, and `CIK-HANDOFF-003` for a malformed `handed_off`. Legacy contract checks (`CIK-LEGACY-*`) apply only to legacy-owned files.
 
 ## Migrating one repository
 
@@ -91,4 +91,4 @@ The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` tr
 3. Add the area to the `handed_off` validator's `allowed_handed_off` list in `copier.yml`.
 4. Add the module's required checks to `CHECKS_AFTER` in `tools/ci_kit/migration_marker.py`.
 5. If handing off the area changes which checks a pilot publishes, extend `template_contexts` in `scripts/verify_ci_gate.py`. Today it handles `validate`: `CHECKS_AFTER["core"]` once handed off, otherwise the contexts of the pilot's legacy `validate.yml` jobs.
-6. Keep the registry, validator, and `_exclude` consistent; a test compares them.
+6. Keep the registry, validator, and `_exclude` consistent; a test compares them. An area whose legacy files are removed from the template (as `validate` was) needs no `_exclude` entry.

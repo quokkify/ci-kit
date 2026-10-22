@@ -30,13 +30,13 @@ class LegacyCompatTests(unittest.TestCase):
                     render_tree(self.candidate, scenario, {**PIN, "module": "legacy"}),
                 )
 
-    def test_empty_handed_off_is_byte_identical(self) -> None:
+    def test_default_handed_off_matches_explicit_validate(self) -> None:
         for scenario in sorted((ROOT / "tests/scenarios").glob("*.yml")):
             with self.subTest(scenario=scenario.name):
                 plain = render_tree(self.candidate, scenario, PIN)
-                explicit = render_tree(self.candidate, scenario, {**PIN, "handed_off": []})
+                explicit = render_tree(self.candidate, scenario, {**PIN, "handed_off": "[validate]"})
                 for tree in (plain, explicit):
-                    self.assertIn(b"\nhanded_off: []\n", tree[".copier-answers.yml"])
+                    self.assertEqual(yaml.safe_load(tree[".copier-answers.yml"])["handed_off"], ["validate"])
                 self.assertEqual(
                     normalize_answers(plain, "legacy"), normalize_answers(explicit, "legacy")
                 )

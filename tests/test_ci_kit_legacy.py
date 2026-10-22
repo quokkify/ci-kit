@@ -14,17 +14,22 @@ from ci_kit.plan import build_plan
 from module_test_support import ROOT, mkdtemp, render, run_copier, shared_template_repo
 
 _CACHE: dict[tuple, Path] = {}
+LEGACY_WORKFLOW = ".github/workflows/gitleaks.yml"
 
 
-def legacy_repo(scenario: str = "java.yml", handed_off: list | None = None, core: bool = False) -> Path:
-    key = (scenario, tuple(handed_off or ()), core)
+def legacy_repo(scenario: str = "java.yml", handed_off: list | None = None, core: bool = True) -> Path:
+    handed_off = ["validate"] if handed_off is None else handed_off
+    key = (scenario, repr(handed_off), core)
     if key not in _CACHE:
         data = yaml.safe_load((ROOT / "tests/scenarios" / scenario).read_text())
         data["toolkit_version"] = "v99.0.0"
-        data["handed_off"] = handed_off or []
+        data["handed_off"] = ["validate"]
         data_file = mkdtemp("scenario-") / "data.yml"
         data_file.write_text(yaml.safe_dump(data))
         dest = render(shared_template_repo(), data_file)
+        if handed_off != ["validate"]:
+            # The template refuses to render legacy without validate handed off; older answers are written afterwards.
+            edit_answers(dest, handed_off=handed_off)
         if core:
             run_copier(shared_template_repo(), dest, "-a", ".copier-answers.core.yml", "-d", "module=core")
         _CACHE[key] = dest
@@ -65,15 +70,34 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(codes(repo, drift=True), [])
 
     def test_handoff_001_area_without_owner_module(self):
-        repo = legacy_repo(handed_off=["validate"])
+        repo = legacy_repo(handed_off=["validate"], core=False)
         self.assertEqual(codes(repo), ["CIK-HANDOFF-001"])
 
-    def test_handoff_002_module_without_handoff_points_to_modules_doc(self):
+    def test_handoff_002_module_without_handoff_points_to_legacy_006_runbook(self):
         repo = legacy_repo(handed_off=["validate"], core=True)
         edit_answers(repo, handed_off=[])
         findings = build_plan(repo, drift=False).findings
-        self.assertEqual([f.code for f in findings], ["CIK-HANDOFF-002"])
-        self.assertIn("docs/modules.md", findings[0].message)
+        self.assertEqual([f.code for f in findings], ["CIK-HANDOFF-002", "CIK-LEGACY-006"])
+        self.assertIn("docs/errors/CIK-LEGACY-006.md", findings[0].message)
+
+    def test_validate_not_handed_off_reports_legacy_006(self):
+        for answers in ({"handed_off": []}, {"handed_off": None}):
+            with self.subTest(answers=answers):
+                repo = legacy_repo(handed_off=[], core=False)
+                if answers["handed_off"] is None:
+                    edit_answers(repo, **answers)
+                findings = build_plan(repo, drift=False).findings
+                self.assertEqual([f.code for f in findings], ["CIK-LEGACY-006"])
+                self.assertEqual(findings[0].module, "legacy")
+                self.assertEqual(findings[0].path, ".copier-answers.yml")
+                self.assertIn("docs/errors/CIK-LEGACY-006.md", findings[0].message)
+
+    def test_malformed_handed_off_keeps_handoff_003(self):
+        for value in ("oops", ["bogus"], [1]):
+            with self.subTest(value=value):
+                repo = legacy_repo(core=False)
+                edit_answers(repo, handed_off=value)
+                self.assertEqual(codes(repo), ["CIK-HANDOFF-003"])
 
     def test_handoff_003_unknown_or_malformed(self):
         for value in (["bogus"], "validate", [1], {"a": 1}):
@@ -137,7 +161,7 @@ class LegacyTests(unittest.TestCase):
 
     def test_legacy_003_ref_mismatch(self):
         repo = legacy_repo()
-        wf = repo / ".github/workflows/validate.yml"
+        wf = repo / LEGACY_WORKFLOW
         wf.write_text(wf.read_text().replace("@v99.0.0", "@v1.2.3"))
         self.assertEqual(set(codes(repo)), {"CIK-LEGACY-003"})
 
@@ -147,7 +171,7 @@ class LegacyTests(unittest.TestCase):
         wf.write_text(wf.read_text().replace("@v99.0.0", "@v1.2.3"))
         self.assertEqual(codes(repo, drift=False), [])
         repo2 = legacy_repo()
-        wf2 = repo2 / ".github/workflows/validate.yml"
+        wf2 = repo2 / LEGACY_WORKFLOW
         sha = "a" * 40
         wf2.write_text(wf2.read_text().replace("@v99.0.0", f"@{sha} # v99.0.0"))
         self.assertEqual(codes(repo2), [])
@@ -207,7 +231,7 @@ class LegacyTests(unittest.TestCase):
     def test_legacy_005_unparseable_files(self):
         repo = legacy_repo()
         (repo / ".github/renovate.json").write_text("{")
-        (repo / ".github/workflows/validate.yml").write_text("a: [")
+        (repo / LEGACY_WORKFLOW).write_text("a: [")
         self.assertEqual(codes(repo), ["CIK-LEGACY-005", "CIK-LEGACY-005"])
 
     def test_legacy_005_skips_module_owned(self):

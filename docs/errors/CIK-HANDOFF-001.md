@@ -8,8 +8,13 @@ Legacy .copier-answers.yml lists an area in handed_off, but the module that owns
 
 ## Fix
 
-The `ci-kit migrate` command is retired; see [CIK-LEGACY-006](CIK-LEGACY-006.md) for the migration path.
-Or remove the area from handed_off if the hand-off was not intended.
+Install the owner module; for validate that is core:
+
+```bash
+copier copy --trust -a .copier-answers.core.yml -d module=core https://github.com/quokkify/ci-kit.git .
+```
+
+validate cannot be removed from handed_off: the legacy template no longer renders validate.yml ([CIK-LEGACY-006](CIK-LEGACY-006.md)).
 
 ## Example
 

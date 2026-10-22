@@ -77,7 +77,7 @@ class CheckoutTests(unittest.TestCase):
 
     def test_every_generated_checkout_tracks_the_copier_version(self):
         sources = ROOT / 'template/.github/workflows'
-        expected = {'validate.yml', 'codeql.yml', 'gitleaks.yml', 'copier-update.yml'}
+        expected = {'codeql.yml', 'gitleaks.yml', 'copier-update.yml'}
         actual = set()
         for source in sources.glob('*.jinja'):
             text = source.read_text()
@@ -184,7 +184,7 @@ jobs:
             self.assertEqual(answers['toolkit_version'], 'v8.1.0')
             self.assertFalse(list(consumer.rglob('*.rej')))
             self.assertEqual(custom.read_text(), custom_text)
-            for name in ('validate', 'gitleaks', 'copier-update'):
+            for name in ('gitleaks', 'copier-update'):
                 text = (consumer / f'.github/workflows/{name}.yml').read_text()
                 self.assertIn('uses: quokkify/ci-kit/actions/checkout@v8.1.0', text)
                 self.assertNotIn('uses: actions/checkout@', text)

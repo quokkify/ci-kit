@@ -9,18 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.migration_marker import MARKER, MappingError, check_contexts, legacy_check_names, parse_marker
-from module_test_support import legacy_scenario_repo, lifecycle_template_repo, mkdtemp
-
-VALIDATE = ".github/workflows/validate.yml"
-_TEMPLATE: Path | None = None
-
-
-def template() -> Path:
-    global _TEMPLATE
-    if _TEMPLATE is None:
-        _TEMPLATE = lifecycle_template_repo()
-    return _TEMPLATE
-
+from module_test_support import mkdtemp
 
 VERSION = "v3.3.0"
 WORKFLOWS_URL = "quokkify/ci-kit/.github/workflows"
@@ -98,18 +87,31 @@ class CheckContextsTests(unittest.TestCase):
         self.assertEqual(check_contexts({"on": "push"}), [])
 
 
+# The shape of a validate.yml rendered by the legacy template up to v3.7.0; the
+# current template no longer renders it, but rollbacks still read it.
+LEGACY_CONTRACT_JOB = "  template-contract:\n    name: Shared template contract\n    runs-on: ubuntu-latest\n    steps: []\n"
+LEGACY_JAVA_JOB = (
+    '  app-java:\n    name: "Application Java"\n'
+    f"    uses: {WORKFLOWS_URL}/java-ci.yml@{VERSION}\n    with:\n      working-directory: \".\"\n"
+)
+LEGACY_DOCKER_JOB = f"  docker:\n    uses: {WORKFLOWS_URL}/docker-build.yml@{VERSION}\n    with:\n      push: false\n"
+
+
+def legacy_validate(*jobs: str) -> Path:
+    path = mkdtemp("legacy-validate-") / "validate.yml"
+    path.write_text("name: Validate\non:\n  pull_request:\njobs:\n" + LEGACY_CONTRACT_JOB + "".join(jobs))
+    return path
+
+
 class CheckNamesTests(unittest.TestCase):
     def test_component_less_legacy_has_only_the_contract_job(self):
-        repo = legacy_scenario_repo(template(), "allure-external")
-        self.assertEqual(legacy_check_names(repo / VALIDATE), ["Shared template contract"])
+        self.assertEqual(legacy_check_names(legacy_validate()), ["Shared template contract"])
 
     def test_component_jobs_get_exact_contexts(self):
-        repo = legacy_scenario_repo(template(), "java")
-        self.assertEqual(legacy_check_names(repo / VALIDATE), ["Shared template contract", "Application Java / ci"])
+        self.assertEqual(legacy_check_names(legacy_validate(LEGACY_JAVA_JOB)), ["Shared template contract", "Application Java / ci"])
 
     def test_docker_job_context(self):
-        repo = legacy_scenario_repo(template(), "docker")
-        self.assertEqual(legacy_check_names(repo / VALIDATE)[-1], "docker / build")
+        self.assertEqual(legacy_check_names(legacy_validate(LEGACY_JAVA_JOB, LEGACY_DOCKER_JOB))[-1], "docker / build")
 
     def test_job_without_mapping_is_refused(self):
         path = mkdtemp("names-") / "validate.yml"

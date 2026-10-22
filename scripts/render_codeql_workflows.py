@@ -20,7 +20,9 @@ def render_workflows(root: Path = ROOT) -> list[Path]:
     target = root / ".github/workflows"
     evidence: dict[Path, bytes] = {}
     with tempfile.TemporaryDirectory(prefix="codeql-template-") as temporary:
-        temporary_root = Path(temporary)
+        # Resolved: Copier rejects reading the destination answers file through a
+        # symlinked temporary directory (macOS /var) unless the render is trusted.
+        temporary_root = Path(temporary).resolve()
         # A non-VCS source preserves the exact checked-out files, including local
         # changes. Copier must not silently render a previous committed template.
         source = temporary_root / "source"
