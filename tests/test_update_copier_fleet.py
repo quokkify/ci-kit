@@ -3455,6 +3455,22 @@ class ChecksVerdictTests(TestCase):
         rollup = [self.check(completed="2026-10-22T11:55:00Z")]
         self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "checks finished less than 10 minutes ago"))
 
+    def test_missing_or_unparseable_times_wait_instead_of_merging(self) -> None:
+        for completed in (None, "", "not-a-date"):
+            with self.subTest(completed=completed):
+                rollup = [self.check(completed=completed)]
+                self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "check times unavailable"))
+        context = {"__typename": "StatusContext", "context": "x", "state": "SUCCESS"}
+        self.assertEqual(fleet.checks_verdict([context], self.NOW), ("waiting", "check times unavailable"))
+
+    def test_exactly_ten_minutes_old_is_ready(self) -> None:
+        rollup = [self.check(completed="2026-10-22T11:50:00Z")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("ready", "all checks green"))
+
+    def test_status_context_with_recent_start_waits(self) -> None:
+        context = {"__typename": "StatusContext", "context": "x", "state": "SUCCESS", "startedAt": "2026-10-22T11:55:00Z"}
+        self.assertEqual(fleet.checks_verdict([context], self.NOW), ("waiting", "checks finished less than 10 minutes ago"))
+
     def test_failed_checks_named(self) -> None:
         rollup = [self.check("a", conclusion="FAILURE"), self.context("b", "ERROR"), self.check("c", conclusion="CANCELLED")]
         self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("failed", "failed checks: a, b, c"))
@@ -4002,6 +4018,24 @@ class CommandLineTests(TestCase):
     def test_write_mode_requires_codeowner_session_token(self) -> None:
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 
+    def test_failed_checks_skip_is_a_pr_ci_attention_row(self) -> None:
+        url = "https://github.com/quokkify/a/pull/1"
+        result = fleet.Result("quokkify/a", "pull-request", url, auto_merge={"state": "skipped", "reason": "failed checks: ci / gate"})
+        markdown = fleet.markdown_report([result])
+        self.assertIn("### Needs your attention — 1", markdown)
+        self.assertIn("PR [#1](https://github.com/quokkify/a/pull/1) open", markdown)
+        self.assertIn("failed checks&#58; ci / gate", markdown)
+        quiet = fleet.Result("quokkify/b", "pull-request", "https://github.com/quokkify/b/pull/2", auto_merge={"state": "skipped", "reason": "major version bump"})
+        self.assertNotIn("Needs your attention", fleet.markdown_report([quiet]))
+
+    def test_merged_pull_request_is_not_treated_as_open(self) -> None:
+        url = "https://github.com/quokkify/a/pull/1"
+        merged = fleet.Result("quokkify/a", "pull-request", url, auto_merge={"state": "merged", "reason": "r"})
+        self.assertEqual(fleet.automation_pull_request(merged)["state"], "merged")
+        waiting = fleet.Result("quokkify/a", "pull-request", url, auto_merge={"state": "waiting", "reason": "r"})
+        self.assertEqual(fleet.automation_pull_request(waiting)["state"], "open")
+        self.assertEqual(fleet.automation_pull_request(fleet.Result("quokkify/a", "pull-request", url))["state"], "open")
+
 
 class MergeReadyTests(TestCase):
     URL = "https://github.com/quokkify/example/pull/7"
@@ -4094,6 +4128,41 @@ class MergeReadyTests(TestCase):
             )
         self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "pull request head not yet updated"})
         self.assertFalse(any("merge" in call.args[0] for call in run_mock.call_args_list))
+
+    def real_merge_ready(self, rollup, *, mergeable="MERGEABLE"):
+        pull = {"state": "OPEN", "baseRefName": "main", "mergeable": mergeable, "headRefOid": self.HEAD,
+                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH,
+                "statusCheckRollup": rollup}
+
+        def fake_gh_json(arguments, **_):
+            if arguments[:2] == ["pr", "list"]:
+                return [{"url": self.URL, "headRefOid": self.HEAD}]
+            if arguments[:2] == ["pr", "view"]:
+                return pull
+            return {"allow_auto_merge": False, "allow_squash_merge": True}
+
+        parsed = {"main": self.answers(self.BASE), self.HEAD: self.answers(self.UPDATED)}
+        with mock.patch.object(fleet, "gh_json", side_effect=fake_gh_json), \
+             mock.patch.object(fleet, "answers_at", side_effect=lambda _, ref, **__: parsed[ref]), \
+             mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run_mock, \
+             mock.patch.object(fleet.time, "sleep"):
+            result = fleet.merge_ready_repository(
+                self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY,
+            )
+        return result, [call.args[0] for call in run_mock.call_args_list]
+
+    def test_direct_path_merges_green_pull_request_with_pinned_head(self) -> None:
+        green = {"__typename": "CheckRun", "name": "ci / gate", "status": "COMPLETED", "conclusion": "SUCCESS", "completedAt": "2020-01-01T00:00:00Z"}
+        result, commands = self.real_merge_ready([green])
+        self.assertEqual(result.auto_merge, {"state": "merged", "reason": f"merged {self.HEAD}"})
+        self.assertEqual(commands, [["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--squash", "--match-head-commit", self.HEAD]])
+        self.assertNotIn("--auto", commands[0])
+
+    def test_direct_path_waits_for_running_check_without_merging(self) -> None:
+        running = {"__typename": "CheckRun", "name": "ci / gate", "status": "IN_PROGRESS", "conclusion": None, "completedAt": None}
+        result, commands = self.real_merge_ready([running])
+        self.assertEqual(result.auto_merge, {"state": "waiting", "reason": "checks still running"})
+        self.assertEqual(commands, [])
 
     def test_module_head_version_must_match_the_target(self) -> None:
         result = self.merge_ready(

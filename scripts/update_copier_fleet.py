@@ -1055,7 +1055,7 @@ def automation_pull_request(result: Result) -> dict[str, Any] | None:
     if result.status != "pull-request":
         return None
     match = PULL_REQUEST_URL_PATTERN.fullmatch(result.detail)
-    return {"url": match[0] if match else None, "state": "open", "ci": {"status": "unknown"}, "repository": result.repository}
+    return {"url": match[0] if match else None, "state": "merged" if (result.auto_merge or {}).get("state") == "merged" else "open", "ci": {"status": "unknown"}, "repository": result.repository}
 
 
 def pull_request_link(pull_request: dict[str, Any], *, with_repository: bool = False) -> str:
@@ -1123,6 +1123,9 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("gap", f"Health exception expired on {markdown_text(str(exception.get('expires_on')))}: {markdown_text(str(exception.get('reason')))}.", "**Review** the exception: renew or remove it."))
     if pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) == "failed":
         facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌.", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
+    auto_merge = result.auto_merge or {}
+    if pull_request and auto_merge.get("state") == "skipped" and str(auto_merge.get("reason", "")).startswith("failed checks:"):
+        facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌ ({markdown_text(str(auto_merge['reason']))}).", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
     if (result.auto_merge or {}).get("state") == "failed":
         target = f" on PR {pull_request_link(pull_request)}" if pull_request else ""
         facts.append(Fact("auto-merge", f"Auto-merge could not be enabled{target}: {markdown_text(str(result.auto_merge.get('reason')))}.", "**Fix** the cause, then re-run with `--auto-merge` or merge the PR manually."))
@@ -2255,7 +2258,9 @@ def checks_verdict(rollup: object, now: datetime) -> tuple[str, str]:
         return "failed", f"failed checks: {', '.join(failed)}"
     if running:
         return "waiting", "checks still running"
-    if latest is not None and now - latest < AUTO_MERGE_SETTLE:
+    if latest is None:
+        return "waiting", "check times unavailable"
+    if now - latest < AUTO_MERGE_SETTLE:
         return "waiting", "checks finished less than 10 minutes ago"
     return "ready", "all checks green"
 
