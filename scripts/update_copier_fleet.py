@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -291,8 +292,9 @@ def discover_repositories(
     return sorted(repositories, key=lambda repository: repository.name_with_owner.casefold())
 
 
-def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, str]:
-    listing = run(["gh", "api", f"repos/{repository}/contents/"], env=env, check=False)
+def fetch_answers_files(repository: str, *, env: dict[str, str], ref: str | None = None) -> dict[str, str]:
+    query = f"?ref={urllib.parse.quote(ref, safe='')}" if ref else ""
+    listing = run(["gh", "api", f"repos/{repository}/contents/{query}"], env=env, check=False)
     if listing.returncode:
         if "404" in listing.stderr or "Not Found" in listing.stderr:
             return {}
@@ -319,7 +321,7 @@ def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, st
             [
                 "gh",
                 "api",
-                f"repos/{repository}/contents/{name}",
+                f"repos/{repository}/contents/{name}{query}",
                 "-H",
                 "Accept: application/vnd.github.raw+json",
             ],
@@ -2388,6 +2390,66 @@ def enable_auto_merge(
     return {"state": state, "reason": reason}
 
 
+def answers_file_name(module: str) -> str:
+    return ANSWERS_FILE if module == LEGACY_MODULE else f".copier-answers.{module}.yml"
+
+
+def answers_versions(repository: Repository, ref: str, *, env: dict[str, str]) -> dict[str, str | None]:
+    """Map each root answers file at ref to its _commit."""
+    versions: dict[str, str | None] = {}
+    for module, text in fetch_answers_files(repository.name_with_owner, env=env, ref=ref).items():
+        commit = parse_answers(text).get("_commit")
+        versions[answers_file_name(module)] = commit.strip() if isinstance(commit, str) and commit.strip() else None
+    return versions
+
+
+def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str, str]) -> Result:
+    """Evaluate and merge the open automation PR without running Copier or pushing."""
+    name = repository.name_with_owner
+    pulls = gh_json(["pr", "list", "--repo", name, "--head", branch, "--state", "open", "--json", "url,headRefOid"], env=env)
+    if not isinstance(pulls, list):
+        raise FleetUpdateError("pull request listing is unreadable")
+    if not pulls:
+        return Result(name, "up-to-date")
+    pull = pulls[0]
+    url = pull.get("url") if isinstance(pull, dict) else None
+    head_oid = pull.get("headRefOid") if isinstance(pull, dict) else None
+    if not isinstance(url, str) or not isinstance(head_oid, str) or not COMMIT_SHA_PATTERN.fullmatch(head_oid):
+        raise FleetUpdateError("open pull request has no usable URL or head commit")
+    try:
+        base = answers_versions(repository, repository.default_branch, env=env)
+        head = answers_versions(repository, head_oid, env=env)
+    except UnsafeAnswersFileError as exc:
+        return Result(name, "unsafe-answers-file", str(exc))
+    differ = sorted(set(base) ^ set(head))
+    if differ:
+        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": f"answers files differ: {', '.join(differ)}"})
+    if not base:
+        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": "no answers files"})
+    modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base if file != ANSWERS_FILE)
+    if ANSWERS_FILE in base:
+        primary = ANSWERS_FILE
+    else:
+        primary = answers_file_name("core" if "core" in modules else modules[0])
+    rows = [
+        {"module": module, "from": base[answers_file_name(module)] or ""}
+        for module in modules
+        if answers_file_name(module) != primary
+    ]
+    merge = enable_auto_merge(
+        repository,
+        url,
+        branch=branch,
+        head=None,
+        applied=base[primary] or "",
+        target=head[primary],
+        requested_template_ref=None,
+        env=env,
+        modules=rows,
+    )
+    return Result(name, "pull-request", url, auto_merge=merge)
+
+
 def process_repository(
     repository: Repository,
     *,
@@ -2765,6 +2827,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--migrate", metavar="MODULE", help="Hand the module's legacy area off and open a PR on ci-kit/migrate-MODULE instead of updating.")
     parser.add_argument("--auto-merge", action="store_true", help="Enable GitHub auto-merge (squash) on eligible template-update PRs; write mode only.")
+    parser.add_argument(
+        "--merge-ready",
+        action="store_true",
+        help="Skip Copier and pushes; only evaluate and merge open automation PRs. Requires --write --auto-merge.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -2778,6 +2845,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--auto-merge cannot be combined with --dry-run")
     if args.auto_merge and args.migrate:
         parser.error("--auto-merge cannot be combined with --migrate")
+    if args.merge_ready and not (args.write and args.auto_merge):
+        parser.error("--merge-ready requires --write and --auto-merge")
+    if args.merge_ready and args.migrate:
+        parser.error("--merge-ready cannot be combined with --migrate")
+    if args.merge_ready and args.template_ref:
+        parser.error("--merge-ready cannot be combined with --template-ref")
     env = os.environ.copy()
     if args.write:
         if not env.get("GH_TOKEN", "").strip():
@@ -2789,7 +2862,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not env.get("GH_TOKEN"):
         print("GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
         return 2
-    for command in ("copier", "gh", "git"):
+    for command in ("gh",) if args.merge_ready else ("copier", "gh", "git"):
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
@@ -2873,7 +2946,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     excluded = {name.casefold() for name in args.exclude}
     template_ref = args.template_ref
-    if any(repository.name_with_owner.casefold() not in excluded for repository in repositories):
+    if not args.merge_ready and any(repository.name_with_owner.casefold() not in excluded for repository in repositories):
         try:
             template_ref = resolve_template_ref(
                 args.template_repository,
@@ -2890,7 +2963,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 results.append(Result(repository.name_with_owner, "excluded"))
                 continue
             try:
-                if args.migrate:
+                if args.merge_ready:
+                    result = merge_ready_repository(repository, branch=branch, env=env)
+                elif args.migrate:
                     result = migrate_repository(
                         repository,
                         module=args.migrate,

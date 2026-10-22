@@ -4003,6 +4003,120 @@ class CommandLineTests(TestCase):
         self.assertEqual(fleet.main(["--write", "--repo", "quokkify/example"]), 2)
 
 
+class MergeReadyTests(TestCase):
+    URL = "https://github.com/quokkify/example/pull/7"
+    HEAD = "c" * 40
+    REPOSITORY = fleet.Repository("quokkify/example", "main")
+    BASE = {".copier-answers.yml": "v3.2.0", ".copier-answers.core.yml": "v3.2.0"}
+    UPDATED = {".copier-answers.yml": "v3.3.0", ".copier-answers.core.yml": "v3.3.0"}
+
+    def merge_ready(self, *, pulls=None, base=None, head=None):
+        pulls = [{"url": self.URL, "headRefOid": self.HEAD}] if pulls is None else pulls
+        versions = {"main": self.BASE if base is None else base, self.HEAD: self.UPDATED if head is None else head}
+        outcome = {"state": "merged", "reason": f"merged {self.HEAD}"}
+        with mock.patch.object(fleet, "gh_json", return_value=pulls) as gh_mock, \
+             mock.patch.object(fleet, "answers_versions", side_effect=lambda _, ref, **__: versions[ref]), \
+             mock.patch.object(fleet, "enable_auto_merge", return_value=outcome) as merge_mock, \
+             mock.patch.object(fleet, "run") as run_mock:
+            result = fleet.merge_ready_repository(self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={})
+        self.gh_mock, self.merge_mock, self.run_mock = gh_mock, merge_mock, run_mock
+        return result
+
+    def parse_error(self, argv, message):
+        stderr = StringIO()
+        with mock.patch.object(sys, "stderr", stderr), self.assertRaises(SystemExit):
+            fleet.main(argv)
+        self.assertIn(message, stderr.getvalue())
+
+    def test_parser_requires_write_and_auto_merge(self) -> None:
+        required = "--merge-ready requires --write and --auto-merge"
+        self.parse_error(["--merge-ready", "--write"], required)
+        self.parse_error(["--merge-ready", "--dry-run"], required)
+        self.parse_error(["--merge-ready", "--dry-run", "--auto-merge"], "--auto-merge cannot be combined with --dry-run")
+
+    def test_parser_rejects_migrate_and_template_ref(self) -> None:
+        self.parse_error(["--merge-ready", "--write", "--auto-merge", "--migrate", "core"], "--auto-merge cannot be combined with --migrate")
+        self.parse_error(["--merge-ready", "--write", "--auto-merge", "--template-ref", "v3.3.0"], "--merge-ready cannot be combined with --template-ref")
+
+    def test_no_open_pull_request_is_up_to_date_without_writes(self) -> None:
+        result = self.merge_ready(pulls=[])
+        self.assertEqual(result, fleet.Result("quokkify/example", "up-to-date"))
+        self.assertEqual(self.gh_mock.call_args.args[0], [
+            "pr", "list", "--repo", "quokkify/example", "--head", fleet.DEFAULT_BRANCH,
+            "--state", "open", "--json", "url,headRefOid",
+        ])
+        self.merge_mock.assert_not_called()
+        self.assertFalse(any("merge" in call.args[0] for call in self.run_mock.call_args_list))
+
+    def test_versions_come_from_base_and_head(self) -> None:
+        result = self.merge_ready()
+        self.assertEqual((result.status, result.detail), ("pull-request", self.URL))
+        self.assertEqual(result.auto_merge, {"state": "merged", "reason": f"merged {self.HEAD}"})
+        args, kwargs = self.merge_mock.call_args
+        self.assertEqual(args, (self.REPOSITORY, self.URL))
+        self.assertEqual(kwargs["branch"], fleet.DEFAULT_BRANCH)
+        self.assertEqual((kwargs["applied"], kwargs["target"]), ("v3.2.0", "v3.3.0"))
+        self.assertEqual(kwargs["modules"], [{"module": "core", "from": "v3.2.0"}])
+        self.assertIsNone(kwargs["head"])
+        self.assertIsNone(kwargs["requested_template_ref"])
+
+    def test_module_only_repository_uses_the_primary_module_versions(self) -> None:
+        self.merge_ready(
+            base={".copier-answers.core.yml": "v3.2.0", ".copier-answers.java.yml": "v3.1.0"},
+            head={".copier-answers.core.yml": "v3.3.0", ".copier-answers.java.yml": "v3.3.0"},
+        )
+        kwargs = self.merge_mock.call_args.kwargs
+        self.assertEqual((kwargs["applied"], kwargs["target"]), ("v3.2.0", "v3.3.0"))
+        self.assertEqual(kwargs["modules"], [{"module": "java", "from": "v3.1.0"}])
+
+    def test_added_or_removed_answers_file_is_skipped(self) -> None:
+        for base, head in ((
+            {".copier-answers.yml": "v3.2.0"}, self.UPDATED,
+        ), (
+            self.BASE, {".copier-answers.yml": "v3.3.0"},
+        )):
+            with self.subTest(base=base, head=head):
+                result = self.merge_ready(base=base, head=head)
+                self.assertEqual((result.status, result.detail), ("pull-request", self.URL))
+                self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "answers files differ: .copier-answers.core.yml"})
+                self.merge_mock.assert_not_called()
+
+    def test_answers_versions_reads_each_root_answers_file_at_the_ref(self) -> None:
+        listing = [entry(".copier-answers.yml"), entry(".copier-answers.core.yml"), entry("README.md")]
+        texts = {".copier-answers.yml": "_commit: v3.3.0\n", ".copier-answers.core.yml": "_src_path: gh:quokkify/ci-kit\n"}
+
+        def fake_run(command, **_):
+            endpoint = next(arg for arg in command if arg.startswith("repos/"))
+            path, _, query = endpoint.partition("?")
+            self.assertEqual(query, f"ref={self.HEAD}")
+            if path.endswith("/contents/"):
+                return subprocess.CompletedProcess(command, 0, json.dumps(listing), "")
+            return subprocess.CompletedProcess(command, 0, texts[path.rsplit("/", 1)[1]], "")
+
+        with mock.patch.object(fleet, "run", side_effect=fake_run):
+            versions = fleet.answers_versions(self.REPOSITORY, self.HEAD, env={})
+        self.assertEqual(versions, {".copier-answers.yml": "v3.3.0", ".copier-answers.core.yml": None})
+
+    @mock.patch.dict("os.environ", {"GH_TOKEN": "t"}, clear=False)
+    def test_main_routes_merge_ready_and_never_clones(self) -> None:
+        outcome = fleet.Result("quokkify/example", "pull-request", self.URL, auto_merge={"state": "merged", "reason": "merged"})
+        with mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.object(fleet, "discover_repositories", return_value=[self.REPOSITORY, fleet.Repository("quokkify/skip", "main")]), \
+             mock.patch.object(fleet, "resolve_template_ref") as resolve_mock, \
+             mock.patch.object(fleet, "merge_ready_repository", return_value=outcome) as merge_ready_mock, \
+             mock.patch.object(fleet, "process_repository") as process_mock, \
+             mock.patch.object(fleet, "clone_repository") as clone_mock, \
+             redirect_stdout(StringIO()):
+            status = fleet.main(["--write", "--auto-merge", "--merge-ready", "--exclude", "quokkify/skip"])
+        self.assertEqual(status, 0)
+        merge_ready_mock.assert_called_once()
+        self.assertEqual(merge_ready_mock.call_args.args, (self.REPOSITORY,))
+        self.assertEqual(merge_ready_mock.call_args.kwargs["branch"], fleet.DEFAULT_BRANCH)
+        process_mock.assert_not_called()
+        clone_mock.assert_not_called()
+        resolve_mock.assert_not_called()
+
+
 class ReleaseHelperDriftTests(TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
