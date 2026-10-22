@@ -130,13 +130,27 @@ class LegacyValidateUpdateTests(unittest.TestCase):
         self.assertFalse((repo / ".github/workflows/validate.yml").exists())
 
     def test_update_without_handed_off_key_refuses(self) -> None:
-        # Regression guard: a pre-v3.4 answers file has no handed_off key, and --defaults must not
+        # Regression guard: a pre-v3.2 answers file has no handed_off key, and --defaults must not
         # silently hand validate off (and drop validate.yml) through the question default.
         repo = self.legacy_repo()
         answers = repo / ".copier-answers.yml"
         answers.write_text(HANDED_OFF_ANSWER.sub("", answers.read_text()))
         self.assertNotIn("handed_off", answers.read_text())
-        git(repo, "commit", "-q", "-am", "pre-v3.4 answers")
+        git(repo, "commit", "-q", "-am", "pre-v3.2 answers")
+        head = git(repo, "rev-parse", "HEAD")
+        result = self.update(repo)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(LEGACY_006, result.stdout + result.stderr)
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+
+    def test_update_with_empty_handed_off_refuses(self) -> None:
+        # Regression guard: stored handed_off: [] still relies on legacy validate.yml.
+        repo = self.legacy_repo()
+        answers = repo / ".copier-answers.yml"
+        answers.write_text(HANDED_OFF_ANSWER.sub("handed_off: []\n", answers.read_text()))
+        self.assertEqual(yaml.safe_load(answers.read_text())["handed_off"], [])
+        git(repo, "commit", "-q", "-am", "empty handoff")
         head = git(repo, "rev-parse", "HEAD")
         result = self.update(repo)
         self.assertNotEqual(result.returncode, 0)

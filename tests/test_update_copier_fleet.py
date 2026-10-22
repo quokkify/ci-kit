@@ -816,8 +816,12 @@ class TemplateSourceTests(TestCase):
 
 class TemplateUpdateTests(TestCase):
     @skipUnless(shutil.which("copier"), "Copier is required for the legacy migration integration")
-    def test_real_legacy_copier_migration_reaches_pull_request_dispatch(self) -> None:
-        """Exercise the actual old-template update, not only command construction."""
+    def test_real_legacy_copier_update_without_validate_handoff_is_refused(self) -> None:
+        """Exercise the actual old-template update, not only command construction.
+
+        A legacy repository from before handed_off still relies on the legacy validate.yml, which the
+        current template no longer renders, so the fleet update must stop before any push (CIK-LEGACY-006).
+        """
         legacy_revision = "a8217fa983347a3dd10133ec51117f873485b138"
         components = (
             [{"type": "java", "path": "worker"},
@@ -895,28 +899,16 @@ class TemplateUpdateTests(TestCase):
                  mock.patch.object(fleet, "clone_repository", side_effect=clone_fixture), \
                  mock.patch.object(fleet, "push_automation_branch") as push_mock, \
                  mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
-                result = fleet.process_repository(
-                    repository, expected_template="quokkify/ci-kit",
-                    branch="automation/copier-template-update", dry_run=False,
-                    template_ref=current_revision, env=integration_env, workspace=generated,
-                )
+                with self.assertRaises(fleet.RepositoryProcessError) as raised:
+                    fleet.process_repository(
+                        repository, expected_template="quokkify/ci-kit",
+                        branch="automation/copier-template-update", dry_run=False,
+                        template_ref=current_revision, env=integration_env, workspace=generated,
+                    )
 
-            self.assertEqual(result.status, "pull-request")
-            self.assertEqual(result.detail, "https://example.invalid/pr")
-            push_mock.assert_called_once()
-            pr_mock.assert_called_once()
-            updated = yaml.safe_load((generated / "quokkify--legacy-fixture" / fleet.ANSWERS_FILE).read_text())
-            migrated = updated["components"]
-            self.assertEqual([item["type"] for item in migrated], [item["type"] for item in components])
-            self.assertEqual([item["path"] for item in migrated], [item["path"] for item in components])
-            ids = [item["id"] for item in migrated]
-            self.assertEqual(len(ids), len(set(ids)))
-            self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", item) for item in ids))
-            self.assertTrue(all(item["name"].strip() for item in migrated))
-            workflow = (generated / "quokkify--legacy-fixture" / ".github/workflows/validate.yml").read_text()
-            for item in migrated:
-                self.assertIn(f"{item['id']}:", workflow)
-                self.assertIn(item["name"], workflow)
+            self.assertIn("CIK-LEGACY-006", str(raised.exception))
+            push_mock.assert_not_called()
+            pr_mock.assert_not_called()
 
     @mock.patch.object(fleet, "changed_paths", return_value=[])
     @mock.patch.object(fleet, "canonicalize_answers_source")

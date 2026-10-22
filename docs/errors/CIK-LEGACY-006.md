@@ -1,6 +1,6 @@
 # CIK-LEGACY-006
 
-Legacy validate is not handed off to the core module.
+Legacy template no longer renders validate; validate is not handed off to core.
 
 ## Cause
 
@@ -23,8 +23,14 @@ ci-kit migrate --module core --repo . --to v3.7.0
 A new legacy copy hands `validate` off by default; add the `core` module next to it (`CIK-HANDOFF-001` until you do):
 
 ```bash
-copier copy --trust -a .copier-answers.core.yml -d module=core https://github.com/quokkify/ci-kit.git .
+copier copy https://github.com/quokkify/ci-kit.git . \
+  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust \
+  -a .copier-answers.core.yml -d module=core
 ```
+
+A fresh legacy copy into a directory that already holds another template's `.copier-answers.yml` is refused with this code too, because those stored answers have no `handed_off`. Use a different answers file (`-a`) or directory.
+
+A fresh legacy copy prints a harmless Copier `MissingFileWarning` about `.copier-answers.yml`: the template looks for stored answers that do not exist yet. The commands above pass `--trust`; without it, a copy into a symlinked directory (such as a macOS temporary directory under `/var`) fails with `ForbiddenPathError`.
 
 ## Example
 

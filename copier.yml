@@ -19,7 +19,8 @@ _exclude:
     {% endif %}
   # Legacy no longer renders validate.yml; the core module owns it. Rendering
   # legacy without the handoff would silently drop the repository's Validate
-  # workflow, so refuse instead.
+  # workflow, so refuse instead. Backstop: the handed_off validator normally
+  # refuses first.
   - >-
     {% if module == 'legacy' and 'validate' not in (handed_off | default([])) %}
     {{ _copier_conf['__legacy_validate_removed__'] | mandatory('CIK-LEGACY-006: the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md') }}

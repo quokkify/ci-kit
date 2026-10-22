@@ -16,7 +16,7 @@ A language declaration is `schema_version: 1` plus `components`, one mapping per
 
 The language version is optional in a declaration, but new projects pin it: the default answers of `python` and `node` set `python_version` and `node_version` to the workflow default. If a declaration omits it, the workflow default applies and can change with a ci-kit release. A docker `dockerfile` is resolved from the repository root, not from `context`.
 
-`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts.
+`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts. For a legacy Allure report in component mode, every component must upload its results as `allure-results-<id>`: set `upload_test_artifacts: true`, `test_artifact_name: allure-results-<id>` and `test_artifact_path` to the Allure results directory. The legacy template used to add these uploads to its own `validate.yml`; modules do not add them automatically.
 
 ```yaml
 schema_version: 1
