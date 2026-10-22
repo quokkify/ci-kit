@@ -19,6 +19,7 @@ EXCLUDED_SUITES: frozenset[str] = frozenset()
 
 SUITE_WEIGHTS: dict[str, int] = {
     "test_ci_kit_update.py": 42,
+    "test_hybrid_update_lifecycle.py": 60,
     "test_module_selector.py": 30,
     "test_modules_lifecycle.py": 30,
     "test_ci_kit_drift.py": 28,
