@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.7.0](https://github.com/quokkify/ci-kit/compare/v3.6.1...v3.7.0) (2026-10-22)
+
+
+### ✨ Features
+
+* **fleet:** merge ready template-update PRs directly ([#471](https://github.com/quokkify/ci-kit/issues/471)) ([f862c9b](https://github.com/quokkify/ci-kit/commit/f862c9bbe80fe3112d4b1f5146fb4241fb358c17))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.175.0 ([#469](https://github.com/quokkify/ci-kit/issues/469)) ([ae19d14](https://github.com/quokkify/ci-kit/commit/ae19d141f4f7ef7aae11c0b627297678a3d0ff20))
+
 ## [3.6.1](https://github.com/quokkify/ci-kit/compare/v3.6.0...v3.6.1) (2026-10-22)
 
 
