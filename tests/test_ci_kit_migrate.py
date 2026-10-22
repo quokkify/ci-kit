@@ -237,6 +237,54 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
         self.assertEqual(git(self.repo, "status", "--porcelain"), "")
 
+    def test_rollback_removes_only_ignored_files_the_migration_created(self):
+        # A consumer that ignores *.rej kept the failed run's rejects after rollback; a re-run then saw them as conflicts.
+        (self.repo / ".gitignore").write_text("*.rej\n*.log\n.venv/\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore rejects")
+        (self.repo / ".venv").mkdir()
+        (self.repo / ".venv/keep").write_text("user\n")
+        (self.repo / "notes.log").write_text("user\n")
+        (self.repo / " lead.log").write_text("user\n")
+        # git clean -fd removes the empty tmp/cache, after which a --directory listing collapses tmp/x.log into tmp/.
+        (self.repo / "tmp/cache").mkdir(parents=True)
+        (self.repo / "tmp/x.log").write_text("user\n")
+        head = git(self.repo, "rev-parse", "HEAD")
+        leftovers = "mkdir -p new && echo x > new/left.rej && echo x > top.rej && echo x > '  0.rej'; exit 1"
+        with mock.patch("ci_kit.migrate.copier_copy_command", return_value=["sh", "-c", leftovers]):
+            result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-UPDATE-001"])
+        self.assertIn("copier copy of core failed", result.findings[0].message)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(self.repo, "status", "--porcelain"), "")
+        self.assertFalse((self.repo / "top.rej").exists())
+        self.assertFalse((self.repo / "  0.rej").exists())
+        self.assertFalse((self.repo / "new").exists())
+        for kept in ("notes.log", " lead.log", ".venv/keep", "tmp/x.log"):
+            self.assertEqual((self.repo / kept).read_text(), "user\n", kept)
+        retry = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual(retry.findings, [])
+
+    def test_untracked_files_hidden_by_status_config_are_refused(self):
+        # The rollback's git clean -fd would delete them, so the clean-tree check must see them.
+        git(self.repo, "config", "status.showUntrackedFiles", "no")
+        (self.repo / "draft.txt").write_text("user\n")
+        result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
+        self.assertEqual((self.repo / "draft.txt").read_text(), "user\n")
+
+    def test_stale_rejects_are_refused_up_front(self):
+        (self.repo / ".gitignore").write_text("*.rej\n")
+        git(self.repo, "add", ".gitignore")
+        git(self.repo, "commit", "-qm", "ignore rejects")
+        (self.repo / "old.rej").write_text("left by an earlier run\n")
+        head = git(self.repo, "rev-parse", "HEAD")
+        result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
+        self.assertIn("old.rej", result.findings[0].message)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
+        self.assertTrue((self.repo / "old.rej").exists())
+
     def test_option_like_ref_refused(self):
         result = migrate(self.repo, "core", "--evil", src_override=self.src)
         self.assertEqual(result.commits, [])
