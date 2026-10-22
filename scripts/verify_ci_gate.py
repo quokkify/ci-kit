@@ -7,9 +7,13 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 API_DEADLINE: float | None = None
 
@@ -136,17 +140,17 @@ def preflight_ready(repository: str, sha: str) -> bool:
 # Explicit public-pilot policy is usable by a public-scoped token without branch-
 # administration access. CodeQL is separately verified by workflow identity;
 # its external code-scanning rule need not appear in the check-runs API.
+# Only the checks a pilot publishes itself; the template's checks come from template_contexts.
 PILOT_CHECKS = {
-    "quokkify/gh-pages-subdir-action": ("Scan Git history and current tree", "Validation pipeline complete", "Shared template contract"),
-    "quokkify/skills": ("gitleaks", "App Python / ci", "Shared template contract"),
-    "quokkify/q4j": ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete", "Shared template contract"),
+    "quokkify/gh-pages-subdir-action": ("Scan Git history and current tree", "Validation pipeline complete"),
+    "quokkify/skills": ("gitleaks",),
+    "quokkify/q4j": ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete"),
 }
 # Contexts produced only by pull_request workflows. A pilot that is already up to date is verified on its
 # default branch, where these checks never run, so waiting for them could only time out.
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
-HANDOFF_CONTEXTS = {"validate": {"Shared template contract": "ci / gate", "App Python / ci": "ci / gate"}}
 PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
@@ -155,11 +159,27 @@ PILOT_TIMEOUTS = {
 }
 
 
-def pilot_contexts(repository: str, pr: int | None, *, handed_off: tuple[str, ...] = ()) -> tuple[str, ...]:
-    contexts = PILOT_CHECKS[repository]
-    for area in handed_off:
-        replacements = HANDOFF_CONTEXTS.get(area, {})
-        contexts = tuple(dict.fromkeys(replacements.get(context, context) for context in contexts))
+def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...]) -> tuple[str, ...]:
+    """The template's checks at sha: checks_after once validate is handed off, else the legacy validate.yml jobs."""
+    import base64
+    import yaml
+    from ci_kit.legacy_jobs import check_contexts
+    from ci_kit.migrate import CHECKS_AFTER
+
+    if "validate" in handed_off:
+        return tuple(CHECKS_AFTER["core"])
+    contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
+    try:
+        contexts = check_contexts(yaml.safe_load(base64.b64decode(contents["content"]).decode()))
+    except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+        raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: {exc}") from exc
+    if not contexts:
+        raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: validate.yml has no jobs")
+    return tuple(contexts)
+
+
+def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
+    contexts = tuple(dict.fromkeys((*PILOT_CHECKS[repository], *template)))
     if pr is None:
         pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
         contexts = tuple(context for context in contexts if context not in pull_request_only)
@@ -272,7 +292,7 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
         handed_off = answers.get("handed_off")
         if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
             handed_off = []
-        contexts = pilot_contexts(repository, pr, handed_off=tuple(handed_off))
+        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off)))
     ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
     wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
     if current_snapshot(repository, pr, branch) != snapshot:

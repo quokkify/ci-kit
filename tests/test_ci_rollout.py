@@ -30,6 +30,17 @@ def check(name, sha=SHA, outcome="success", status="completed", app="github-acti
             "conclusion": outcome, "app": {"slug": app}}
 
 
+LEGACY_VALIDATE = (b"jobs:\n  template-contract:\n    name: Shared template contract\n"
+                   b"  app:\n    name: App Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v1.2.3\n")
+
+
+def pilot_api(answers=b"", validate=LEGACY_VALIDATE):
+    def read(endpoint):
+        content = validate if "/validate.yml?" in endpoint else b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
+        return {"content": base64.b64encode(content).decode()}
+    return read
+
+
 class ReleaseGateTests(unittest.TestCase):
     def test_success_is_exact_sha_and_both_workflows(self):
         with patch.object(gate, "pages", return_value=[workflow()]) as reads:
@@ -164,20 +175,18 @@ class PilotGateTests(unittest.TestCase):
                 gate.pilot_ready(REPO, SHA, ("Tests",))
 
     def test_no_change_verifies_version_and_freshness(self):
-        payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n").decode()}
         with patch.object(gate, "current_snapshot", side_effect=[(SHA, "", ""), (OTHER, "", "")]), \
-             patch.object(gate, "api", return_value=payload), patch.object(gate, "wait_until"):
-            with self.assertRaises(gate.GateError):
+             patch.object(gate, "api", side_effect=pilot_api()), patch.object(gate, "wait_until"):
+            with self.assertRaisesRegex(gate.GateError, "changed while checking"):
                 gate.verify_pilot(REPO, None, "v1.2.3", 0)
-        with patch.object(gate, "current_snapshot", return_value=(SHA, "", "")), patch.object(gate, "api", return_value=payload):
-            with self.assertRaises(gate.GateError):
+        with patch.object(gate, "current_snapshot", return_value=(SHA, "", "")), patch.object(gate, "api", side_effect=pilot_api()):
+            with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
                 gate.verify_pilot(REPO, None, "v2.0.0", 0)
 
     def test_default_branch_pilot_skips_pull_request_only_checks(self):
-        payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n").decode()}
         for pr, expected in ((None, False), (7, True)):
             with self.subTest(pr=pr), patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
-                 patch.object(gate, "api", return_value=payload), \
+                 patch.object(gate, "api", side_effect=pilot_api()), \
                  patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
                  patch.object(gate, "pilot_ready", return_value=True) as ready:
                 gate.verify_pilot("quokkify/q4j", pr, "v1.2.3", 0)
@@ -185,32 +194,44 @@ class PilotGateTests(unittest.TestCase):
                 self.assertEqual("Tests pipeline complete" in contexts, expected)
                 self.assertIn("Shared template contract", contexts)
 
-    def test_handed_off_validate_replaces_legacy_context(self):
-        pilot = "quokkify/gh-pages-subdir-action"
-        legacy = gate.PILOT_CHECKS[pilot]
-        handed = gate.pilot_contexts(pilot, 7, handed_off=("validate",))
-        self.assertEqual(handed, tuple("ci / gate" if c == "Shared template contract" else c for c in legacy))
-        self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("validate", "validate")), handed)
-        self.assertEqual(gate.pilot_contexts(pilot, 7, handed_off=("other",)), legacy)
+    def test_pilot_contexts_join_own_and_template_checks(self):
+        self.assertEqual(gate.pilot_contexts("quokkify/skills", 7, ("ci / gate",)), ("gitleaks", "ci / gate"))
+        self.assertEqual(gate.pilot_contexts("quokkify/q4j", 7, ("ci / gate",)),
+                         ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete", "ci / gate"))
+        self.assertEqual(gate.pilot_contexts("quokkify/q4j", None, ("ci / gate",)),
+                         ("Scan current tree (legacy history pending baseline)", "ci / gate"))
 
-    def test_handed_off_validate_replaces_component_contexts(self):
-        self.assertEqual(gate.pilot_contexts("quokkify/skills", 7, handed_off=("validate",)), ("gitleaks", "ci / gate"))
+    def test_handed_off_validate_expects_checks_after_without_reading_validate(self):
+        with patch.object(gate, "api", side_effect=AssertionError("validate.yml must not be read")):
+            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate",)), ("ci / gate",))
 
-    def test_legacy_pilot_contexts_are_unchanged(self):
-        self.assertEqual(gate.pilot_contexts("quokkify/skills", None),
-                         ("gitleaks", "App Python / ci", "Shared template contract"))
-        self.assertEqual(gate.pilot_contexts("quokkify/q4j", 7),
-                         ("Scan current tree (legacy history pending baseline)", "Tests pipeline complete",
-                          "Shared template contract"))
-        self.assertEqual(gate.pilot_contexts("quokkify/q4j", None),
-                         ("Scan current tree (legacy history pending baseline)", "Shared template contract"))
+    def test_legacy_template_contexts_come_from_validate_jobs(self):
+        # A pilot with components needs no per-context mapping: the contexts are read from its validate.yml.
+        for handed_off in ((), ("other",)):
+            with self.subTest(handed_off=handed_off), patch.object(gate, "api", side_effect=pilot_api()) as read:
+                self.assertEqual(gate.template_contexts(REPO, SHA, handed_off), ("Shared template contract", "App Python / ci"))
+                self.assertIn(f"/contents/.github/workflows/validate.yml?ref={SHA}", read.call_args.args[0])
+
+    def test_explicit_contexts_skip_template_derivation(self):
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=pilot_api(validate=b"not: [valid")), \
+             patch.object(gate, "template_contexts", side_effect=AssertionError("must not derive")), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0, contexts=("ci / gate",))
+            self.assertEqual(ready.call_args.args[2], ("ci / gate",))
+
+    def test_unusable_legacy_validate_stops_the_gate(self):
+        for validate in (b"jobs:\n  a:\n    name: Alpha\n", b"on: push\n", b"jobs: [\n", b"\xff"):
+            with self.subTest(validate=validate), patch.object(gate, "api", side_effect=pilot_api(validate=validate)):
+                with self.assertRaisesRegex(gate.GateError, "legacy check contexts"):
+                    gate.template_contexts(REPO, SHA, ())
 
     def test_verify_pilot_expects_gate_after_handoff(self):
         for answers, expected in ((b"handed_off: [validate]\n", "ci / gate"), (b"handed_off: oops\n", "Shared template contract"),
                                   (b"", "Shared template contract")):
-            payload = {"content": base64.b64encode(b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers).decode()}
             with self.subTest(answers=answers), patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
-                 patch.object(gate, "api", return_value=payload), \
+                 patch.object(gate, "api", side_effect=pilot_api(answers)), \
                  patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
                  patch.object(gate, "pilot_ready", return_value=True) as ready:
                 gate.verify_pilot("quokkify/gh-pages-subdir-action", 7, "v1.2.3", 0)
