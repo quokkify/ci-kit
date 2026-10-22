@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.9.0](https://github.com/quokkify/ci-kit/compare/v3.8.0...v3.9.0) (2026-10-22)
+
+
+### ✨ Features
+
+* **template:** remove legacy validate and refuse repositories that still use it ([#485](https://github.com/quokkify/ci-kit/issues/485)) ([b55de3a](https://github.com/quokkify/ci-kit/commit/b55de3a9170e48a3079168efc647a5e0896fcea5))
+
 ## [3.8.0](https://github.com/quokkify/ci-kit/compare/v3.7.0...v3.8.0) (2026-10-22)
 
 
