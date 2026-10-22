@@ -24,7 +24,7 @@ import tempfile
 import time
 import unicodedata
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -2210,6 +2210,52 @@ def ensure_pull_request(
 AUTO_MERGE_HEAD_POLL_SECONDS = 2
 AUTO_MERGE_HEAD_POLLS = 3
 AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"
+AUTO_MERGE_SETTLE = timedelta(minutes=10)
+CHECK_PASSING_CONCLUSIONS = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
+CHECK_PENDING_STATES = frozenset({"PENDING", "EXPECTED"})
+
+
+def parse_check_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def checks_verdict(rollup: object, now: datetime) -> tuple[str, str]:
+    """Classify a statusCheckRollup as ready, waiting or failed, with a human reason."""
+    entries = [entry for entry in rollup if isinstance(entry, dict)] if isinstance(rollup, list) else []
+    if not entries:
+        return "waiting", "no checks reported yet"
+    failed: list[str] = []
+    running = False
+    latest: datetime | None = None
+    for entry in entries:
+        if entry.get("__typename") == "StatusContext":
+            name, state = str(entry.get("context") or "?"), entry.get("state")
+            if state in CHECK_PENDING_STATES:
+                running = True
+            elif state != "SUCCESS":
+                failed.append(name)
+            moment = parse_check_time(entry.get("startedAt"))
+        else:
+            name = str(entry.get("name") or "?")
+            if entry.get("status") != "COMPLETED":
+                running = True
+            elif entry.get("conclusion") not in CHECK_PASSING_CONCLUSIONS:
+                failed.append(name)
+            moment = parse_check_time(entry.get("completedAt"))
+        if moment is not None and (latest is None or moment > latest):
+            latest = moment
+    if failed:
+        return "failed", f"failed checks: {', '.join(failed)}"
+    if running:
+        return "waiting", "checks still running"
+    if latest is not None and now - latest < AUTO_MERGE_SETTLE:
+        return "waiting", "checks finished less than 10 minutes ago"
+    return "ready", "all checks green"
 
 
 def pull_request_number(repository: Repository, url: str) -> str | None:

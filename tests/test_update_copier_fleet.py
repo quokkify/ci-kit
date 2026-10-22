@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import redirect_stdout
 from io import StringIO
@@ -3422,6 +3422,46 @@ class FleetReportTests(TestCase):
                               self.inventory(modules=("core",), state="hybrid(validate)"), {"adoption": "different"}, {"findings": []})
         payload = json.loads(fleet.json_report([result], {"pull-request": 1}))
         self.assertEqual(fleet.results_from_report(payload), [result])
+
+
+class ChecksVerdictTests(TestCase):
+    NOW = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
+
+    @staticmethod
+    def check(name="ci / gate", status="COMPLETED", conclusion="SUCCESS", completed="2026-10-22T11:30:00Z"):
+        return {"__typename": "CheckRun", "name": name, "status": status, "conclusion": conclusion,
+                "startedAt": "2026-10-22T11:20:00Z", "completedAt": completed}
+
+    @staticmethod
+    def context(name="CodeRabbit", state="SUCCESS"):
+        return {"__typename": "StatusContext", "context": name, "state": state, "startedAt": "2026-10-22T11:30:00Z"}
+
+    def test_green_and_settled_is_ready(self) -> None:
+        rollup = [self.check(), self.check("x", conclusion="SKIPPED"), self.context()]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("ready", "all checks green"))
+
+    def test_empty_or_unreadable_rollup_waits(self) -> None:
+        for rollup in ([], None, "x"):
+            self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "no checks reported yet"))
+
+    def test_running_check_waits(self) -> None:
+        rollup = [self.check(status="IN_PROGRESS", conclusion=None, completed=None)]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "checks still running"))
+
+    def test_pending_status_context_waits(self) -> None:
+        self.assertEqual(fleet.checks_verdict([self.context(state="PENDING")], self.NOW)[0], "waiting")
+
+    def test_recent_completion_waits(self) -> None:
+        rollup = [self.check(completed="2026-10-22T11:55:00Z")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "checks finished less than 10 minutes ago"))
+
+    def test_failed_checks_named(self) -> None:
+        rollup = [self.check("a", conclusion="FAILURE"), self.context("b", "ERROR"), self.check("c", conclusion="CANCELLED")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("failed", "failed checks: a, b, c"))
+
+    def test_failure_wins_over_pending(self) -> None:
+        rollup = [self.check("a", conclusion="FAILURE"), self.check("b", status="IN_PROGRESS", conclusion=None, completed=None)]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("failed", "failed checks: a"))
 
 
 class AutoMergeTests(TestCase):
