@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -167,20 +166,25 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
 
 
 def _ignored(repo: Path) -> set[str]:
-    listing = _git(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
-    return {path for path in listing.split("\0") if path}
+    # Per file, not --directory: a collapsed directory entry changes once git clean removes an empty sibling.
+    # Read raw output: _git strips it, which would eat leading spaces of the first -z entry.
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard"],
+        cwd=repo, capture_output=True, text=True, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(f"git ls-files failed: {result.stderr.strip()}")
+    return {path for path in result.stdout.split("\0") if path}
 
 
 def _rollback(repo: Path, head: str, ignored: set[str]) -> None:
     """Restore head and remove what the migration created, keeping ignored files that existed before it."""
     _git(repo, "reset", "-q", "--hard", head, check=False)
     _git(repo, "clean", "-qfd", check=False)
-    for path in _ignored(repo) - ignored:
-        target = repo / path
-        if target.is_dir() and not target.is_symlink():
-            shutil.rmtree(target, ignore_errors=True)
-        else:
-            target.unlink(missing_ok=True)
+    for path in sorted(_ignored(repo) - ignored):
+        (repo / path).unlink(missing_ok=True)
+    # Directories that held only the removed files are now empty and untracked.
+    _git(repo, "clean", "-qfd", check=False)
 
 
 def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None) -> MigrateResult:
@@ -196,7 +200,9 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
         return fail("CIK-MIGRATE-004", f"module {module} owns no hand-off area")
     area = AREAS[area_name]
     try:
-        status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True, check=False)
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo, capture_output=True, text=True, check=False,
+        )
     except OSError as error:
         return fail("CIK-MIGRATE-001", f"cannot run git: {error.strerror or error}")
     if status.returncode:

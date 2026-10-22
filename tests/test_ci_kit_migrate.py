@@ -245,8 +245,12 @@ class MigrateTests(unittest.TestCase):
         (self.repo / ".venv").mkdir()
         (self.repo / ".venv/keep").write_text("user\n")
         (self.repo / "notes.log").write_text("user\n")
+        (self.repo / " lead.log").write_text("user\n")
+        # git clean -fd removes the empty tmp/cache, after which a --directory listing collapses tmp/x.log into tmp/.
+        (self.repo / "tmp/cache").mkdir(parents=True)
+        (self.repo / "tmp/x.log").write_text("user\n")
         head = git(self.repo, "rev-parse", "HEAD")
-        leftovers = "mkdir -p new && echo x > new/left.rej && echo x > top.rej; exit 1"
+        leftovers = "mkdir -p new && echo x > new/left.rej && echo x > top.rej && echo x > '  0.rej'; exit 1"
         with mock.patch("ci_kit.migrate.copier_copy_command", return_value=["sh", "-c", leftovers]):
             result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
         self.assertEqual([f.code for f in result.findings], ["CIK-UPDATE-001"])
@@ -254,11 +258,20 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), head)
         self.assertEqual(git(self.repo, "status", "--porcelain"), "")
         self.assertFalse((self.repo / "top.rej").exists())
+        self.assertFalse((self.repo / "  0.rej").exists())
         self.assertFalse((self.repo / "new").exists())
-        self.assertEqual((self.repo / "notes.log").read_text(), "user\n")
-        self.assertEqual((self.repo / ".venv/keep").read_text(), "user\n")
+        for kept in ("notes.log", " lead.log", ".venv/keep", "tmp/x.log"):
+            self.assertEqual((self.repo / kept).read_text(), "user\n", kept)
         retry = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
         self.assertEqual(retry.findings, [])
+
+    def test_untracked_files_hidden_by_status_config_are_refused(self):
+        # The rollback's git clean -fd would delete them, so the clean-tree check must see them.
+        git(self.repo, "config", "status.showUntrackedFiles", "no")
+        (self.repo / "draft.txt").write_text("user\n")
+        result = migrate(self.repo, "core", "v99.0.0", src_override=self.src)
+        self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-001"])
+        self.assertEqual((self.repo / "draft.txt").read_text(), "user\n")
 
     def test_stale_rejects_are_refused_up_front(self):
         (self.repo / ".gitignore").write_text("*.rej\n")
