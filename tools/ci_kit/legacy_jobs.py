@@ -4,11 +4,12 @@ import re
 from dataclasses import dataclass
 
 from .inputs import WORKFLOWS, field_name, load_inputs
+from .modules import MODULES
 
 CONTRACT_JOB = "template-contract"
 CONTRACT_CHECK = "Shared template contract"
 JOB_KEYS = ("name", "uses", "with")
-DOCKER_INPUTS = ("context", "dockerfile", "target")
+DOCKER_INPUTS = MODULES["docker"].fields
 MODULE_ORDER = ("core", "java", "python", "node", "docker")
 QUESTIONS = {
     "java": "java_components",

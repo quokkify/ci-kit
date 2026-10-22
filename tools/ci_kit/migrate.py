@@ -92,7 +92,7 @@ def copier_copy_command(module: str, to: str, src: str, data: dict[str, object] 
     return [
         *_copier(), "copy", "--defaults", "--quiet",
         "-a", f".copier-answers.{module}.yml",
-        "-d", f"module={module}", "-d", f"toolkit_version={to}",
+        "-d", f"module={module}", *(("-d", f"toolkit_version={to}") if module == "core" else ()),
         *[arg for key, value in values.items() for arg in ("-d", f"{key}={value}")],
         "--vcs-ref", to, "--", src, ".",
     ]
