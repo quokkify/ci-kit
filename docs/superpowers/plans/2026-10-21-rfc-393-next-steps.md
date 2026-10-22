@@ -67,11 +67,11 @@ gh run view <run-id> --repo quokkify/<repo> --json jobs --jq '.jobs[]|"\(.name):
 - [x] ci-kit#459 — `migration_checks.py --revert` добавляет в required checks контексты, которых до миграции не было. Исправлено в #478: прямой запуск печатает `removed`/`added`, `--revert` требует `--restore` с этим `removed` (подмножество `checks_before`).
 - [x] gh-pages-subdir-action#51 — `release-please debug-config` без токена ловит анонимный rate limit и останавливает раскатку на первом pilot. Исправлено в gh-pages-subdir-action#55: шаг передаёт `--token` с токеном задания.
 - [x] `scripts/verify_ci_gate.py`: `HANDOFF_CONTEXTS["validate"]` перечисляет компонентные контексты pilot-репозиториев вручную (`App Python / ci`). Новый pilot с компонентами потребует новой строки; обобщить (выводить контексты из legacy `validate.yml` pilot'а, как `legacy_jobs.check_contexts`). Сделано в #480: `PILOT_CHECKS` — только собственные проверки пилота, `template_contexts` выводит проверки шаблона на SHA пилота, `HANDOFF_CONTEXTS` удалён.
-- [ ] Отложенные мелочи из ревью волны 2:
-  - Copier-валидаторы python/node принимают пустую `*_version`, схема отклоняет её только на `ci-kit plan`;
-  - `legacy_jobs.DOCKER_INPUTS` дублирует `MODULES["docker"].fields`;
-  - `migrate` оставляет коммиты, если `plan` нашёл замечания без расхождения эквивалентности; `_rollback` не чистит ignored-файлы; `-d toolkit_version` передаётся и не-core модулям;
-  - lifecycle-тесты миграции: update проверяется только на том же ref, ручная правка — только у первого компонента.
+- [x] Отложенные мелочи из ревью волны 2:
+  - Copier-валидаторы python/node принимают пустую `*_version`, схема отклоняет её только на `ci-kit plan` — #481;
+  - `legacy_jobs.DOCKER_INPUTS` дублирует `MODULES["docker"].fields` — #484;
+  - `migrate` оставляет коммиты, если `plan` нашёл замечания без расхождения эквивалентности — оставлено: поведение задокументировано в `docs/modules.md`, коммиты нужны для разбора; `_rollback` не чистит ignored-файлы — #482 (удаляет только созданные миграцией, старые `*.rej` и скрытые untracked — отказ `CIK-MIGRATE-001`); `-d toolkit_version` передаётся и не-core модулям — #484 (был no-op);
+  - lifecycle-тесты миграции: update проверяется только на том же ref, ручная правка — только у первого компонента — #483.
 
 ## 4. Следующие волны RFC
 
