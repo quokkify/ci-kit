@@ -62,6 +62,24 @@ class SuiteRunnerTests(TestCase):
         self.assertIn("test_a_failure.py", result.stderr)
         self.assertIn("last suite ran", result.stdout)
 
+    def test_failed_subprocess_output_is_reported(self) -> None:
+        # Regression guard for #470: CalledProcessError hid copier's stderr, so a flaky copy failed blind.
+        (self.root / "tests/test_child.py").write_text(
+            "import subprocess, sys, unittest\n"
+            "def child(tag):\n"
+            "    code = f\"import sys; print('{tag}' + ' out'); sys.exit('{tag}' + ' err')\"\n"
+            "    subprocess.run([sys.executable, '-c', code], check=True, capture_output=True, text=True)\n"
+            "class Child(unittest.TestCase):\n"
+            "    def test_direct(self):\n        child('direct')\n"
+            "    def test_subtest(self):\n"
+            "        with self.subTest(case='one'):\n            child('subtest')\n"
+        )
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0)
+        for tag in ("direct", "subtest"):
+            self.assertIn(f"{tag} out", result.stderr)
+            self.assertIn(f"{tag} err", result.stderr)
+
     def test_empty_suite_set_fails(self) -> None:
         self.assertNotEqual(self.run_runner().returncode, 0)
 

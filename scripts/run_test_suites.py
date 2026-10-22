@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import TracebackType
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,6 +110,25 @@ def run_suites(root: Path = ROOT, shard: tuple[int, int] | None = None) -> int:
     return int(bool(failures))
 
 
+def decoded(output: str | bytes | None) -> str:
+    return output.decode(errors="replace") if isinstance(output, bytes) else output or ""
+
+
+class SubprocessOutputResult(unittest.TextTestResult):
+    """Report a failed child's captured output, which CalledProcessError leaves out of its traceback."""
+
+    def _exc_info_to_string(
+        self, err: tuple[type[BaseException], BaseException, TracebackType | None], test: unittest.TestCase,
+    ) -> str:
+        text = super()._exc_info_to_string(err, test)
+        error = err[1]
+        if isinstance(error, subprocess.CalledProcessError):
+            for name, output in (("stdout", error.stdout), ("stderr", error.stderr)):
+                if output:
+                    text += f"\n--- {name}\n{decoded(output)}"
+        return text
+
+
 def run_suite(root: Path, filename: str) -> int:
     if Path(filename).name != filename or not filename.startswith("test_") or not filename.endswith(".py"):
         raise ValueError("suite must be a root test_*.py filename")
@@ -119,7 +139,7 @@ def run_suite(root: Path, filename: str) -> int:
     if suite.countTestCases() == 0:
         print(f"ERROR: no tests discovered in {filename}", file=sys.stderr)
         return 1
-    return int(not unittest.TextTestRunner().run(suite).wasSuccessful())
+    return int(not unittest.TextTestRunner(resultclass=SubprocessOutputResult).run(suite).wasSuccessful())
 
 
 if __name__ == "__main__":
