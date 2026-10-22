@@ -3809,12 +3809,12 @@ class AutoMergeTests(TestCase):
         def result(name, number, state):
             return fleet.Result(f"quokkify/{name}", "pull-request", f"https://github.com/quokkify/{name}/pull/{number}",
                                 auto_merge={"state": state, "reason": "Head branch was modified" if state == "failed" else "r"})
-        markdown = fleet.markdown_report([result("a", 1, "failed"), result("b", 2, "enabled"), result("c", 3, "merged"), result("d", 4, "skipped")])
+        markdown = fleet.markdown_report([result("a", 1, "failed"), result("b", 2, "enabled"), result("c", 3, "merged"), result("d", 4, "skipped"), result("e", 5, "waiting")])
         self.assertTrue(markdown.startswith("## Copier fleet: ❌ action required — 1 auto-merge failed\n"))
         self.assertIn("### Needs your attention — 1", markdown)
         self.assertIn("Auto-merge could not be enabled on PR [#1](https://github.com/quokkify/a/pull/1): Head branch was modified.", markdown)
         self.assertIn("**Fix** the cause", markdown)
-        self.assertIn(" · 1 auto-merging · 1 merged", markdown)
+        self.assertIn(" · 1 auto-merging · 1 merged · 1 auto-merge waiting on CI", markdown)
         self.assertNotIn("[d](https://github.com/quokkify/d) | Auto-merge", markdown)
 
 

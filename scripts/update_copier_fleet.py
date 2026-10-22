@@ -1273,7 +1273,7 @@ def _context(rows: Sequence[ReportRow], excluded: int, run: dict[str, Any], roll
             links = " (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")" if len(pulls) <= 3 else ""
             context.append(f"{len(pulls)} {label}{links}")
     states = [(row.result.auto_merge or {}).get("state") for row in rows]
-    for state, label in (("enabled", "auto-merging"), ("merged", "merged")):
+    for state, label in (("enabled", "auto-merging"), ("merged", "merged"), ("waiting", "auto-merge waiting on CI")):
         if states.count(state):
             context.append(f"{states.count(state)} {label}")
     return " · ".join(context)
