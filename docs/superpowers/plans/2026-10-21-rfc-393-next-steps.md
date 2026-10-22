@@ -64,7 +64,7 @@ gh run view <run-id> --repo quokkify/<repo> --json jobs --jq '.jobs[]|"\(.name):
 ## 3. Открытые хвосты
 
 - [ ] ci-kit#470 — flaky unit test: `copier copy` падает с exit 1, stderr глотается (`tests/module_test_support.py` `run_copier`); заблокировал релиз v3.6.1 до перезапуска. Шаг 1 сделан: #477 (смёржен) печатает stdout/stderr упавшего подпроцесса в отчёте раннера. Три случая, все на раннерах с Python 3.15.1; локально и в контейнере 3.15.1 не воспроизводится (0/400). Ждём следующий сбой с видимой причиной, потом фикс.
-- [ ] ci-kit#459 — `migration_checks.py --revert` добавляет в required checks контексты, которых до миграции не было.
+- [x] ci-kit#459 — `migration_checks.py --revert` добавляет в required checks контексты, которых до миграции не было. Исправлено в #478: прямой запуск печатает `removed`/`added`, `--revert` требует `--restore` с этим `removed` (подмножество `checks_before`).
 - [ ] gh-pages-subdir-action#51 — `release-please debug-config` без токена ловит анонимный rate limit и останавливает раскатку на первом pilot.
 - [ ] `scripts/verify_ci_gate.py`: `HANDOFF_CONTEXTS["validate"]` перечисляет компонентные контексты pilot-репозиториев вручную (`App Python / ci`). Новый pilot с компонентами потребует новой строки; обобщить (выводить контексты из legacy `validate.yml` pilot'а, как `legacy_jobs.check_contexts`).
 - [ ] Отложенные мелочи из ревью волны 2:
