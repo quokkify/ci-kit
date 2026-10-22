@@ -77,7 +77,7 @@ gh run view <run-id> --repo quokkify/<repo> --json jobs --jq '.jobs[]|"\(.name):
 
 Каждая — небольшая spec + plan по механике spec #2/#4 (область `handed_off`, модуль-владелец, `migrate`, pilot-кольца).
 
-- [ ] **Удаление legacy validate** из `template/` (после §11): убрать область `validate` из legacy, `CIK-LEGACY-*` для неё, ветку `components` в `copier.yml`.
+- [x] **Удаление legacy validate** из `template/` (после §11): убрать область `validate` из legacy, `CIK-LEGACY-*` для неё, ветку `components` в `copier.yml`. Сделано в #485 (spec `2026-10-22-remove-legacy-validate-design.md`), релиз v3.9.0. Кроме шаблона, убраны `ci-kit migrate` и `CIK-MIGRATE-*`. Репозиторий без `validate` в `handed_off` получает отказ `CIK-LEGACY-006` и мигрирует CLI v3.8.0. Ответы `components` остаются до волны security: их читают CodeQL и Allure. v3.9.0 раскатан на все 12 без ручных правок: 11 fleet PR и knowledge#74. Allure на fleet PR прошёл у всех 7 репозиториев, где он включён.
 - [ ] **Spec #3 — Renovate → `renovate-presets`**: пресеты, Copier-модуль `renovate` по подключённым модулям, self-hosted runner как reusable workflow; разорвать цикл ci-kit ↔ renovate-presets.
 - [ ] **security** (CodeQL + gitleaks): CodeQL сейчас выводит языки из legacy `components` — у мигрированных репозиториев answers `components` и модули дублируют источник истины (spec #4 §3).
 - [ ] **release** (release-please, enrich), **allure** (publisher, Pages), **copier-update** (consumer workflow).
