@@ -23,8 +23,9 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.parse
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -291,8 +292,9 @@ def discover_repositories(
     return sorted(repositories, key=lambda repository: repository.name_with_owner.casefold())
 
 
-def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, str]:
-    listing = run(["gh", "api", f"repos/{repository}/contents/"], env=env, check=False)
+def fetch_answers_files(repository: str, *, env: dict[str, str], ref: str | None = None) -> dict[str, str]:
+    query = f"?ref={urllib.parse.quote(ref, safe='')}" if ref else ""
+    listing = run(["gh", "api", f"repos/{repository}/contents/{query}"], env=env, check=False)
     if listing.returncode:
         if "404" in listing.stderr or "Not Found" in listing.stderr:
             return {}
@@ -319,7 +321,7 @@ def fetch_answers_files(repository: str, *, env: dict[str, str]) -> dict[str, st
             [
                 "gh",
                 "api",
-                f"repos/{repository}/contents/{name}",
+                f"repos/{repository}/contents/{name}{query}",
                 "-H",
                 "Accept: application/vnd.github.raw+json",
             ],
@@ -1053,7 +1055,7 @@ def automation_pull_request(result: Result) -> dict[str, Any] | None:
     if result.status != "pull-request":
         return None
     match = PULL_REQUEST_URL_PATTERN.fullmatch(result.detail)
-    return {"url": match[0] if match else None, "state": "open", "ci": {"status": "unknown"}, "repository": result.repository}
+    return {"url": match[0] if match else None, "state": "merged" if (result.auto_merge or {}).get("state") == "merged" else "open", "ci": {"status": "unknown"}, "repository": result.repository}
 
 
 def pull_request_link(pull_request: dict[str, Any], *, with_repository: bool = False) -> str:
@@ -1121,6 +1123,9 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("gap", f"Health exception expired on {markdown_text(str(exception.get('expires_on')))}: {markdown_text(str(exception.get('reason')))}.", "**Review** the exception: renew or remove it."))
     if pull_request and pull_request.get("state") == "open" and pull_request_ci(pull_request) == "failed":
         facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌.", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
+    auto_merge = result.auto_merge or {}
+    if pull_request and auto_merge.get("state") == "skipped" and str(auto_merge.get("reason", "")).startswith("failed checks:"):
+        facts.append(Fact("pr-ci", f"PR {pull_request_link(pull_request)} open {age_text(pull_request.get('age_days'))}, CI ❌ ({markdown_text(str(auto_merge['reason']))}).", f"**Fix** the [failing checks]({pull_request['url']}/checks); the next run refreshes the PR."))
     if (result.auto_merge or {}).get("state") == "failed":
         target = f" on PR {pull_request_link(pull_request)}" if pull_request else ""
         facts.append(Fact("auto-merge", f"Auto-merge could not be enabled{target}: {markdown_text(str(result.auto_merge.get('reason')))}.", "**Fix** the cause, then re-run with `--auto-merge` or merge the PR manually."))
@@ -1271,7 +1276,7 @@ def _context(rows: Sequence[ReportRow], excluded: int, run: dict[str, Any], roll
             links = " (" + ", ".join(pull_request_link(pull, with_repository=True) for pull in pulls) + ")" if len(pulls) <= 3 else ""
             context.append(f"{len(pulls)} {label}{links}")
     states = [(row.result.auto_merge or {}).get("state") for row in rows]
-    for state, label in (("enabled", "auto-merging"), ("merged", "merged")):
+    for state, label in (("enabled", "auto-merging"), ("merged", "merged"), ("waiting", "auto-merge waiting on CI")):
         if states.count(state):
             context.append(f"{states.count(state)} {label}")
     return " · ".join(context)
@@ -2209,7 +2214,55 @@ def ensure_pull_request(
 
 AUTO_MERGE_HEAD_POLL_SECONDS = 2
 AUTO_MERGE_HEAD_POLLS = 3
-AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName"
+AUTO_MERGE_PULL_FIELDS = "state,baseRefName,mergeable,headRefOid,autoMergeRequest,isCrossRepository,headRefName,statusCheckRollup"
+AUTO_MERGE_SETTLE = timedelta(minutes=10)
+CHECK_PASSING_CONCLUSIONS = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
+CHECK_PENDING_STATES = frozenset({"PENDING", "EXPECTED"})
+
+
+def parse_check_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def checks_verdict(rollup: object, now: datetime) -> tuple[str, str]:
+    """Classify a statusCheckRollup as ready, waiting or failed, with a human reason."""
+    entries = [entry for entry in rollup if isinstance(entry, dict)] if isinstance(rollup, list) else []
+    if not entries:
+        return "waiting", "no checks reported yet"
+    failed: list[str] = []
+    running = False
+    latest: datetime | None = None
+    for entry in entries:
+        if entry.get("__typename") == "StatusContext":
+            name, state = str(entry.get("context") or "?"), entry.get("state")
+            if state in CHECK_PENDING_STATES:
+                running = True
+            elif state != "SUCCESS":
+                failed.append(name)
+            moment = parse_check_time(entry.get("startedAt"))
+        else:
+            name = str(entry.get("name") or "?")
+            if entry.get("status") != "COMPLETED":
+                running = True
+            elif entry.get("conclusion") not in CHECK_PASSING_CONCLUSIONS:
+                failed.append(name)
+            moment = parse_check_time(entry.get("completedAt"))
+        if moment is not None and (latest is None or moment > latest):
+            latest = moment
+    if failed:
+        return "failed", f"failed checks: {', '.join(failed)}"
+    if running:
+        return "waiting", "checks still running"
+    if latest is None:
+        return "waiting", "check times unavailable"
+    if now - latest < AUTO_MERGE_SETTLE:
+        return "waiting", "checks finished less than 10 minutes ago"
+    return "ready", "all checks green"
 
 
 def pull_request_number(repository: Repository, url: str) -> str | None:
@@ -2248,13 +2301,15 @@ def enable_auto_merge(
     env: dict[str, str],
     modules: Sequence[dict[str, str]] = (),
     disarmed: bool = False,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> dict[str, str]:
-    """Ask GitHub to squash-merge the automation PR once its ruleset is satisfied."""
+    """Squash-merge the automation PR: through GitHub auto-merge when the repository allows it, directly once checks are green otherwise."""
     number = pull_request_number(repository, url)
     if number is None:
         return {"state": "failed", "reason": "pull request URL does not belong to the repository"}
     name = repository.name_with_owner
     pull_request: dict[str, Any] = {}
+    direct = False
 
     def view() -> dict[str, Any]:
         payload = gh_json(["pr", "view", number, "--repo", name, "--json", AUTO_MERGE_PULL_FIELDS], env=env)
@@ -2263,7 +2318,7 @@ def enable_auto_merge(
         return payload
 
     def evaluate() -> tuple[str, str]:
-        nonlocal pull_request
+        nonlocal pull_request, direct
         pull_request = view()
         if pull_request.get("state") == "MERGED":
             return "merged", "pull request already merged"
@@ -2290,8 +2345,7 @@ def enable_auto_merge(
         settings = gh_json(["api", f"repos/{name}"], env=env)
         if not isinstance(settings, dict) or "allow_auto_merge" not in settings or "allow_squash_merge" not in settings:
             return "failed", "repository auto-merge setting unreadable (token permissions?)"
-        if not settings["allow_auto_merge"]:
-            return "skipped", "repository has auto-merge disabled"
+        direct = not settings["allow_auto_merge"]
         if not settings["allow_squash_merge"]:
             return "skipped", "repository does not allow squash merge"
         if pull_request.get("state") != "OPEN":
@@ -2310,6 +2364,17 @@ def enable_auto_merge(
             pull_request = view()
         if pull_request.get("headRefOid") != expected:
             return "skipped", "pull request head not yet updated"
+        if direct:
+            if pull_request.get("mergeable") != "MERGEABLE":
+                return "waiting", "mergeability not yet computed"
+            verdict, why = checks_verdict(pull_request.get("statusCheckRollup"), now())
+            if verdict != "ready":
+                return ("skipped" if verdict == "failed" else "waiting"), why
+            # Never pass --auto here: where auto-merge cannot be armed, gh merges at once and ignores checks.
+            completed = run(["gh", "pr", "merge", number, "--repo", name, "--squash", "--match-head-commit", expected], env=env, check=False)
+            if completed.returncode:
+                return "failed", sanitize_text(completed.stderr.strip() or completed.stdout.strip() or f"gh pr merge exited {completed.returncode}")
+            return "merged", f"merged {expected}"
         if pull_request.get("autoMergeRequest") and not disarmed:
             return "enabled", "auto-merge already enabled"
         completed = run(["gh", "pr", "merge", number, "--repo", name, "--auto", "--squash", "--match-head-commit", expected], env=env, check=False)
@@ -2319,7 +2384,7 @@ def enable_auto_merge(
 
     try:
         state, reason = evaluate()
-        if state in {"skipped", "failed"} and pull_request.get("autoMergeRequest") and not disarmed:
+        if state in {"skipped", "failed"} and not direct and pull_request.get("autoMergeRequest") and not disarmed:
             error = disable_auto_merge(repository, number, env=env)
             if error is None:
                 reason += "; existing auto-merge disabled"
@@ -2328,6 +2393,101 @@ def enable_auto_merge(
     except Exception as exc:  # the PR exists; never fail the repository over auto-merge
         state, reason = "failed", sanitize_text(str(exc) or type(exc).__name__)
     return {"state": state, "reason": reason}
+
+
+def answers_file_name(module: str) -> str:
+    return ANSWERS_FILE if module == LEGACY_MODULE else f".copier-answers.{module}.yml"
+
+
+def answers_at(repository: Repository, ref: str, *, env: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Parse each root answers file at ref, keyed by file name."""
+    return {
+        answers_file_name(module): parse_answers(text)
+        for module, text in fetch_answers_files(repository.name_with_owner, env=env, ref=ref).items()
+    }
+
+
+def answers_commit(answers: dict[str, Any]) -> str | None:
+    commit = answers.get("_commit")
+    return commit.strip() if isinstance(commit, str) and commit.strip() else None
+
+
+def answers_versions(repository: Repository, ref: str, *, env: dict[str, str]) -> dict[str, str | None]:
+    """Map each root answers file at ref to its _commit."""
+    return {file: answers_commit(answers) for file, answers in answers_at(repository, ref, env=env).items()}
+
+
+def trusted_answers_source(file: str, answers: dict[str, Any], expected_template: str) -> bool:
+    source = answers.get("_src_path")
+    if not isinstance(source, str):
+        return False
+    if file == ANSWERS_FILE:
+        expected = normalize_template_source(expected_template)
+        return expected is not None and normalize_template_source(source) == expected
+    return bool(TRUSTED_SRC_RE.fullmatch(source))
+
+
+def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str, str], expected_template: str) -> Result:
+    """Evaluate and merge the open automation PR without running Copier or pushing."""
+    name = repository.name_with_owner
+    pulls = gh_json(["pr", "list", "--repo", name, "--head", branch, "--state", "open", "--json", "url,headRefOid"], env=env)
+    if not isinstance(pulls, list):
+        raise FleetUpdateError("pull request listing is unreadable")
+    if not pulls:
+        return Result(name, "up-to-date")
+    pull = pulls[0]
+    url = pull.get("url") if isinstance(pull, dict) else None
+    head_oid = pull.get("headRefOid") if isinstance(pull, dict) else None
+    if not isinstance(url, str) or not isinstance(head_oid, str) or not COMMIT_SHA_PATTERN.fullmatch(head_oid):
+        raise FleetUpdateError("open pull request has no usable URL or head commit")
+
+    def skipped(reason: str) -> Result:
+        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": reason})
+
+    try:
+        base = answers_at(repository, repository.default_branch, env=env)
+        head = answers_at(repository, head_oid, env=env)
+    except UnsafeAnswersFileError as exc:
+        return Result(name, "unsafe-answers-file", str(exc))
+    differ = sorted(set(base) ^ set(head))
+    if differ:
+        return skipped(f"answers files differ: {', '.join(differ)}")
+    if not base:
+        return skipped("no answers files")
+    for file in sorted(base):
+        if (
+            not trusted_answers_source(file, base[file], expected_template)
+            or not trusted_answers_source(file, head[file], expected_template)
+            or base[file].get("_src_path") != head[file].get("_src_path")
+        ):
+            return skipped(f"untrusted template source in {file}")
+    modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base if file != ANSWERS_FILE)
+    if ANSWERS_FILE in base:
+        primary = ANSWERS_FILE
+    else:
+        primary = answers_file_name("core" if "core" in modules else modules[0])
+    target = answers_commit(head[primary])
+    rows: list[dict[str, str]] = []
+    for module in modules:
+        file = answers_file_name(module)
+        if file == primary:
+            continue
+        head_commit = answers_commit(head[file])
+        if head_commit != target:
+            return skipped(f"module {module} head {head_commit} does not match target {target}")
+        rows.append({"module": module, "from": answers_commit(base[file]) or ""})
+    merge = enable_auto_merge(
+        repository,
+        url,
+        branch=branch,
+        head=head_oid,
+        applied=answers_commit(base[primary]) or "",
+        target=target,
+        requested_template_ref=None,
+        env=env,
+        modules=rows,
+    )
+    return Result(name, "pull-request", url, auto_merge=merge)
 
 
 def process_repository(
@@ -2707,6 +2867,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--migrate", metavar="MODULE", help="Hand the module's legacy area off and open a PR on ci-kit/migrate-MODULE instead of updating.")
     parser.add_argument("--auto-merge", action="store_true", help="Enable GitHub auto-merge (squash) on eligible template-update PRs; write mode only.")
+    parser.add_argument(
+        "--merge-ready",
+        action="store_true",
+        help="Skip Copier and pushes; only evaluate and merge open automation PRs. Requires --write --auto-merge.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -2720,6 +2885,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--auto-merge cannot be combined with --dry-run")
     if args.auto_merge and args.migrate:
         parser.error("--auto-merge cannot be combined with --migrate")
+    if args.merge_ready and not (args.write and args.auto_merge):
+        parser.error("--merge-ready requires --write and --auto-merge")
+    if args.merge_ready and args.migrate:
+        parser.error("--merge-ready cannot be combined with --migrate")
+    if args.merge_ready and args.template_ref:
+        parser.error("--merge-ready cannot be combined with --template-ref")
     env = os.environ.copy()
     if args.write:
         if not env.get("GH_TOKEN", "").strip():
@@ -2731,7 +2902,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not env.get("GH_TOKEN"):
         print("GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
         return 2
-    for command in ("copier", "gh", "git"):
+    for command in ("gh",) if args.merge_ready else ("copier", "gh", "git"):
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
@@ -2815,7 +2986,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     excluded = {name.casefold() for name in args.exclude}
     template_ref = args.template_ref
-    if any(repository.name_with_owner.casefold() not in excluded for repository in repositories):
+    if not args.merge_ready and any(repository.name_with_owner.casefold() not in excluded for repository in repositories):
         try:
             template_ref = resolve_template_ref(
                 args.template_repository,
@@ -2832,7 +3003,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 results.append(Result(repository.name_with_owner, "excluded"))
                 continue
             try:
-                if args.migrate:
+                if args.merge_ready:
+                    result = merge_ready_repository(repository, branch=branch, env=env, expected_template=args.template_repository)
+                elif args.migrate:
                     result = migrate_repository(
                         repository,
                         module=args.migrate,

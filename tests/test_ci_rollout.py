@@ -290,14 +290,50 @@ class RolloutTests(unittest.TestCase):
                 self.assertFalse(verify.called)
                 self.assertEqual(run.call_args.args[0][-len(arguments):], arguments)
 
-    def test_auto_merge_is_refused_until_the_pilot_gate_is_wired(self):
-        for arguments in (["--write", "--public-only", "--auto-merge"], ["--write", "--auto-merge", "--repo", "quokkify/q4j"]):
-            with self.subTest(arguments=arguments), patch.object(rollout.subprocess, "run") as run, \
-                 patch.object(rollout.fleet, "resolve_template_ref") as resolve:
-                with self.assertRaisesRegex(gate.GateError, "auto-merge is not wired into the pilot gate yet"):
-                    rollout.rollout(arguments)
-                run.assert_not_called()
-                resolve.assert_not_called()
+    def test_auto_merge_is_forwarded_to_every_stage(self):
+        calls = []
+        events = []
+
+        def update(arguments, report):
+            calls.append(arguments)
+            events.append("update")
+            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
+            return {"schema_version": 4, "configuration_gaps": 1,
+                    "repositories": [{"repository": repository, "status": "up-to-date", "detail": "", "health": {"adopted": True}}]}
+
+        def verify(repository, pr, target, timeout, expected_snapshot=None):
+            events.append("verify")
+            return SHA
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=update), \
+             patch.object(rollout, "verify_pilot", side_effect=verify), \
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")), \
+             patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
+            rollout.rollout(["--write", "--public-only", "--auto-merge",
+                             "--json-report", str(Path(temporary) / "report.json"),
+                             "--markdown-report", str(Path(temporary) / "report.md")])
+        self.assertGreater(len(calls), 1)
+        for arguments in calls:
+            self.assertIn("--auto-merge", arguments)
+        self.assertIn("verify", events)
+        self.assertLess(events.index("verify"), len(events) - 1)
+        self.assertEqual(events[-1], "update")
+
+    def test_merge_ready_bypasses_the_pilot_gate(self):
+        arguments = ["--write", "--public-only", "--auto-merge", "--merge-ready"]
+        with patch.object(rollout.subprocess, "run") as run, \
+             patch.object(rollout, "verify_pilot") as verify, \
+             patch.object(rollout.fleet, "resolve_template_ref") as resolve:
+            run.return_value.returncode = 0
+            rollout.rollout(arguments)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][-len(arguments):], arguments)
+        self.assertFalse(verify.called)
+        self.assertFalse(resolve.called)
 
     def test_pilots_precede_fanout_and_recheck_before_fanout(self):
         events = []

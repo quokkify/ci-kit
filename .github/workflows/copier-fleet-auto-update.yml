@@ -99,7 +99,7 @@ jobs:
               echo "::error::FLEET_UPDATE_TOKEN is required for write mode; it must be a credential scoped to public quokkify repositories only." >&2
               exit 2
             fi
-            args+=(--write)
+            args+=(--write --auto-merge)
           fi
           if [[ -n "${REQUESTED_REPOSITORY:-}" ]]; then
             # --repo bypasses organization discovery entirely, so --org cannot contain it.
@@ -129,10 +129,45 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
 
+      # Runs after the dry-run audit, and still runs when the audit found drift or a failure:
+      # merging ready PRs is independent of whether other repositories are behind.
+      - name: Merge ready template updates
+        if: ${{ !cancelled() && github.event.schedule == '17 4 * * 0,2-6' }}
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_UPDATE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::error::FLEET_UPDATE_TOKEN is required for write mode; it must be a credential scoped to public quokkify repositories only." >&2
+            exit 2
+          fi
+          markdown_report="$RUNNER_TEMP/copier-fleet-merge.md"
+          json_report="$RUNNER_TEMP/copier-fleet-merge.json"
+          set +e
+          python scripts/rollout_copier_fleet.py \
+            --org quokkify \
+            --public-only \
+            --exclude quokkify/.github \
+            --exclude quokkify/ci-kit \
+            --branch automation/copier-template-update \
+            --write --auto-merge --merge-ready \
+            --markdown-report "$markdown_report" --json-report "$json_report"
+          status=$?
+          set -e
+          if [[ -f "$markdown_report" ]]; then
+            cat "$markdown_report" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '## Copier fleet merge\n\nThe run failed before a report was written; see the job log.\n' \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
       - name: Upload Copier fleet update report
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: copier-fleet-update
-          path: ${{ runner.temp }}/copier-fleet-update.json
+          path: |
+            ${{ runner.temp }}/copier-fleet-update.json
+            ${{ runner.temp }}/copier-fleet-merge.json
           if-no-files-found: warn
