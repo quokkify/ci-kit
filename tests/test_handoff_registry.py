@@ -54,6 +54,10 @@ class HandoffRegistryTests(unittest.TestCase):
         question = self.cfg["handed_off"]
         self.assertEqual(question["type"], "yaml")
         self.assertEqual(question["when"], "{{ module == 'legacy' }}")
+        default = question["default"]
+        self.assertIsInstance(default, str)
+        self.assertIn("_external_data", default)
+        self.assertIn("[validate]", default)
 
     def copy(self, *args: str) -> tuple[subprocess.CompletedProcess, Path]:
         dest = mkdtemp("handoff-")

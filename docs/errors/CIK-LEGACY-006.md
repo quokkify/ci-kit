@@ -4,7 +4,7 @@ Legacy template no longer renders validate; validate is not handed off to core.
 
 ## Cause
 
-The legacy template no longer renders `.github/workflows/validate.yml`; the `core` module owns it. A legacy `.copier-answers.yml` whose `handed_off` lacks `validate` (or has no `handed_off` key, as in answers last updated before v3.2.0) still relies on the legacy `validate.yml`. Copier refuses to copy or update such a repository instead of silently deleting the workflow, and `ci-kit plan` reports it.
+The legacy template no longer renders `.github/workflows/validate.yml`; the `core` module owns it. A legacy `.copier-answers.yml` whose `handed_off` lacks `validate` (or has no `handed_off` key, as in answers last updated before v3.2.0) still relies on the legacy `validate.yml`. Copier refuses to copy or update such a repository instead of silently deleting the workflow, and `ci-kit plan` reports it. Two checks enforce this: a guard in the template exclusions refuses when updating from a template revision that still rendered `validate.yml`, and the `handed_off` validator refuses on copies and on later updates.
 
 The `ci-kit migrate` command that moved `validate.yml` to `core` is removed from the current release.
 
@@ -34,4 +34,4 @@ A fresh legacy copy prints a harmless Copier `MissingFileWarning` about `.copier
 
 ## Example
 
-`.copier-answers.yml` last updated by ci-kit v3.1.1 has no `handed_off`, and `copier update --defaults` fails with `CIK-LEGACY-006: validate must stay handed off`.
+`.copier-answers.yml` last updated by ci-kit v3.1.1 has no `handed_off`, and `copier update --defaults` fails with a `CIK-LEGACY-006` message pointing to this runbook (`CIK-LEGACY-006: the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md`).

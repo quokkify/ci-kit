@@ -54,8 +54,8 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v3.6.0 --trust
-copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v3.6.0 --trust -a .copier-answers.core.yml -d module=core
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v3.6.0 --data toolkit_version=v3.6.0 --trust
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v3.6.0 --data toolkit_version=v3.6.0 --trust -a .copier-answers.core.yml -d module=core
 cd my-project
 copier update --trust
 ```
