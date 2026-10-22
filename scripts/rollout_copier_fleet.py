@@ -59,11 +59,9 @@ def run_update(arguments: list[str], report: Path) -> dict:
 
 def rollout(arguments: list[str]) -> None:
     args = fleet.build_parser().parse_args(arguments)
-    if args.auto_merge:
-        raise GateError("auto-merge is not wired into the pilot gate yet")
     # A targeted request must never mutate unrelated pilots. The audit is also
     # passed through unchanged, without requiring a write token or CI evidence.
-    if args.dry_run or args.repo:
+    if args.dry_run or args.repo or args.merge_ready:
         result = subprocess.run(
             [sys.executable, str(Path(__file__).with_name("update_copier_fleet.py")), *arguments],
             check=False,
