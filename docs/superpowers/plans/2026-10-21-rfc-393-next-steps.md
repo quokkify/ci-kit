@@ -1,7 +1,7 @@
 # RFC #393 — что осталось сделать
 
 - RFC: [#393](https://github.com/quokkify/ci-kit/issues/393)
-- Состояние на 2026-10-21; подробности — комментарий со статусом волны 2 в #393.
+- Состояние на 2026-10-22; подробности — комментарии со статусом волны 2 и раскатки v3.6.0 в #393.
 - Специфики: spec #1 `docs/superpowers/specs/2026-10-12-modular-ci-templates-design.md`, spec #2 `…/2026-10-12-modular-ci-migration-design.md`, spec #4 `…/2026-10-21-modular-ci-language-modules-design.md`. Runbook: `docs/modules.md`.
 
 Каждый внешний шаг (merge, смена ruleset, раскатка) — только с подтверждения владельца.
@@ -13,17 +13,17 @@
 | ci-kit | модули `core`, `java`, `python`, `node`, `docker` (#452); `ci-kit migrate` для репозиториев с компонентами (#454); релизы до v3.6.0 |
 | На модулях | 9 из 12 (11 + новый archgate): волна 1 (7 × `core`), knowledge (`core`), skills (`core` + `python`) |
 | Готовы к миграции | marketdesk (подготовка marketdesk#416), q4j (подготовка q4j#778, заглушки убраны q4j#779) |
-| Раскатка v3.6.0 | pilot gate для мигрированных репозиториев исправлен (#465); раскатка запущена с `main` через `copier-fleet-auto-update.yml` (`template-ref=v3.6.0`) |
+| Раскатка v3.6.0 | завершена: 12 из 12 на v3.6.0 (10 fleet PR, archgate#3, knowledge#66), CI на `main` зелёный |
 
-## 1. Завтра первым делом
+## 1. Раскатка v3.6.0 и проверка Allure (сделано 2026-10-22)
 
 ### 1.1 Раскатка v3.6.0
 
-- [ ] Проверить последний запуск `copier-fleet-auto-update.yml`: pilots (gh-pages-subdir-action, skills, q4j) → fan-out без ошибок.
-- [ ] Смёржить зелёные fleet PR (squash, только `CLEAN`).
-- [ ] Пока идёт раскатка, ничего не мёржить в pilot-репозитории: gate останавливается с `Pilot base is behind the current target branch` и требует перезапуска.
-- [ ] **quokkify/archgate** — новый, 12-й потребитель (legacy, v3.3.0, компонент `java:.`). Раскатка v3.6.0 не смогла запушить ветку: `Permission to quokkify/archgate.git denied` (403) — токену раскатки (`FLEET_UPDATE_TOKEN`) не выдан доступ к репозиторию. Выдать доступ и перезапустить `copier-fleet-auto-update.yml` с `repository=quokkify/archgate`, `template-ref=<текущий тег>`. Его миграция на модули — отдельно (java-компонент, через `ci-kit migrate`, как marketdesk/q4j).
-- [ ] knowledge (приватный, вне раскатки): `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/knowledge --template-ref v3.6.0 --write` (с `GH_TOKEN`).
+- [x] Проверить последний запуск `copier-fleet-auto-update.yml`: pilots (gh-pages-subdir-action, skills, q4j) → fan-out без ошибок.
+- [x] Смёржить зелёные fleet PR (squash, только `CLEAN`).
+- [x] Пока идёт раскатка, ничего не мёржить в pilot-репозитории: gate останавливается с `Pilot base is behind the current target branch` и требует перезапуска.
+- [x] **quokkify/archgate** — новый, 12-й потребитель (legacy, v3.3.0, компонент `java:.`). Раскатка v3.6.0 не смогла запушить ветку: `Permission to quokkify/archgate.git denied` (403) — токену раскатки (`FLEET_UPDATE_TOKEN`) не выдан доступ к репозиторию. Выдать доступ и перезапустить `copier-fleet-auto-update.yml` с `repository=quokkify/archgate`, `template-ref=<текущий тег>`. Его миграция на модули — отдельно (java-компонент, через `ci-kit migrate`, как marketdesk/q4j). Доступ выдан, archgate#3 смёржен.
+- [x] knowledge (приватный, вне раскатки): `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/knowledge --template-ref v3.6.0 --write` (с `GH_TOKEN`). knowledge#66 смёржен.
 
 ### 1.2 Проверка Allure после v3.6.0 (#450, исправлено #460)
 
@@ -51,12 +51,12 @@ gh run view <run-id> --repo quokkify/<repo> --json jobs --jq '.jobs[]|"\(.name):
 | `Expected exactly one module value …`, `Partial module provenance …` | фрагмент потребителя (car-service-platform#280 добавляет `<Prefix>.Module`, path-of-exile-starter#1136 пишет `Module=java`; оба смёржены) |
 | `artifact … has no scannable allure-results directory`, `… outside a scannable allure-results directory`, `only regular files directly under allure-results are read` | новые ранние проверки ci-kit#460 (`safe_extract`, раскладка по артефактам) |
 
-- [ ] Все три репозитория зелёные → отметить в #393.
-- [ ] Если падает → комментарий в #450 (закрыт #460) с run URL и строкой ошибки.
+- [x] Все три репозитория зелёные → отметить в #393.
+- [x] Если падает → комментарий в #450 (закрыт #460) с run URL и строкой ошибки. Не понадобилось.
 
 ## 2. Завершить волну 2 (spec #4 §9, §11)
 
-- [ ] Пауза выдержана: релиз v3.6.0 прошёл fleet `update` по skills и knowledge без ручных правок (skills#137 — одним bot-commit, `ci / gate` зелёный).
+- [x] Пауза выдержана: релиз v3.6.0 прошёл fleet `update` по skills и knowledge без ручных правок (skills#137 и knowledge#66 — одним bot-commit, `ci / gate` зелёный).
 - [ ] **marketdesk**: `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/marketdesk --template-ref <текущий тег> --migrate core --write` → зелёный `ci / gate` → `python scripts/migration_checks.py --pr quokkify/marketdesk#<n> --dry-run` (ожидаемо `checks_before`: `Shared template contract`, `MarketDesk / ci`, `Java test automation / ci`, `docker / build`) → без `--dry-run` → merge. Проверить Allure external на `main`.
 - [ ] **q4j**: то же; модуль только `core`, `checks_before` = `Shared template contract`. Required checks q4j от validate не зависят — `migration_checks.py` покажет, что менять нечего.
 - [ ] Пауза: следующий релиз ci-kit проходит fleet `update` по marketdesk и q4j.
