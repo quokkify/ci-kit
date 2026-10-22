@@ -113,7 +113,7 @@ java_components:
 python_components:
   when: "{{ module == 'python' }}"
   type: yaml
-  help: "Python components such as [{id: backend-python, name: Backend Python, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the python-ci workflow inputs in snake_case; every *_version must be a string."
+  help: "Python components such as [{id: backend-python, name: Backend Python, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the python-ci workflow inputs in snake_case; every *_version must be a non-empty string."
   default: >-
     {% if _commit is defined and python_components is defined %}{{ python_components }}{% else %}[{id: app-python, name: Application Python, path: ., python_version: "3.14"}]{% endif %}
   validator: >-
@@ -130,7 +130,7 @@ python_components:
     {% if component.name is string %}{% set python_state.names = python_state.names + [component.name] %}{% endif %}
     {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
     {% for key, value in component.items() %}
-    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and (value is not string or not (value | trim)) %}{{ key }} must be a non-empty string such as "24".{% endif %}
     {% endfor %}
     {% endif %}
     {% endfor %}
@@ -139,7 +139,7 @@ python_components:
 node_components:
   when: "{{ module == 'node' }}"
   type: yaml
-  help: "Node components such as [{id: backend-node, name: Backend Node, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the node-ci workflow inputs in snake_case; every *_version must be a string."
+  help: "Node components such as [{id: backend-node, name: Backend Node, path: backend}]. id is the stable GitHub Actions job identifier and name is its display name. Optional keys mirror the node-ci workflow inputs in snake_case; every *_version must be a non-empty string."
   default: >-
     {% if _commit is defined and node_components is defined %}{{ node_components }}{% else %}[{id: app-node, name: Application Node, path: ., node_version: "22"}]{% endif %}
   validator: >-
@@ -156,7 +156,7 @@ node_components:
     {% if component.name is string %}{% set node_state.names = node_state.names + [component.name] %}{% endif %}
     {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
     {% for key, value in component.items() %}
-    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and (value is not string or not (value | trim)) %}{{ key }} must be a non-empty string such as "24".{% endif %}
     {% endfor %}
     {% endif %}
     {% endfor %}
@@ -183,7 +183,7 @@ docker_images:
     {% if docker_name is string %}{% set docker_state.names = docker_state.names + [docker_name] %}{% endif %}
     {% if 'context' in component and (component.context is not string or '..' in component.context.split('/') or (component.context | regex_search('[*?\\[]'))) %}context must be a string without .. segments or glob characters.{% endif %}
     {% for key, value in component.items() %}
-    {% if key not in allowed_keys %}Unsupported image key: {{ key }}.{% elif key.endswith('_version') and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% if key not in allowed_keys %}Unsupported image key: {{ key }}.{% elif key.endswith('_version') and (value is not string or not (value | trim)) %}{{ key }} must be a non-empty string such as "24".{% endif %}
     {% endfor %}
     {% endif %}
     {% endfor %}
