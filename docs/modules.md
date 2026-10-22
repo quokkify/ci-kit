@@ -127,5 +127,5 @@ The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` tr
 2. Add the legacy paths to `_exclude` in `copier.yml` guarded by `'<area>' in (handed_off | default([]))`.
 3. Add the area to the `handed_off` validator's `allowed_handed_off` list in `copier.yml`.
 4. Add the module's required checks to `CHECKS_AFTER` in `tools/ci_kit/migrate.py`.
-5. Add the legacy-to-module check mapping to `HANDOFF_CONTEXTS` in `scripts/verify_ci_gate.py`.
+5. If handing off the area changes which checks a pilot publishes, extend `template_contexts` in `scripts/verify_ci_gate.py`. Today it handles `validate`: `CHECKS_AFTER["core"]` once handed off, otherwise the contexts of the pilot's legacy `validate.yml` jobs.
 6. Keep the registry, validator, and `_exclude` consistent; a test compares them.
