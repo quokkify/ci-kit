@@ -11,6 +11,7 @@ from .plan import Finding
 ANSWERS = ".copier-answers.yml"
 REQUIRED_ANSWERS = ("_src_path", "_commit", "toolkit_version")
 HEX = "0123456789abcdef"
+LAST_LEGACY_VALIDATE = "v3.8.0"
 
 
 def load_answers(repo: Path) -> tuple[dict | None, str | None]:
@@ -41,7 +42,7 @@ def handoff_findings(repo: Path, legacy_answers: dict | None, modules: set[str])
         elif name not in handed and area.module in modules:
             findings.append(Finding(
                 "CIK-HANDOFF-002", area.module,
-                f"module {area.module} is installed but area {name} is not handed off; run: ci-kit migrate --module {area.module}",
+                f"module {area.module} is installed but area {name} is not handed off; see docs/errors/CIK-LEGACY-006.md",
                 ANSWERS,
             ))
     return findings
@@ -119,6 +120,14 @@ def legacy_findings(repo: Path, module_owned: set[str]) -> list[Finding]:
     toolkit = answers.get("toolkit_version")
     if answers.get("_commit") and toolkit and answers["_commit"] != toolkit:
         findings.append(Finding("CIK-LEGACY-002", "legacy", f"Copier _commit {answers['_commit']} must match toolkit_version {toolkit}", ANSWERS))
+    handed = answers.get("handed_off", [])
+    if isinstance(handed, list) and all(isinstance(a, str) and a in AREAS for a in handed) and "validate" not in handed:
+        findings.append(Finding(
+            "CIK-LEGACY-006", "legacy",
+            "validate is not handed off; the legacy template no longer renders validate.yml. "
+            f"Migrate with ci-kit {LAST_LEGACY_VALIDATE}, see docs/errors/CIK-LEGACY-006.md",
+            ANSWERS,
+        ))
     findings.extend(_feature_findings(repo, answers))
     for rel in (".github/renovate.json", ".github/release-please/config.json", ".github/release-please/manifest.json"):
         if rel in module_owned:

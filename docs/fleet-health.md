@@ -68,7 +68,7 @@ raw CLI errors or credentials.
 The Markdown report (the job summary) opens with one verdict:
 `❌ action required` for failures, configuration gaps (including expired
 health exceptions), automation PRs with failed CI, failing required checks on
-the default branch, migrations that need an update first, unrecognized statuses
+the default branch, unrecognized statuses
 or a stopped rollout; `🟡 drift in N` for
 dry-run drift only; `🔀 N PRs open` when PRs are only in flight; otherwise
 `✅ nothing to do`. A full rollout renders it once from the merged pilot and
@@ -80,7 +80,7 @@ matches a successful pilot gate shows `CI ✅ · pilot gate`; this is render-onl
 the JSON keeps the raw PR evidence and the gate result in `rollout.pilots`.
 
 `Needs your attention` has one row per repository, ordered conflict, failure,
-PR with failed CI, auto-merge failed, failing CI on `main`, configuration gap, needs update first,
+PR with failed CI, auto-merge failed, failing CI on `main`, configuration gap,
 drift, unrecognized status; any status the report does not know is shown with
 its raw value. Re-run commands (for failed repositories and, in dry runs, the
 write-mode command for drift, repeating an explicit template ref) and raw errors follow in a collapsed block. `not-managed`,
@@ -102,7 +102,7 @@ evidence. A narrower token simply produces an unknown observation.
 python scripts/update_copier_fleet.py --write --repo quokkify/skills --auto-merge
 ```
 
-`--auto-merge` (off by default; rejected with `--dry-run` and `--migrate`)
+`--auto-merge` (off by default; rejected with `--dry-run`)
 merges each template-update PR the run created or refreshed, once the PR is
 eligible. Write-mode workflow runs (release-triggered and the Monday run) pass
 it, but they always pin `--template-ref`, and a PR from a run with an explicit
@@ -144,7 +144,7 @@ itself, never a fork's.
 A PR is eligible only when all of these hold; otherwise it is skipped with
 the reason in `repositories[].auto_merge.reason`:
 
-1. the branch is the automation update branch, not `ci-kit/migrate-*`, and
+1. the branch is the automation update branch, and
    the PR's head is that branch in the repository itself;
 2. the target is the release tag the run resolved, not an explicit `--template-ref`;
 3. the applied version (`_commit` before the update) and every updated
@@ -168,7 +168,7 @@ python scripts/update_copier_fleet.py --write --auto-merge --merge-ready --org q
 ```
 
 `--merge-ready` requires `--write --auto-merge` and is rejected with
-`--dry-run`, `--migrate` and `--template-ref`. Copier does not run and nothing
+`--dry-run` and `--template-ref`. Copier does not run and nothing
 is pushed: for each repository it takes the open PR from the automation
 branch, checks that the template source is trusted and that the module
 versions satisfy the same rules as above, and merges it by the direct path
@@ -198,27 +198,3 @@ with the flag or disarmed after a push, `repositories[].auto_merge` with
 These fields are additive and the schema version is unchanged. A `failed`
 state is an attention row but does not change the exit code; `enabled`,
 `merged` and `waiting` are counted in the context line; `skipped` stays quiet.
-
-## Migrate mode
-
-```console
-python scripts/update_copier_fleet.py --dry-run --repo quokkify/knowledge --migrate core
-```
-
-`--migrate MODULE` replaces the update flow: per repository it runs `ci-kit doctor`,
-then `ci-kit migrate` on a clone and opens one squashed commit on
-`ci-kit/migrate-MODULE` (override with `--branch`). Statuses: `not-applicable`
-(no legacy answers, module installed, or area already handed off),
-`needs-update-first` (legacy `_commit` differs from the resolved target ref),
-`migrate-rejected`, `would-migrate` (dry run) and `pull-request`. An explicit
-`--repo` is processed even when private; organization runs keep their filtering.
-
-`migrate-rejected` opens no branch, commit or PR and makes the run exit 1. Its
-`detail` lists the `CIK-*` codes; the JSON report adds
-`repositories[].migration` with `findings` (`code`, `module`, `message`, `path`;
-the `message` of `CIK-MIGRATE-003` carries the diff) and, for a failed doctor
-run, `doctor` (its output). The schema version is unchanged.
-
-The PR body ends with the `<!-- ci-kit-migrate -->` marker and a json block whose
-`commits` is the pushed head SHA; the `migration_checks.py --pr` command is filled
-with the real PR number by editing the body after creation.

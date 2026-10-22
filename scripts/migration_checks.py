@@ -32,7 +32,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from ci_kit.migrate import CHECKS_AFTER, legacy_check_names, parse_marker
+from ci_kit.migration_marker import CHECKS_AFTER, legacy_check_names, parse_marker
 from fleet_health import required_checks
 from reconcile_ruleset import (GitHubClient, ReconcileError, _find_existing, _normalize, build_desired, check_contexts, list_rulesets,
                                managed_name, reconcile)

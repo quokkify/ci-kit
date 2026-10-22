@@ -2,6 +2,11 @@ _min_copier_version: "9.19.1"
 _subdirectory: "{% if module == 'legacy' %}template{% else %}modules/{{ module }}/template{% endif %}"
 _answers_file: .copier-answers.yml
 _templates_suffix: .jinja
+# The answers file already in the destination: empty on a fresh copy, the
+# stored answers on update. Lets the handed_off default tell a missing key in
+# stored answers apart from a fresh copy.
+_external_data:
+  stored_answers: "{{ _copier_conf.answers_file }}"
 _exclude:
   # Rendered before file generation: Copier's --defaults does not validate
   # retained question defaults and can discard invalid boolean answers. Skip
@@ -11,6 +16,15 @@ _exclude:
     {% set selected_release = _copier_answers.get('_commit', '') %}
     {% if '__allure_pin_mismatch__' not in (_copier_conf.exclude | join(' ')) and allure_report and (selected_release | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) and toolkit_version != selected_release %}
     {{ _copier_conf['__allure_pin_mismatch__'] | mandatory('Allure reusable workflows require the selected toolkit release. Retry with --data toolkit_version=' ~ selected_release) }}
+    {% endif %}
+  # Legacy no longer renders validate.yml; the core module owns it. Rendering
+  # legacy without the handoff would silently drop the repository's Validate
+  # workflow, so refuse instead. This guard fires first when updating from a
+  # template that still rendered validate.yml; the handed_off validator fires
+  # on copies and on later updates.
+  - >-
+    {% if module == 'legacy' and 'validate' not in (handed_off | default([])) %}
+    {{ _copier_conf['__legacy_validate_removed__'] | mandatory('CIK-LEGACY-006: the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md') }}
     {% endif %}
   - "{% if not renovate %}.github/renovate.json{% endif %}"
   - "{% if not release_please %}.github/workflows/release.yml{% endif %}"
@@ -22,7 +36,6 @@ _exclude:
   - "{% if not allure_report %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if not allure_report %}.github/allure/safe_extract.py{% endif %}"
   - "{% if not allure_report %}.github/workflows/allure-report.yml{% endif %}"
-  - "{% if 'validate' in (handed_off | default([])) %}.github/workflows/validate.yml{% endif %}"
 
 # Written once when the project is generated, then owned by the project.
 # The template ships a starter README and a minimal Renovate config; real
@@ -216,7 +229,11 @@ codeql_languages:
 
 handed_off:
   type: yaml
-  default: []
+  # Fresh copies hand validate off. Stored answers without the key predate the
+  # handoff and still rely on legacy validate.yml: default to [] there so the
+  # validator refuses the update instead of silently dropping the workflow.
+  default: >-
+    {% if module == 'legacy' and _external_data.stored_answers is mapping and _external_data.stored_answers.get('_commit') %}[]{% else %}[validate]{% endif %}
   when: "{{ module == 'legacy' }}"
   help: Areas now owned by ci-kit modules; legacy stops rendering their files.
   validator: >-
@@ -228,6 +245,7 @@ handed_off:
     {% for area in handed_off %}
     {% if area is not string %}Every handed_off entry must be a string.{% elif area not in allowed_handed_off %}Unknown handed_off area: {{ area }}.{% elif area in handed_off_state.seen %}Duplicate handed_off area: {{ area }}.{% else %}{% set handed_off_state.seen = handed_off_state.seen + [area] %}{% endif %}
     {% endfor %}
+    {% if 'validate' not in handed_off %}CIK-LEGACY-006: validate must stay handed off; the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md{% endif %}
     {% endif %}
 
 gitleaks:

@@ -1643,7 +1643,6 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
             subprocess.run(["git", "add", "."], cwd=destination, check=True)
             subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], cwd=destination, check=True)
-            java_validate = ""
             java_data = root / "java.yml"
             java_data.write_text("components:\n  - type: java\n    path: .\n    id: app-java\n    name: Application Java\n")
             empty_data = root / "empty.yml"
@@ -1655,7 +1654,6 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self._assert_no_copier_conflicts(destination)
                 if data_file == java_data:
-                    java_validate = (destination / ".github/workflows/validate.yml").read_text()
                     java_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
                 else:
                     external_workflow = (destination / ".github/workflows/allure-report.yml").read_text()
@@ -1670,7 +1668,6 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             workflows = trigger["workflow_run"]["workflows"]
             self.assertEqual(workflows, ["Validate", "Run tests"])
             self.assertEqual(len(set(workflows)), 2)
-            self.assertIn("allure-results-app-java", java_validate)
             pull_request_template = (destination / ".github/pull_request_template.md").read_text()
             for heading in ("Description", "Highlight", "Usage example", "Migration"):
                 self.assertIn(f"## {heading}", pull_request_template)

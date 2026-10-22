@@ -252,6 +252,13 @@ class CliTests(unittest.TestCase):
         code, _, _ = self.run_cli("plan", "--repo", str(repo))
         self.assertEqual(code, 1)
 
+    def test_cli_has_no_migrate(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            main(["migrate", "--help"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice: 'migrate'", err.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

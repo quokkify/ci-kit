@@ -123,7 +123,8 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertIn('"versioningTemplate": "python"', template)
 
     def test_own_workflows_named_like_template_workflows_stay_updatable(self) -> None:
-        template_names = {path.name.removesuffix(".jinja") for path in (ROOT / "template/.github/workflows").iterdir()}
+        sources = [ROOT / "template/.github/workflows", *ROOT.glob("modules/*/template/.github/workflows")]
+        template_names = {path.name.removesuffix(".jinja") for source in sources for path in source.iterdir()}
         own = sorted(f".github/workflows/{path.name}" for path in (ROOT / ".github/workflows").iterdir() if path.name in template_names)
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
         rule = config["packageRules"][-1]

@@ -8,10 +8,15 @@ Legacy .copier-answers.yml lists an area in handed_off, but the module that owns
 
 ## Fix
 
+Install the owner module; for validate that is core:
+
 ```bash
-ci-kit migrate --module core --repo . --to <REF>
+copier copy https://github.com/quokkify/ci-kit.git . \
+  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust \
+  -a .copier-answers.core.yml -d module=core
 ```
-Or remove the area from handed_off if the hand-off was not intended.
+
+validate cannot be removed from handed_off: the legacy template no longer renders validate.yml ([CIK-LEGACY-006](CIK-LEGACY-006.md)).
 
 ## Example
 

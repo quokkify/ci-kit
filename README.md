@@ -38,13 +38,18 @@ You need `git`, [`gh`](https://cli.github.com/) (authenticated), and [Copier](ht
 export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq .tagName)"
 copier copy https://github.com/quokkify/ci-kit.git my-project \
   --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
+copier copy https://github.com/quokkify/ci-kit.git my-project \
+  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust \
+  -a .copier-answers.core.yml -d module=core
 ```
 
-Run the same command with `.` instead of `my-project` from the root of an existing repository. Copier asks for components and optional features, then writes:
+Run the same commands with `.` instead of `my-project` from the root of an existing repository. The first command applies the legacy template (shared files and optional features); it hands the `validate` area to the `core` module, so the second command adds `core`, which owns `validate.yml`. Add a language module per stack the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). Together they write:
 
 ```text
 my-project/
 ├── .copier-answers.yml          # commit it; copier update needs it
+├── .copier-answers.core.yml     # core module answers
+├── .ci/modules/core.yml         # core module declaration
 ├── README.md                    # written once, then yours
 ├── docs/ci-kit.md      # onboarding checklist, refreshed on update
 └── .github/
@@ -54,7 +59,7 @@ my-project/
     ├── release-please/          # if release_please
     ├── scripts/                 # if release_please
     └── workflows/
-        ├── validate.yml
+        ├── validate.yml         # core module
         ├── copier-update.yml
         ├── codeql.yml           # if codeql
         ├── gitleaks.yml         # if gitleaks

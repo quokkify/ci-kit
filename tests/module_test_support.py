@@ -90,10 +90,17 @@ def normalize_answers(tree: dict[str, bytes], expect_module: str | None = None) 
     if raw is not None:
         kept = []
         found_module = False
+        in_handed_off = False
         for line in raw.decode().splitlines(keepends=True):
+            if in_handed_off and line.startswith("  - "):
+                continue
+            in_handed_off = False
             if line.startswith(("_commit:", "_src_path:")):
                 continue
-            if line.rstrip("\n") == "handed_off: []":
+            if line.rstrip("\n") in ("handed_off: []", "handed_off: [validate]"):
+                continue
+            if line.rstrip("\n") == "handed_off:":
+                in_handed_off = True
                 continue
             if line.startswith("module:"):
                 found_module = True

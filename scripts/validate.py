@@ -1106,7 +1106,8 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
-TEMPLATE_WORKFLOW_SOURCES = ROOT / "template/.github/workflows"
+# Legacy and module templates both ship toolkit-owned workflows.
+TEMPLATE_WORKFLOW_SOURCES = (ROOT / "template/.github/workflows", *sorted(ROOT.glob("modules/*/template/.github/workflows")))
 # The API endpoint rather than raw.githubusercontent.com: raw is CDN-cached for
 # several minutes, which would fail this check against a preset that was already
 # updated. Authorization is attached when a token is present so CI is not subject
@@ -1118,10 +1119,11 @@ SHARED_PRESET_BASE_URL = (
 
 def template_owned_workflow_paths() -> list[str]:
     """Return the workflow paths whose versions ci-kit owns."""
-    return sorted(
+    return sorted({
         f".github/workflows/{source.name.removesuffix('.jinja')}"
-        for source in TEMPLATE_WORKFLOW_SOURCES.glob("*.yml.jinja")
-    )
+        for sources in TEMPLATE_WORKFLOW_SOURCES
+        for source in sources.glob("*.yml.jinja")
+    })
 
 
 def assert_shared_preset_covers_template_workflows() -> None:
@@ -2147,13 +2149,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and 'pull.user?.login === "dependabot[bot]"' in report_text,
                 f"{scenario}: pre-extraction collision and resource bounds are missing",
             )
-            validate_text = (dest / ".github/workflows/validate.yml").read_text()
-            check(
-                'answers.get("allure_report")' in validate_text
-                and 'Path(".github/allure/allurerc.mjs")' in validate_text
-                and 'Path(".github/allure/safe_extract.py")' in validate_text,
-                f"{scenario}: generated contract does not verify Allure outputs",
-            )
             artifact_names = ["allure-results-app-python"]
             if scenario == "allure-polyglot":
                 artifact_names = [
@@ -2184,8 +2179,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                       and configured.get("maximum-artifacts") == 50,
                       f"{scenario}: default external source artifact contract is incomplete")
             else:
-                for artifact_name in artifact_names:
-                    check(artifact_name in validate_text, f"{scenario}: missing source workflow artifact for {artifact_name}")
                 check(caller["with"].get("artifact-mode") == "component"
                       and caller["with"].get("source-workflow") == "Validate"
                       and caller["with"].get("source-workflow-path") == ".github/workflows/validate.yml"
@@ -2197,11 +2190,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                   and "allureArtifacts.map((artifact) => ({" in report_text,
                   f"{scenario}: stable Allure source materialization contract is missing")
             if scenario == "allure-polyglot":
-                check(
-                    'test-artifact-path: "reports/allure-results"' in validate_text
-                    and 'test-artifact-path: "build/allure-results"' in validate_text,
-                    "allure-polyglot: custom per-component result paths were not rendered",
-                )
                 probe_root = tmp_path / "allure-zip-probe"
                 fixture_archives = probe_root / "fixtures"
                 archive_root = probe_root / "downloaded"
@@ -2360,11 +2348,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
             check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")
             check(not allure_extractor_path.exists(), f"{scenario}: Allure extractor generated while disabled")
-        generated_validate = (dest / ".github/workflows/validate.yml").read_text()
-        check(
-            not generated_validate.endswith("\n\n"),
-            f"{scenario}: validate workflow has a trailing blank line",
-        )
         generated_readme = (dest / "README.md").read_text()
         check(
             not generated_readme.endswith("\n\n"),
@@ -2397,27 +2380,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             renovate_extends("quokkify/renovate-presets", expected_presets),
             scenario,
         )
-        if scenario == "polyglot":
-            generated = (dest / ".github/workflows/validate.yml").read_text()
-            for name in (
-                "python-ci.yml",
-                "node-ci.yml",
-                "java-ci.yml",
-            ):
-                check(name in generated, f"polyglot generated workflow missing {name}")
-            check(
-                "docker-build.yml" not in generated,
-                "polyglot generated workflow unexpectedly includes Docker",
-            )
-        if scenario == "same-type":
-            generated = (dest / ".github/workflows/validate.yml").read_text()
-            for job_id, display_name, path in (
-                ("backend-python", "Backend Python", "backend"),
-                ("tools-python", "Tools Python", "tools"),
-            ):
-                check(f"  {job_id}:" in generated, f"same-type missing job {job_id}")
-                check(f'name: "{display_name}"' in generated, f"same-type missing display name for {job_id}")
-                check(f'working-directory: "{path}"' in generated, f"same-type missing path for {job_id}")
         if scenario == "python":
             run(["git", "init", "-q"], dest)
             run(["git", "config", "user.email", "fixture@example.invalid"], dest)
@@ -2511,19 +2473,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ]
     )
     check(
-        (config_only_dest / ".github/workflows/validate.yml").exists(),
-        "config-only project lost shared template-contract validation",
+        not (config_only_dest / ".github/workflows/validate.yml").exists(),
+        "legacy template rendered validate.yml, which the core module owns",
     )
-    config_only_validate = (config_only_dest / ".github/workflows/validate.yml").read_text()
-    check(
-        not config_only_validate.endswith("\n\n"),
-        "config-only validate workflow has a trailing blank line",
-    )
-    for workflow_name in ("python-ci.yml", "node-ci.yml", "java-ci.yml", "docker-build.yml"):
-        check(
-            workflow_name not in config_only_validate,
-            f"config-only project unexpectedly generated {workflow_name}",
-        )
     for generated_workflow in sorted((config_only_dest / ".github/workflows").glob("*.yml")):
         run([actionlint, str(generated_workflow)])
     config_only_gitleaks = (config_only_dest / ".github/workflows/gitleaks.yml").read_text()
@@ -2540,12 +2492,6 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     check(
         'if ! git cat-file -e "$TRUSTED_REF^{commit}" 2>/dev/null; then' in config_only_gitleaks,
         "generated Gitleaks workflow fetches a ref the credential-less checkout already contains",
-    )
-    check(
-        'Path(".github/renovate.json")' in config_only_validate
-        and 'git diff --check "$BASE_SHA..$HEAD_SHA"' in config_only_validate
-        and '"$RUNNER_TEMP/bin/actionlint"' in config_only_validate,
-        "generated validation workflow is missing contract gates",
     )
     check(
         (config_only_dest / ".github/workflows/release.yml").exists(),
@@ -2623,15 +2569,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         not (no_codeql_dest / ".github/workflows/codeql.yml").exists(),
         "codeql=false generated .github/workflows/codeql.yml",
     )
-    for workflow_name in ("validate.yml", "gitleaks.yml"):
-        check(
-            (no_codeql_dest / f".github/workflows/{workflow_name}").is_file(),
-            f"codeql=false dropped the {workflow_name} baseline workflow",
-        )
     check(
-        'if answers.get("codeql") and not codeql_path.is_file():'
-        in (no_codeql_dest / ".github/workflows/validate.yml").read_text(),
-        "generated contract does not gate the CodeQL workflow on its answer",
+        (no_codeql_dest / ".github/workflows/gitleaks.yml").is_file(),
+        "codeql=false dropped the gitleaks.yml baseline workflow",
     )
 
     no_gitleaks_data = tmp_path / "no-gitleaks.yml"

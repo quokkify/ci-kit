@@ -14,31 +14,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import update_copier_fleet as fleet
-from ci_kit.migrate import parse_marker
 from verify_ci_gate import (DEFAULT_PILOT_TIMEOUT, GateError, PILOT_CHECKS, PILOT_TIMEOUTS, current_snapshot,
                             release_ready, verify_pilot, wait_until)
-
-MIGRATE_PILOTS = ("quokkify/gh-pages-subdir-action", "quokkify/java-test-automation-template",
-                  "quokkify/renovate-presets")
-
-
-def pilot_migration(repository: str, pr: int) -> tuple[tuple[str, ...], str]:
-    try:
-        result = subprocess.run(
-            ["gh", "pr", "view", str(pr), "--repo", repository, "--json", "body,headRefOid"],
-            check=True, capture_output=True, text=True, timeout=45,
-        )
-        payload = json.loads(result.stdout)
-        head = payload["headRefOid"]
-        checks = parse_marker(payload["body"])["checks_after"]
-    except (subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
-        raise GateError(f"Pilot migration marker unavailable: {repository}#{pr}: {exc}") from exc
-    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
-        raise GateError(f"Pilot PR head unavailable: {repository}#{pr}")
-    if not isinstance(checks, list) or not checks or not all(isinstance(check, str) for check in checks):
-        raise GateError(f"Pilot migration has no usable checks_after: {repository}#{pr}")
-    return tuple(checks), head
-
 
 def merged_repositories(repositories: list[dict]) -> list[dict]:
     """Drop a stage's `excluded` entry for a repository another stage processed."""
@@ -73,8 +50,7 @@ def rollout(arguments: list[str]) -> None:
             or args.template_repository != "quokkify/ci-kit"
             or args.branch != "automation/copier-template-update"):
         raise GateError("Full rollout requires the public quokkify fleet and standard automation branch")
-    pilots = MIGRATE_PILOTS if args.migrate else tuple(PILOT_CHECKS)
-    pilot_branch = f"ci-kit/migrate-{args.migrate}" if args.migrate else None
+    pilots = tuple(PILOT_CHECKS)
     if any(pilot in args.exclude for pilot in pilots):
         raise GateError("Full rollout cannot exclude a pilot")
     target = fleet.resolve_template_ref(args.template_repository, args.template_ref, env=os.environ.copy())
@@ -115,8 +91,6 @@ def rollout(arguments: list[str]) -> None:
                 if len(report["repositories"]) != 1:
                     raise GateError(f"Pilot update did not produce one result: {repository}")
                 item = report["repositories"][0]
-                if args.migrate and item["status"] != "pull-request":
-                    raise GateError(f"Pilot {repository} cannot be migrated: status {item['status']}")
                 if item["repository"] != repository or item["status"] not in {"up-to-date", "pull-request"}:
                     raise GateError(f"Pilot was not updated or verified: {repository}")
                 pr = None
@@ -125,26 +99,20 @@ def rollout(arguments: list[str]) -> None:
                     if not match:
                         raise GateError(f"Unrecognized pilot PR: {repository}")
                     pr = int(match[1])
-                extra = {}
-                if args.migrate:
-                    contexts, expected_head = pilot_migration(repository, pr)
-                    extra = {"contexts": contexts, "branch": pilot_branch}
-                snapshot = current_snapshot(repository, pr, **({"branch": pilot_branch} if args.migrate else {}))
-                if args.migrate and snapshot[0] != expected_head:
-                    raise GateError(f"Pilot PR head moved since its marker was written: {repository}#{pr}")
+                snapshot = current_snapshot(repository, pr)
                 timeout = PILOT_TIMEOUTS.get(repository, DEFAULT_PILOT_TIMEOUT)
-                sha = verify_pilot(repository, pr, target, timeout=timeout, expected_snapshot=snapshot, **extra)
-                verified.append((repository, pr, snapshot, extra))
+                sha = verify_pilot(repository, pr, target, timeout=timeout, expected_snapshot=snapshot)
+                verified.append((repository, pr, snapshot))
                 gates.append({"repository": repository, "revision": sha, "base_revision": snapshot[1],
                               "merge_revision": snapshot[2], "pull_request": pr, "result": "success"})
             # Recheck earlier pilots immediately before fanout: waiting on a later
             # pilot must not make stale heads count as current evidence.
             if fleet.resolve_template_commit(args.template_repository, target, env=os.environ.copy()) != template_sha:
                 raise GateError("Template tag changed before fanout")
-            for repository, pr, snapshot, extra in verified:
-                if current_snapshot(repository, pr, **({"branch": extra["branch"]} if extra else {})) != snapshot:
+            for repository, pr, snapshot in verified:
+                if current_snapshot(repository, pr) != snapshot:
                     raise GateError(f"Pilot changed before fanout: {repository}")
-                if verify_pilot(repository, pr, target, timeout=0, expected_snapshot=snapshot, **extra) != snapshot[0]:
+                if verify_pilot(repository, pr, target, timeout=0, expected_snapshot=snapshot) != snapshot[0]:
                     raise GateError(f"Pilot changed before fanout: {repository}")
             remaining = [*base]
             for repository in pilots:
