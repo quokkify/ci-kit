@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -165,9 +166,21 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
     return findings
 
 
-def _rollback(repo: Path, head: str) -> None:
+def _ignored(repo: Path) -> set[str]:
+    listing = _git(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
+    return {path for path in listing.split("\0") if path}
+
+
+def _rollback(repo: Path, head: str, ignored: set[str]) -> None:
+    """Restore head and remove what the migration created, keeping ignored files that existed before it."""
     _git(repo, "reset", "-q", "--hard", head, check=False)
     _git(repo, "clean", "-qfd", check=False)
+    for path in _ignored(repo) - ignored:
+        target = repo / path
+        if target.is_dir() and not target.is_symlink():
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            target.unlink(missing_ok=True)
 
 
 def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None) -> MigrateResult:
@@ -190,6 +203,9 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
         return fail("CIK-MIGRATE-001", "not a git repository or git status failed")
     if status.stdout.strip():
         return fail("CIK-MIGRATE-001", "working tree is not clean")
+    stale = _rejects(repo)
+    if stale:
+        return fail("CIK-MIGRATE-001", f"reject files from an earlier run: {', '.join(stale)}; remove them first")
     legacy, error = load_answers(repo)
     if legacy is None:
         return fail("CIK-MIGRATE-002", error or f"cannot read {ANSWERS}", ANSWERS)
@@ -227,10 +243,11 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
 
     declarations = legacy_to_modules(jobs)
     head = _git(repo, "rev-parse", "HEAD")
+    ignored = _ignored(repo)
     commits: list[str] = []
 
     def abort(message: str) -> MigrateResult:
-        _rollback(repo, head)
+        _rollback(repo, head, ignored)
         return fail("CIK-UPDATE-001", f"{message}; rolled back to {head[:7]}")
 
     try:
@@ -262,7 +279,7 @@ def migrate(repo: Path, module: str, to: str, *, src_override: str | None = None
     plan = build_plan(repo, src_override=src_override)
     mismatches = equivalence_findings(jobs, plan)
     if mismatches:
-        _rollback(repo, head)
+        _rollback(repo, head, ignored)
         result.findings = mismatches
         return result
     result.checks_before = checks
