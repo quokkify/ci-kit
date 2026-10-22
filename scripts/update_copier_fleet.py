@@ -2358,6 +2358,8 @@ def enable_auto_merge(
         if pull_request.get("headRefOid") != expected:
             return "skipped", "pull request head not yet updated"
         if direct:
+            if pull_request.get("mergeable") != "MERGEABLE":
+                return "waiting", "mergeability not yet computed"
             verdict, why = checks_verdict(pull_request.get("statusCheckRollup"), now())
             if verdict != "ready":
                 return ("skipped" if verdict == "failed" else "waiting"), why

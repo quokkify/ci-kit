@@ -3566,6 +3566,13 @@ class AutoMergeTests(TestCase):
         self.assertEqual(outcome, {"state": "skipped", "reason": "failed checks: ci / gate"})
         self.assertEqual(commands, [])
 
+    def test_direct_path_waits_while_mergeability_is_not_computed(self) -> None:
+        for mergeable in ("UNKNOWN", None):
+            with self.subTest(mergeable=mergeable):
+                outcome, _, commands = self.enable(settings=self.settings(allow_auto_merge=False), pulls=[self.pull(mergeable=mergeable)])
+                self.assertEqual(outcome, {"state": "waiting", "reason": "mergeability not yet computed"})
+                self.assertEqual(commands, [])
+
     def test_direct_merge_rejected_head_is_failed(self) -> None:
         outcome, _, _ = self.enable(settings=self.settings(allow_auto_merge=False), merge=(1, "head moved"))
         self.assertEqual(outcome, {"state": "failed", "reason": "head moved"})
