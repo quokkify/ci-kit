@@ -253,6 +253,13 @@ class MigrateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             copier_copy_command("python", "v1", "src", {"-x": "1"})
 
+    def test_copy_command_passes_toolkit_version_only_to_core(self):
+        # copier.yml asks toolkit_version only for legacy and core; other modules ignore the value.
+        self.assertIn("toolkit_version=v1", copier_copy_command("core", "v1", "src"))
+        for module in ("java", "python", "node", "docker"):
+            with self.subTest(module=module):
+                self.assertFalse(any(arg.startswith("toolkit_version=") for arg in copier_copy_command(module, "v1", "src")))
+
     def test_copy_command_refuses_option_like_ref(self):
         with self.assertRaises(ValueError):
             copier_copy_command("core", "--evil", "src")
