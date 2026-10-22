@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -167,14 +168,15 @@ def _contract_findings(repo: Path, module: str, area_paths: tuple[str, ...], src
 
 def _ignored(repo: Path) -> set[str]:
     # Per file, not --directory: a collapsed directory entry changes once git clean removes an empty sibling.
-    # Read raw output: _git strips it, which would eat leading spaces of the first -z entry.
+    # Read raw bytes: _git strips its text output, which would eat leading spaces of the first -z entry,
+    # and text mode cannot decode every file name.
     result = subprocess.run(
         ["git", "ls-files", "-z", "--others", "--ignored", "--exclude-standard"],
-        cwd=repo, capture_output=True, text=True, check=False,
+        cwd=repo, capture_output=True, check=False,
     )
     if result.returncode:
-        raise RuntimeError(f"git ls-files failed: {result.stderr.strip()}")
-    return {path for path in result.stdout.split("\0") if path}
+        raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip()}")
+    return {os.fsdecode(path) for path in result.stdout.split(b"\0") if path}
 
 
 def _rollback(repo: Path, head: str, ignored: set[str]) -> None:
