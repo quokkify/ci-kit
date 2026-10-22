@@ -68,12 +68,12 @@ class HandoffTests(unittest.TestCase):
         repo = legacy_repo(handed_off=["validate"])
         self.assertEqual(codes(repo), ["CIK-HANDOFF-001"])
 
-    def test_handoff_002_module_without_handoff_names_migrate(self):
+    def test_handoff_002_module_without_handoff_points_to_modules_doc(self):
         repo = legacy_repo(handed_off=["validate"], core=True)
         edit_answers(repo, handed_off=[])
         findings = build_plan(repo, drift=False).findings
         self.assertEqual([f.code for f in findings], ["CIK-HANDOFF-002"])
-        self.assertIn("ci-kit migrate --module core", findings[0].message)
+        self.assertIn("docs/modules.md", findings[0].message)
 
     def test_handoff_003_unknown_or_malformed(self):
         for value in (["bogus"], "validate", [1], {"a": 1}):

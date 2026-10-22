@@ -38,33 +38,9 @@ The fleet inventory and the health report classify every repository by its answe
 
 ## Migrating one repository
 
-Update and migrate never share a PR. The repository must already be on the target ref (`needs-update-first` otherwise).
+The legacy-validate migration (`ci-kit migrate`, `update_copier_fleet.py --migrate`, `rollout_copier_fleet.py --migrate`) is retired: every consumer is already on the `core` module. Migration PRs that were already opened stay revertible; see [CIK-LEGACY-006](errors/CIK-LEGACY-006.md) for the path from a legacy `validate.yml` to modules and for the retirement details.
 
-The module set is derived from the jobs of the legacy `validate.yml`: a job calling a ci-kit language workflow becomes a component of `java`, `python` or `node`, a `docker` job becomes a `docker` component, and `core` is always installed. Modules are installed in the order core, java, python, node, docker, one commit each. Hand-edited `with:` inputs of those jobs are carried into the module declarations. After the commits, an equivalence check compares every migrated component with its legacy job (effective workflow inputs) and the set of jobs; on a mismatch the changes are rolled back and `CIK-MIGRATE-005` is reported.
-
-A job that cannot be mapped (hand-added steps, `needs`, `if`, an aggregator job such as `complete`, an unknown input) is `CIK-MIGRATE-005`. Fix it in a preparatory pull request first: move the hand-added steps or aggregator job into a project-owned workflow with its own required check, switch the required checks to it, merge, then migrate.
-
-1. Dry run, then the real run:
-
-   ```console
-   python scripts/update_copier_fleet.py --dry-run --repo OWNER/REPO --migrate core
-   python scripts/update_copier_fleet.py --repo OWNER/REPO --migrate core
-   ```
-
-   The dry run reports `would-migrate` for a repository it would migrate, without pushing. The real run opens a PR on `ci-kit/migrate-core` that removes legacy `validate.yml` and adds `core` and the modules derived from its jobs. For pilot rings use `rollout_copier_fleet.py --migrate core` (pilots: `MIGRATE_PILOTS` in that script).
-2. Wait for the PR check `ci / gate` to be green. The migration marker records `checks_before`: `Shared template contract` plus the exact contexts of the legacy jobs, `<job name> / ci` for each language component and `docker / build` for docker, and `checks_after`: `ci / gate`.
-3. Preview the required-checks switch, then apply it:
-
-   ```console
-   python scripts/migration_checks.py --pr OWNER/REPO#N --dry-run
-   python scripts/migration_checks.py --pr OWNER/REPO#N
-   ```
-
-   Keep the `removed` list from the output, for example in a PR comment: a rollback needs it, and a re-run reports `[]`. The `--dry-run` output carries the same list, which matters when the real run exits 2 after its PUT and prints no JSON.
-
-4. Merge the PR.
-
-The fleet never merges PRs and never edits rulesets. Required checks change only through `migration_checks.py`, run by a human with `GH_TOKEN` or `GITHUB_TOKEN` (never a CLI argument).
+The fleet never merges migration PRs and never edits rulesets. Required checks change only through `migration_checks.py`, run by a human with `GH_TOKEN` or `GITHUB_TOKEN` (never a CLI argument). Today that is only used to roll a recorded migration back.
 
 ### What `migration_checks.py` changes
 
@@ -100,19 +76,6 @@ Copier does not support downgrades, so rollback is a revert:
 
 3. Merge the revert PR.
 
-## Blockers
-
-Fleet statuses in migrate mode:
-
-- `would-migrate`: dry run only; the migration succeeded in a scratch clone and nothing was pushed.
-- `not-applicable`: no legacy answers, module already installed, or area already handed off.
-- `needs-update-first`: legacy `_commit` differs from the target ref. Run the normal fleet update first, or `ci-kit update --repo . --module legacy --to <ref>`, then migrate.
-- `migrate-rejected`: `ci-kit doctor` findings or a `CIK-MIGRATE-*` refusal, including `CIK-MIGRATE-005`. No branch, commit or PR is created and the run exits 1. The `detail` lists the codes; the JSON report holds `repositories[].migration` with findings and doctor output.
-
-Run directly, `ci-kit migrate` runs the `ci-kit plan` checks on the result after its commits (the hand-off commit plus one commit per module). If they report findings, the command exits 1 but keeps the commits in the repository; inspect them and undo with `git reset --hard <pre-migration HEAD>` (the parent of the first commit `ci-kit migrate` printed, `<first-sha>^`; or record `git rev-parse HEAD` before migrating) if needed. The fleet migrates in a throwaway clone, so a rejected migration leaves nothing behind there.
-
-`CIK-MIGRATE-003` means a file the module takes over (`.github/workflows/validate.yml`) was hand-edited and differs from the legacy render at the recorded `_commit`; the finding message holds the diff. For `validate.yml` the check is narrowed: `with:` edits of component jobs are migrated into the module declarations, while triggers, `permissions`, `concurrency`, `template-contract` and non-component jobs must still match the render. Revert such an edit to the rendered content, or move the custom logic into a project-owned workflow, then migrate again. See [CIK-MIGRATE-003](errors/CIK-MIGRATE-003.md); related runbooks: [001](errors/CIK-MIGRATE-001.md) (dirty tree), [002](errors/CIK-MIGRATE-002.md) (legacy `_commit` != target), [004](errors/CIK-MIGRATE-004.md) (nothing to hand off), [005](errors/CIK-MIGRATE-005.md) (jobs or inputs a module cannot reproduce, or an equivalence mismatch).
-
 ## The `Validate` name
 
 The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` triggers subscribe to that workflow name, and a test in the module suite pins it. Do not rename it.
@@ -126,6 +89,6 @@ The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` tr
 1. Register the area in `tools/ci_kit/handoff.py` (`AREAS`: owner module and legacy paths).
 2. Add the legacy paths to `_exclude` in `copier.yml` guarded by `'<area>' in (handed_off | default([]))`.
 3. Add the area to the `handed_off` validator's `allowed_handed_off` list in `copier.yml`.
-4. Add the module's required checks to `CHECKS_AFTER` in `tools/ci_kit/migrate.py`.
+4. Add the module's required checks to `CHECKS_AFTER` in `tools/ci_kit/migration_marker.py`.
 5. If handing off the area changes which checks a pilot publishes, extend `template_contexts` in `scripts/verify_ci_gate.py`. Today it handles `validate`: `CHECKS_AFTER["core"]` once handed off, otherwise the contexts of the pilot's legacy `validate.yml` jobs.
 6. Keep the registry, validator, and `_exclude` consistent; a test compares them.

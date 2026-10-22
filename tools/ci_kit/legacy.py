@@ -41,7 +41,7 @@ def handoff_findings(repo: Path, legacy_answers: dict | None, modules: set[str])
         elif name not in handed and area.module in modules:
             findings.append(Finding(
                 "CIK-HANDOFF-002", area.module,
-                f"module {area.module} is installed but area {name} is not handed off; run: ci-kit migrate --module {area.module}",
+                f"module {area.module} is installed but area {name} is not handed off; see docs/modules.md",
                 ANSWERS,
             ))
     return findings

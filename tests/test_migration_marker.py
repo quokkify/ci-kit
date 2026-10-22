@@ -132,7 +132,7 @@ class MarkerTests(unittest.TestCase):
         self.assertEqual(parse_marker(body), self.PAYLOAD)
 
     def test_findings_serialised(self):
-        findings = [{"code": "CIK-MIGRATE-001", "module": "core", "message": "dirty", "path": None}]
+        findings = [{"code": "CIK-CORE-002", "module": "core", "message": "dirty", "path": None}]
         data = parse_marker(self.render({**self.PAYLOAD, "findings": findings}))
         self.assertEqual(data["findings"], findings)
 

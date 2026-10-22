@@ -8,9 +8,7 @@ Legacy .copier-answers.yml lists an area in handed_off, but the module that owns
 
 ## Fix
 
-```bash
-ci-kit migrate --module core --repo . --to <REF>
-```
+The `ci-kit migrate` command is retired; see [CIK-LEGACY-006](CIK-LEGACY-006.md) for the migration path.
 Or remove the area from handed_off if the hand-off was not intended.
 
 ## Example

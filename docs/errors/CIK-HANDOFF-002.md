@@ -8,10 +8,8 @@ The module renders a file that the legacy template also owns, so both would writ
 
 ## Fix
 
-```bash
-ci-kit migrate --module core --repo . --to <REF>
-```
-This adds the area to handed_off in .copier-answers.yml.
+The `ci-kit migrate` command is retired; see [CIK-LEGACY-006](CIK-LEGACY-006.md).
+Handing the area off means adding it to handed_off in .copier-answers.yml.
 
 ## Example
 
