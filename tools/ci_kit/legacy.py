@@ -11,7 +11,7 @@ from .plan import Finding
 ANSWERS = ".copier-answers.yml"
 REQUIRED_ANSWERS = ("_src_path", "_commit", "toolkit_version")
 HEX = "0123456789abcdef"
-LAST_LEGACY_VALIDATE = "v3.7.0"
+LAST_LEGACY_VALIDATE = "v3.8.0"
 
 
 def load_answers(repo: Path) -> tuple[dict | None, str | None]:

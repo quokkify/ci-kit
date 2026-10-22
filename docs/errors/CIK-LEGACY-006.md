@@ -10,12 +10,12 @@ The `ci-kit migrate` command that moved `validate.yml` to `core` is removed from
 
 ## Fix
 
-Migrate with the last release whose legacy template still renders `validate.yml`: v3.7.0.
+Migrate with the last release whose legacy template still renders `validate.yml`: v3.8.0.
 
 ```bash
-python -m pip install "git+https://github.com/quokkify/ci-kit@v3.7.0"
-ci-kit update --repo . --module legacy --to v3.7.0
-ci-kit migrate --module core --repo . --to v3.7.0
+python -m pip install "git+https://github.com/quokkify/ci-kit@v3.8.0"
+ci-kit update --repo . --module legacy --to v3.8.0
+ci-kit migrate --module core --repo . --to v3.8.0
 ```
 
 `ci-kit migrate` hands `validate` off, installs `core` and the language modules derived from the legacy `validate.yml` jobs, one commit each. Open a pull request with these commits and switch the base branch's required checks from the legacy Validate job names to `ci / gate` before you merge. Then update to the current release as usual (the generated `copier-update.yml` workflow, or `ci-kit update --repo . --to <current release>` with the current ci-kit CLI).
