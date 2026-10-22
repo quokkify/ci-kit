@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.6.1](https://github.com/quokkify/ci-kit/compare/v3.6.0...v3.6.1) (2026-10-22)
+
+
+### 🐛 Bug Fixes
+
+* **rollout:** map handed-off component checks to ci / gate for pilots ([#465](https://github.com/quokkify/ci-kit/issues/465)) ([71897f9](https://github.com/quokkify/ci-kit/commit/71897f902f8db4d04b87b22a44450f0b6e29ccd2))
+
+
+### 📦 Dependencies
+
+* **analyze:** update github/codeql-action/analyze digest to 9b32540 ([#461](https://github.com/quokkify/ci-kit/issues/461)) ([3e88c86](https://github.com/quokkify/ci-kit/commit/3e88c86cdeb199f8fedd2dfd13a46fa85c1d1945))
+* **github-actions:** update github actions non-major updates ([#462](https://github.com/quokkify/ci-kit/issues/462)) ([9344e06](https://github.com/quokkify/ci-kit/commit/9344e06b1f4661518cb4fa1a9b3dc112b04cf71f))
+* **init:** update github/codeql-action/init digest to 9b32540 ([#463](https://github.com/quokkify/ci-kit/issues/463)) ([caa43c4](https://github.com/quokkify/ci-kit/commit/caa43c4051965891a0f37345305b9acb1a2c3991))
+* **renovate:** update renovate to v44.172.1 ([#447](https://github.com/quokkify/ci-kit/issues/447)) ([6bf45eb](https://github.com/quokkify/ci-kit/commit/6bf45eb294cfb63d75f459d1c8c6505509bcaca9))
+
 ## [3.6.0](https://github.com/quokkify/ci-kit/compare/v3.5.0...v3.6.0) (2026-10-21)
 
 
