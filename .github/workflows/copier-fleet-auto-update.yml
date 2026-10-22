@@ -40,6 +40,11 @@ on:
         type: boolean
         required: false
         default: false
+      merge-ready:
+        description: Also run the daily merge-ready pass (merges eligible template-update PRs). Pair with dry-run to skip the write update.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -132,7 +137,7 @@ jobs:
       # Runs after the dry-run audit, and still runs when the audit found drift or a failure:
       # merging ready PRs is independent of whether other repositories are behind.
       - name: Merge ready template updates
-        if: ${{ !cancelled() && github.event.schedule == '17 4 * * 0,2-6' }}
+        if: ${{ !cancelled() && (github.event.schedule == '17 4 * * 0,2-6' || inputs.merge-ready) }}
         env:
           GH_TOKEN: ${{ secrets.FLEET_UPDATE_TOKEN }}
         run: |
