@@ -2394,16 +2394,35 @@ def answers_file_name(module: str) -> str:
     return ANSWERS_FILE if module == LEGACY_MODULE else f".copier-answers.{module}.yml"
 
 
+def answers_at(repository: Repository, ref: str, *, env: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Parse each root answers file at ref, keyed by file name."""
+    return {
+        answers_file_name(module): parse_answers(text)
+        for module, text in fetch_answers_files(repository.name_with_owner, env=env, ref=ref).items()
+    }
+
+
+def answers_commit(answers: dict[str, Any]) -> str | None:
+    commit = answers.get("_commit")
+    return commit.strip() if isinstance(commit, str) and commit.strip() else None
+
+
 def answers_versions(repository: Repository, ref: str, *, env: dict[str, str]) -> dict[str, str | None]:
     """Map each root answers file at ref to its _commit."""
-    versions: dict[str, str | None] = {}
-    for module, text in fetch_answers_files(repository.name_with_owner, env=env, ref=ref).items():
-        commit = parse_answers(text).get("_commit")
-        versions[answers_file_name(module)] = commit.strip() if isinstance(commit, str) and commit.strip() else None
-    return versions
+    return {file: answers_commit(answers) for file, answers in answers_at(repository, ref, env=env).items()}
 
 
-def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str, str]) -> Result:
+def trusted_answers_source(file: str, answers: dict[str, Any], expected_template: str) -> bool:
+    source = answers.get("_src_path")
+    if not isinstance(source, str):
+        return False
+    if file == ANSWERS_FILE:
+        expected = normalize_template_source(expected_template)
+        return expected is not None and normalize_template_source(source) == expected
+    return bool(TRUSTED_SRC_RE.fullmatch(source))
+
+
+def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str, str], expected_template: str) -> Result:
     """Evaluate and merge the open automation PR without running Copier or pushing."""
     name = repository.name_with_owner
     pulls = gh_json(["pr", "list", "--repo", name, "--head", branch, "--state", "open", "--json", "url,headRefOid"], env=env)
@@ -2416,33 +2435,49 @@ def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str
     head_oid = pull.get("headRefOid") if isinstance(pull, dict) else None
     if not isinstance(url, str) or not isinstance(head_oid, str) or not COMMIT_SHA_PATTERN.fullmatch(head_oid):
         raise FleetUpdateError("open pull request has no usable URL or head commit")
+
+    def skipped(reason: str) -> Result:
+        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": reason})
+
     try:
-        base = answers_versions(repository, repository.default_branch, env=env)
-        head = answers_versions(repository, head_oid, env=env)
+        base = answers_at(repository, repository.default_branch, env=env)
+        head = answers_at(repository, head_oid, env=env)
     except UnsafeAnswersFileError as exc:
         return Result(name, "unsafe-answers-file", str(exc))
     differ = sorted(set(base) ^ set(head))
     if differ:
-        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": f"answers files differ: {', '.join(differ)}"})
+        return skipped(f"answers files differ: {', '.join(differ)}")
     if not base:
-        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": "no answers files"})
+        return skipped("no answers files")
+    for file in sorted(base):
+        if (
+            not trusted_answers_source(file, base[file], expected_template)
+            or not trusted_answers_source(file, head[file], expected_template)
+            or base[file].get("_src_path") != head[file].get("_src_path")
+        ):
+            return skipped(f"untrusted template source in {file}")
     modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base if file != ANSWERS_FILE)
     if ANSWERS_FILE in base:
         primary = ANSWERS_FILE
     else:
         primary = answers_file_name("core" if "core" in modules else modules[0])
-    rows = [
-        {"module": module, "from": base[answers_file_name(module)] or ""}
-        for module in modules
-        if answers_file_name(module) != primary
-    ]
+    target = answers_commit(head[primary])
+    rows: list[dict[str, str]] = []
+    for module in modules:
+        file = answers_file_name(module)
+        if file == primary:
+            continue
+        head_commit = answers_commit(head[file])
+        if head_commit != target:
+            return skipped(f"module {module} head {head_commit} does not match target {target}")
+        rows.append({"module": module, "from": answers_commit(base[file]) or ""})
     merge = enable_auto_merge(
         repository,
         url,
         branch=branch,
-        head=None,
-        applied=base[primary] or "",
-        target=head[primary],
+        head=head_oid,
+        applied=answers_commit(base[primary]) or "",
+        target=target,
         requested_template_ref=None,
         env=env,
         modules=rows,
@@ -2964,7 +2999,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 continue
             try:
                 if args.merge_ready:
-                    result = merge_ready_repository(repository, branch=branch, env=env)
+                    result = merge_ready_repository(repository, branch=branch, env=env, expected_template=args.template_repository)
                 elif args.migrate:
                     result = migrate_repository(
                         repository,

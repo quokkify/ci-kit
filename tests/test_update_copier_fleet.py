@@ -4010,15 +4010,26 @@ class MergeReadyTests(TestCase):
     BASE = {".copier-answers.yml": "v3.2.0", ".copier-answers.core.yml": "v3.2.0"}
     UPDATED = {".copier-answers.yml": "v3.3.0", ".copier-answers.core.yml": "v3.3.0"}
 
-    def merge_ready(self, *, pulls=None, base=None, head=None):
+    TRUSTED = "gh:quokkify/ci-kit"
+
+    def answers(self, versions, sources=None):
+        sources = sources or {}
+        return {file: {"_commit": commit, "_src_path": sources.get(file, self.TRUSTED)} for file, commit in versions.items()}
+
+    def merge_ready(self, *, pulls=None, base=None, head=None, base_sources=None, head_sources=None):
         pulls = [{"url": self.URL, "headRefOid": self.HEAD}] if pulls is None else pulls
-        versions = {"main": self.BASE if base is None else base, self.HEAD: self.UPDATED if head is None else head}
+        parsed = {
+            "main": self.answers(self.BASE if base is None else base, base_sources),
+            self.HEAD: self.answers(self.UPDATED if head is None else head, head_sources),
+        }
         outcome = {"state": "merged", "reason": f"merged {self.HEAD}"}
         with mock.patch.object(fleet, "gh_json", return_value=pulls) as gh_mock, \
-             mock.patch.object(fleet, "answers_versions", side_effect=lambda _, ref, **__: versions[ref]), \
+             mock.patch.object(fleet, "answers_at", side_effect=lambda _, ref, **__: parsed[ref]), \
              mock.patch.object(fleet, "enable_auto_merge", return_value=outcome) as merge_mock, \
              mock.patch.object(fleet, "run") as run_mock:
-            result = fleet.merge_ready_repository(self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={})
+            result = fleet.merge_ready_repository(
+                self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY,
+            )
         self.gh_mock, self.merge_mock, self.run_mock = gh_mock, merge_mock, run_mock
         return result
 
@@ -4057,8 +4068,53 @@ class MergeReadyTests(TestCase):
         self.assertEqual(kwargs["branch"], fleet.DEFAULT_BRANCH)
         self.assertEqual((kwargs["applied"], kwargs["target"]), ("v3.2.0", "v3.3.0"))
         self.assertEqual(kwargs["modules"], [{"module": "core", "from": "v3.2.0"}])
-        self.assertIsNone(kwargs["head"])
+        self.assertEqual(kwargs["head"], self.HEAD)
         self.assertIsNone(kwargs["requested_template_ref"])
+
+    def test_merge_binds_to_the_inspected_head(self) -> None:
+        moved = "e" * 40
+        pull = {"state": "OPEN", "baseRefName": "main", "mergeable": "MERGEABLE", "headRefOid": moved,
+                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH,
+                "statusCheckRollup": []}
+
+        def fake_gh_json(arguments, **_):
+            if arguments[:2] == ["pr", "list"]:
+                return [{"url": self.URL, "headRefOid": self.HEAD}]
+            if arguments[:2] == ["pr", "view"]:
+                return pull
+            return {"allow_auto_merge": True, "allow_squash_merge": True}
+
+        parsed = {"main": self.answers(self.BASE), self.HEAD: self.answers(self.UPDATED)}
+        with mock.patch.object(fleet, "gh_json", side_effect=fake_gh_json), \
+             mock.patch.object(fleet, "answers_at", side_effect=lambda _, ref, **__: parsed[ref]), \
+             mock.patch.object(fleet, "run") as run_mock, \
+             mock.patch.object(fleet.time, "sleep"):
+            result = fleet.merge_ready_repository(
+                self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY,
+            )
+        self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "pull request head not yet updated"})
+        self.assertFalse(any("merge" in call.args[0] for call in run_mock.call_args_list))
+
+    def test_module_head_version_must_match_the_target(self) -> None:
+        result = self.merge_ready(
+            base={".copier-answers.core.yml": "v3.2.0", ".copier-answers.java.yml": "v3.1.0"},
+            head={".copier-answers.core.yml": "v3.3.0", ".copier-answers.java.yml": "v4.0.0"},
+        )
+        self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "module java head v4.0.0 does not match target v3.3.0"})
+        self.merge_mock.assert_not_called()
+
+    def test_untrusted_template_sources_are_skipped(self) -> None:
+        core, legacy = ".copier-answers.core.yml", ".copier-answers.yml"
+        cases = (
+            ({"head_sources": {core: "gh:evil/ci-kit"}}, core),
+            ({"base_sources": {legacy: "gh:evil/template"}, "head_sources": {legacy: "gh:evil/template"}}, legacy),
+            ({"head_sources": {core: "https://github.com/quokkify/ci-kit"}}, core),
+        )
+        for overrides, file in cases:
+            with self.subTest(overrides=overrides):
+                result = self.merge_ready(**overrides)
+                self.assertEqual(result.auto_merge, {"state": "skipped", "reason": f"untrusted template source in {file}"})
+                self.merge_mock.assert_not_called()
 
     def test_module_only_repository_uses_the_primary_module_versions(self) -> None:
         self.merge_ready(
@@ -4112,6 +4168,7 @@ class MergeReadyTests(TestCase):
         merge_ready_mock.assert_called_once()
         self.assertEqual(merge_ready_mock.call_args.args, (self.REPOSITORY,))
         self.assertEqual(merge_ready_mock.call_args.kwargs["branch"], fleet.DEFAULT_BRANCH)
+        self.assertEqual(merge_ready_mock.call_args.kwargs["expected_template"], fleet.DEFAULT_TEMPLATE_REPOSITORY)
         process_mock.assert_not_called()
         clone_mock.assert_not_called()
         resolve_mock.assert_not_called()
