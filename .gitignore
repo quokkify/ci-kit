@@ -7,3 +7,6 @@ dist/
 .gradle/
 target/
 .tmp/
+
+# oh-my-claudecode runtime state
+.omc/
