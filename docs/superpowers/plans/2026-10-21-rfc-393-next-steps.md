@@ -11,8 +11,7 @@
 | | Состояние |
 |---|---|
 | ci-kit | модули `core`, `java`, `python`, `node`, `docker` (#452); `ci-kit migrate` для репозиториев с компонентами (#454); релизы до v3.6.1 |
-| На модулях | 11 из 12 (11 + новый archgate): волна 1 (7 × `core`), knowledge (`core`), skills (`core` + `python`), marketdesk (`core` + `java` + `node` + `docker`, marketdesk#418), q4j (`core`, q4j#781) |
-| Осталось на legacy | archgate (новый, `java:.`; миграция отдельно) |
+| На модулях | 12 из 12 (11 + новый archgate): волна 1 (7 × `core`), knowledge (`core`), skills (`core` + `python`), marketdesk (`core` + `java` + `node` + `docker`, marketdesk#418), q4j (`core`, q4j#781), archgate (`core` + `java`, archgate#5) |
 | Раскатка | v3.6.1 по всем 12 (11 fleet PR + knowledge#70) без ручных правок; волна 2 закрыта (§11) |
 
 ## 1. Раскатка v3.6.0 и проверка Allure (сделано 2026-10-22)
@@ -22,7 +21,7 @@
 - [x] Проверить последний запуск `copier-fleet-auto-update.yml`: pilots (gh-pages-subdir-action, skills, q4j) → fan-out без ошибок.
 - [x] Смёржить зелёные fleet PR (squash, только `CLEAN`).
 - [x] Пока идёт раскатка, ничего не мёржить в pilot-репозитории: gate останавливается с `Pilot base is behind the current target branch` и требует перезапуска.
-- [x] **quokkify/archgate** — новый, 12-й потребитель (legacy, v3.3.0, компонент `java:.`). Раскатка v3.6.0 не смогла запушить ветку: `Permission to quokkify/archgate.git denied` (403) — токену раскатки (`FLEET_UPDATE_TOKEN`) не выдан доступ к репозиторию. Выдать доступ и перезапустить `copier-fleet-auto-update.yml` с `repository=quokkify/archgate`, `template-ref=<текущий тег>`. Его миграция на модули — отдельно (java-компонент, через `ci-kit migrate`, как marketdesk/q4j). Доступ выдан, archgate#3 смёржен.
+- [x] **quokkify/archgate** — новый, 12-й потребитель (legacy, v3.3.0, компонент `java:.`). Раскатка v3.6.0 не смогла запушить ветку: `Permission to quokkify/archgate.git denied` (403) — токену раскатки (`FLEET_UPDATE_TOKEN`) не выдан доступ к репозиторию. Выдать доступ и перезапустить `copier-fleet-auto-update.yml` с `repository=quokkify/archgate`, `template-ref=<текущий тег>`. Его миграция на модули — отдельно (java-компонент, через `ci-kit migrate`, как marketdesk/q4j). Доступ выдан, archgate#3 смёржен. Мигрирован archgate#5; ruleset `main` создан (`CodeQL`, `gitleaks`, `ci / gate`).
 - [x] knowledge (приватный, вне раскатки): `python scripts/update_copier_fleet.py --org quokkify --repo quokkify/knowledge --template-ref v3.6.0 --write` (с `GH_TOKEN`). knowledge#66 смёржен.
 
 ### 1.2 Проверка Allure после v3.6.0 (#450, исправлено #460)
