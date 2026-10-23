@@ -18,6 +18,8 @@ ci-kit consumers move from the single legacy Copier template to modules (`core` 
 
 A new repository is `core` plus any of `security`, `release`, `allure` and `renovate` plus one language module per stack. The legacy template is transitional: it stays until v4.0.0, where it is removed together with `migrate-legacy`.
 
+Until v4.0.0, `core` looks for the legacy `.copier-answers.yml` beside its own answers, so a hand-run `copier copy` or `copier update` on a repository without it prints a `MissingFileWarning` for `.copier-answers.yml`. The warning is harmless: `core` then owns every base file.
+
 A language declaration is `schema_version: 1` plus `components`, one mapping per component. Required fields: `id` (stable job identifier), `name` (display name), `path` (component directory, no `..` segment or glob characters), and the language version (`java_version` for `java`). Every other field is optional and mirrors an input of the module's reusable workflow in snake_case (for example `run_lint`, `test_command`, `timeout_minutes`); every `*_version` is a string such as `"3.12"`, and unknown keys are rejected. `docker` components need only `id`; `name`, `context`, `dockerfile` and `target` are optional.
 
 The language version is optional in a declaration, but new projects pin it: the default answers of `python` and `node` set `python_version` and `node_version` to the workflow default. If a declaration omits it, the workflow default applies and can change with a ci-kit release. A docker `dockerfile` is resolved from the repository root, not from `context`.

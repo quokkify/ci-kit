@@ -54,18 +54,20 @@ my-project/
 ├── docs/ci-kit.md      # installed modules, doctor check, update steps
 └── .github/
     ├── pull_request_template.md
-    ├── renovate.json            # if renovate
-    ├── allure/                  # if allure_report
-    ├── release-please/          # if release_please
-    ├── scripts/                 # if release_please
+    ├── renovate.json            # if the renovate module is installed
+    ├── allure/                  # if the allure module is installed
+    ├── release-please/          # if the release module is installed
+    ├── scripts/                 # if the release module is installed
     └── workflows/
         ├── validate.yml         # core module
         ├── copier-update.yml
-        ├── codeql.yml           # if codeql
-        ├── gitleaks.yml         # if gitleaks
-        ├── allure-report.yml    # if allure_report
-        └── release.yml          # if release_please
+        ├── codeql.yml           # security module with codeql
+        ├── gitleaks.yml         # security module with gitleaks
+        ├── allure-report.yml    # if the allure module is installed
+        └── release.yml          # if the release module is installed
 ```
+
+Until v4.0.0, files of an area legacy still owns follow its flags (`codeql`, `gitleaks`, `release_please`, `allure_report`, `renovate`) until `ci-kit migrate-legacy` hands the area to its module.
 
 Open `docs/ci-kit.md` in the generated project and read the installed modules, the `ci-kit doctor` check and the update steps. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
 
