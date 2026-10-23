@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.11.2](https://github.com/quokkify/ci-kit/compare/v3.11.1...v3.11.2) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** verify pilot CodeQL by workflow, not the code-scanning check ([#502](https://github.com/quokkify/ci-kit/issues/502)) ([84fbaf6](https://github.com/quokkify/ci-kit/commit/84fbaf6dec36b5d367366b86a64a3998fd424323))
+
 ## [3.11.1](https://github.com/quokkify/ci-kit/compare/v3.11.0...v3.11.1) (2026-10-23)
 
 
