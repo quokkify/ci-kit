@@ -3851,6 +3851,18 @@ class ReleaseHelperDriftTests(TestCase):
         with self.assertRaisesRegex(fleet.FleetUpdateError, "customized changes"):
             fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})
 
+    @mock.patch.object(fleet, "run")
+    def test_helper_is_read_from_the_release_module(self, run_mock: mock.Mock) -> None:
+        helper = self.repository / ".github/scripts/enrich_release_notes.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("canonical helper\n", encoding="utf-8")
+        run_mock.return_value = type("Result", (), {"stdout": "canonical helper\n"})()
+        fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})
+        self.assertIn(
+            "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja",
+            run_mock.call_args.args[0],
+        )
+
     def test_missing_release_helper_fails_when_feature_is_enabled(self) -> None:
         with self.assertRaisesRegex(fleet.FleetUpdateError, "release_please is enabled"):
             fleet.verify_release_helper(self.repository, "quokkify/ci-kit", "v2.23.0", env={})

@@ -31,6 +31,7 @@ PR_SHA = "b" * 40
 class API:
     def __init__(self):
         self.applied = "v2.0.0"
+        self.legacy_missing = False
         self.rule_checks = [{"context": "Validate", "integration_id": 7}]
         self.classic = {"checks": []}
         self.pulls = []
@@ -58,6 +59,11 @@ class API:
         if endpoint == "repos/acme/demo/commits/main":
             self.commit_calls += 1
             return {"sha": PR_SHA if self.default_stale and self.commit_calls > 1 else DEFAULT_SHA}
+        if "/contents/.copier-answers.yml?ref=" in endpoint and self.legacy_missing:
+            raise RuntimeError("HTTP 404")
+        if "/contents/.copier-answers.core.yml?ref=" in endpoint:
+            assert f"ref={DEFAULT_SHA}" in endpoint
+            return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
         if "/contents/.copier-answers.yml?ref=" in endpoint:
             assert f"ref={DEFAULT_SHA}" in endpoint
             return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
@@ -95,6 +101,13 @@ class HealthTests(TestCase):
         self.assertEqual(result["default_ci"]["checks"][0]["app_id"], 7)
         self.assertIsNone(result["pull_request"])
         self.assertEqual(result["pull_request_observation"]["status"], "observed")
+
+    def test_health_reads_core_answers_without_legacy(self):
+        api = API()
+        api.legacy_missing = True
+        result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", api, now=NOW)
+        self.assertEqual(result["applied_template_version"], "v2.0.0")
+        self.assertEqual(result["adoption"], "current")
 
     def test_open_pr_is_not_adoption(self):
         api = API()

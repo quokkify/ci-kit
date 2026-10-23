@@ -34,6 +34,20 @@ LEGACY_VALIDATE = (b"jobs:\n  template-contract:\n    name: Shared template cont
                    b"  app:\n    name: App Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v1.2.3\n")
 
 
+def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
+    def read(endpoint):
+        if endpoint.endswith(f".copier-answers.yml?ref={SHA}"):
+            raise gate.GateError("HTTP 404")
+        if "/.copier-answers.security.yml?" in endpoint:
+            content = security
+        elif "/.copier-answers.core.yml?" in endpoint:
+            content = b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n"
+        else:
+            raise AssertionError(endpoint)
+        return {"content": base64.b64encode(content).decode()}
+    return read
+
+
 def pilot_api(answers=b"", validate=LEGACY_VALIDATE):
     def read(endpoint):
         content = validate if "/validate.yml?" in endpoint else b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
@@ -211,6 +225,25 @@ class PilotGateTests(unittest.TestCase):
             with self.subTest(handed_off=handed_off), patch.object(gate, "api", side_effect=pilot_api()) as read:
                 self.assertEqual(gate.template_contexts(REPO, SHA, handed_off), ("Shared template contract", "App Python / ci"))
                 self.assertIn(f"/contents/.github/workflows/validate.yml?ref={SHA}", read.call_args.args[0])
+
+    def test_template_contexts_for_module_repo(self):
+        for security, expected in ((b"codeql: true\ngitleaks: true\n", {"ci / gate", "CodeQL", "gitleaks"}),
+                                   (b"codeql: false\ngitleaks: true\n", {"ci / gate", "gitleaks"}),
+                                   (b"codeql: true\ngitleaks: false\n", {"ci / gate", "CodeQL"})):
+            with self.subTest(security=security), patch.object(gate, "api", side_effect=module_only_api(security)):
+                self.assertEqual(set(gate.template_contexts(REPO, SHA, (), modules_only=True)), expected)
+
+    def test_pilot_without_legacy_uses_core_answers(self):
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=module_only_api()), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
+            self.assertEqual(ready.call_args.args[2], ("gitleaks", "ci / gate", "CodeQL"))
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=module_only_api()):
+            with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
+                gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
 
     def test_explicit_contexts_skip_template_derivation(self):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \

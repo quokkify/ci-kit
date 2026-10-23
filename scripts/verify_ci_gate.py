@@ -159,12 +159,34 @@ PILOT_TIMEOUTS = {
 }
 
 
-def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...]) -> tuple[str, ...]:
-    """The template's checks at sha: checks_after once validate is handed off, else the legacy validate.yml jobs."""
+def module_answers(repository: str, sha: str, module: str) -> dict:
+    import base64
+    import yaml
+
+    contents = api(f"repos/{repository}/contents/.copier-answers.{module}.yml?ref={sha}")
+    try:
+        answers = yaml.safe_load(base64.b64decode(contents["content"]).decode())
+    except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+        raise GateError(f"Cannot read {module} answers: {repository}@{sha}") from exc
+    return answers if isinstance(answers, dict) else {}
+
+
+def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False) -> tuple[str, ...]:
+    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs."""
     import base64
     import yaml
     from ci_kit.migration_marker import CHECKS_AFTER, check_contexts
 
+    if modules_only:
+        contexts = list(CHECKS_AFTER["core"])
+        try:
+            security = module_answers(repository, sha, "security")
+        except GateError:
+            return tuple(contexts)
+        for answer, context in (("codeql", "CodeQL"), ("gitleaks", "gitleaks")):
+            if security.get(answer) is True:
+                contexts.append(context)
+        return tuple(contexts)
     if "validate" in handed_off:
         return tuple(CHECKS_AFTER["core"])
     contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
@@ -277,7 +299,13 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
     if expected_snapshot is not None and snapshot != expected_snapshot:
         raise GateError(f"Pilot changed before fanout: {repository}; update or rerun the PR")
     sha = snapshot[0]
-    contents = api(f"repos/{repository}/contents/.copier-answers.yml?ref={sha}")
+    modules_only = False
+    try:
+        contents = api(f"repos/{repository}/contents/.copier-answers.yml?ref={sha}")
+    except GateError:
+        # A repository fully handed off to modules has no legacy answers file.
+        modules_only = True
+        contents = api(f"repos/{repository}/contents/.copier-answers.core.yml?ref={sha}")
     try:
         answers = yaml.safe_load(base64.b64decode(contents["content"]).decode())
     except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
@@ -291,7 +319,7 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
         handed_off = answers.get("handed_off")
         if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
             handed_off = []
-        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off)))
+        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off), modules_only=modules_only))
     ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
     wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
     if current_snapshot(repository, pr, branch) != snapshot:
