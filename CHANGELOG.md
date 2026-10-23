@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.11.0](https://github.com/quokkify/ci-kit/compare/v3.10.0...v3.11.0) (2026-10-23)
+
+
+### ✨ Features
+
+* **modules:** add gitleaks, codeql and allure repository options ([#497](https://github.com/quokkify/ci-kit/issues/497)) ([577923c](https://github.com/quokkify/ci-kit/commit/577923c92cff167254b1a13541811ce49614a4ea))
+
 ## [3.10.0](https://github.com/quokkify/ci-kit/compare/v3.9.0...v3.10.0) (2026-10-23)
 
 
