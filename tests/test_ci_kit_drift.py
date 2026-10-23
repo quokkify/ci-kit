@@ -126,8 +126,9 @@ class DriftTests(unittest.TestCase):
         findings = drift_findings(self.repo, self.answers, "--help")
         self.assertEqual(set(codes(findings)), {"CIK-CORE-010"})
 
-    def test_render_command_is_trusted_and_separates_args(self):
-        # core reads the legacy answers through _external_data, which Copier gates behind --trust.
+    def test_render_command_is_untrusted_and_separates_args(self):
+        # Copier lets core read the seeded legacy answers inside the resolved destination without --trust;
+        # drift runs on fork pull requests, so the render never trusts the template or runs its tasks.
         real = subprocess.run
         seen = []
 
@@ -137,7 +138,8 @@ class DriftTests(unittest.TestCase):
 
         with mock.patch("ci_kit.drift.subprocess.run", spy), tempfile.TemporaryDirectory() as tmp:
             render_module(self.answers["java"], Path(tmp) / "r", self.src)
-        self.assertIn("--trust", seen[0])
+        self.assertNotIn("--trust", seen[0])
+        self.assertIn("--skip-tasks", seen[0])
         self.assertEqual(seen[0][-3], "--")
 
     def test_changed_path_before_ref_is_still_drift(self):

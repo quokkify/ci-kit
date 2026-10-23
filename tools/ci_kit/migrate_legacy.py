@@ -161,7 +161,7 @@ def _copy(repo: Path, module: str, to: str, src: str, data: dict) -> str | None:
         data_file = Path(tmp) / "data.yml"
         data_file.write_text(yaml.safe_dump({**data, "module": module, "toolkit_version": to}))
         return _run([
-            *_copier(), "copy", "--defaults", "--quiet", "--trust", "--overwrite", "--skip-tasks",
+            *_copier(), "copy", "--defaults", "--quiet", "--overwrite", "--skip-tasks",
             "--vcs-ref", to, "--data-file", str(data_file), "-a", f".copier-answers.{module}.yml", "--", src, ".",
         ], repo)
 

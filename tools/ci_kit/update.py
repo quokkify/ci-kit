@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -141,8 +143,11 @@ def run_update(
             return updates, [Finding("CIK-UPDATE-001", module, f"untrusted template source: {src}", path.name)]
         data = {"toolkit_version": to}
         try:
-            command = copier_update_command(path.name, to, trust=True, data=data, exclude=_legacy_owned(repo, module))
-            result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT)
+            command = copier_update_command(path.name, to, trust=module == LEGACY, data=data, exclude=_legacy_owned(repo, module))
+            # Resolved: Copier renders the old and new copies in $TMPDIR and, without --trust, rejects reading the
+            # legacy answers through a symlinked temporary directory (macOS /var) as a path outside the destination.
+            env = {**os.environ, "TMPDIR": str(Path(tempfile.gettempdir()).resolve())}
+            result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT, env=env)
         except ValueError as error:
             return updates, [Finding("CIK-UPDATE-001", module, str(error), path.name)]
         except subprocess.TimeoutExpired:

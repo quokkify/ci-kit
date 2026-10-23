@@ -35,7 +35,9 @@ def _copier() -> list[str]:
 
 def render_module(answers_path: Path, dest: Path, src_override: str | None = None) -> dict[str, bytes]:
     answers_path = Path(answers_path)
-    dest = Path(dest)
+    # Resolved: Copier rejects reading the seeded legacy answers through a symlinked
+    # temporary directory (macOS /var, /tmp) as a path outside the destination.
+    dest = Path(dest).resolve()
     try:
         answers = yaml.safe_load(answers_path.read_text())
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
@@ -65,7 +67,7 @@ def render_module(answers_path: Path, dest: Path, src_override: str | None = Non
         try:
             result = subprocess.run(
                 [
-                    *_copier(), "copy", "--defaults", "--quiet", "--trust",
+                    *_copier(), "copy", "--defaults", "--quiet", "--skip-tasks",
                     "--vcs-ref", commit, "--data-file", str(data_file),
                     "-a", answers_path.name, "--", src, str(dest),
                 ],

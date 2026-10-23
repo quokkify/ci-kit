@@ -105,6 +105,7 @@ Legacy исключает файлы переданных областей че�
 4. Эквивалентность (`CIK-MIGRATE-005`): каждый файл, который до миграции рендерил legacy, после неё побайтно тот же, кроме:
    - `codeql.yml`: множество языков CodeQL до (вывод из `components`/`codeql_languages`) равно множеству после (`ci-kit plan` + override);
    - `docs/ci-kit.md`: новый текст (D6);
+   - `.github/workflows/copier-update.yml`: версия `core` отличается по замыслу (закреплена drift-проверкой `build_plan`);
    - стартовые файлы (`_skip_if_exists`): не меняются вообще.
    И `build_plan` без находок.
 5. Любой отказ после первого коммита — откат к исходному HEAD (как `_rollback` в #482), включая ignored-файлы, созданные миграцией.
@@ -119,7 +120,7 @@ Legacy исключает файлы переданных областей че�
 | Инструмент | Изменение |
 |---|---|
 | `copier-update.yml` (core) | `ci-kit update --repo . --to <ref>` по всем answers-файлам; legacy-шаг только если файл есть; release helper — из `modules/release/template` |
-| `ci-kit update` | порядок `legacy` (если есть), `core`, остальные модули; `--trust` для всех (модули теперь рендерят workflows) |
+| `ci-kit update` | порядок `legacy` (если есть), `core`, остальные модули; модули обновляются без `--trust`, `--trust` остаётся только у legacy (Copier читает legacy answers внутри resolved-назначения без доверия) |
 | `fleet_health.py` | `_commit` из `.copier-answers.core.yml`, если legacy нет |
 | `verify_ci_gate.py` | `verify_pilot`: core answers без legacy; `template_contexts`: проверки модулей (`ci / gate`, `CodeQL`, `gitleaks` по флагам security) |
 | `update_copier_fleet.py` | audit/inventory из ответов модулей; primary answers = core; legacy update только при наличии файла |

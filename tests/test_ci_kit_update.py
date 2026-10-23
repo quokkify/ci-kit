@@ -196,7 +196,7 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(git(repo, "log", "-1", "--format=%ae"), "ci-kit@users.noreply.github.com")
 
 
-    def test_every_module_update_is_trusted(self):
+    def test_module_updates_are_not_trusted(self):
         repo = modules_repo("core", "java")
         calls = []
         real = subprocess.run
@@ -209,7 +209,7 @@ class UpdateTests(unittest.TestCase):
         with mock.patch("ci_kit.update.subprocess.run", side_effect=spy):
             run_update(repo, "v99.1.0", src_override=self.src)
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all("--trust" in call for call in calls))
+        self.assertFalse(any("--trust" in call for call in calls))
 
     def test_core_owns_base_files_without_legacy(self):
         repo = modules_repo("core")
