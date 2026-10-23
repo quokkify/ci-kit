@@ -234,6 +234,17 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('codeql=["actions"]', out.splitlines())
 
+    def test_plan_codeql_includes_discovered_but_unloaded_modules(self):
+        repo = rendered_repo("core", "node")
+        (repo / ".ci/modules/node.yml").write_text("schema_version: 99\n")
+        (repo / ".copier-answers.java.yml").write_text("module: java\n")
+        code, out, _ = self.run_cli("plan", "--repo", str(repo), "--no-drift")
+        lines = dict(line.split("=", 1) for line in out.splitlines() if "=" in line and not line.startswith("::"))
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(lines["modules"]), ["core"])
+        self.assertEqual(json.loads(lines["node"]), [])
+        self.assertEqual(json.loads(lines["codeql"]), ["actions", "javascript-typescript", "java-kotlin"])
+
     def test_plan_no_drift_skips_drift_render(self):
         repo = rendered_repo("core", "python")
         with mock.patch("ci_kit.drift.drift_findings", side_effect=AssertionError("drift rendered")):

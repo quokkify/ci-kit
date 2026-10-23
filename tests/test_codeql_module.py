@@ -174,6 +174,18 @@ class CodeqlLanguageTests(unittest.TestCase):
         self.assertEqual(json.loads(planned), ["actions", "python", "javascript-typescript"])
         self.assertEqual(select_languages("[]", planned), ["actions", "python", "javascript-typescript"])
 
+    def test_invalid_declaration_keeps_its_codeql_language(self) -> None:
+        # Regression guard: an unloaded language module used to drop out of the codeql output.
+        repo = modules_repo({
+            "java": [{"id": "app-java", "name": "App Java", "path": "."}],
+            "python": [{"id": "app-python", "name": "App Python", "path": "."}],
+        })
+        result, planned = planned_output(repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("CIK-CORE-004", result.stdout + result.stderr)
+        self.assertEqual(json.loads(planned), ["actions", "python", "java-kotlin"])
+        self.assertEqual(select_languages("[]", planned), ["actions", "python", "java-kotlin"])
+
     def test_missing_plan_output_fails_selection(self) -> None:
         result, outputs = run_step("languages", {"OVERRIDE": "[]", "PLAN_NEEDED": "true", "PLANNED": ""})
         self.assertNotEqual(result.returncode, 0)

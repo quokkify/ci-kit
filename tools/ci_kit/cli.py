@@ -55,7 +55,10 @@ def _plan(args: argparse.Namespace) -> int:
     plan = build_plan(Path(args.repo), drift=not args.no_drift, src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules)}
     outputs.update({module: _compact(plan.matrices.get(module, [])) for module in WORKFLOWS})
-    outputs["codeql"] = _compact(["actions", *(language for module, language in CODEQL_LANGUAGES.items() if module in plan.modules)])
+    # Every discovered module counts, loaded or not: a broken declaration must
+    # not silently drop its language from security scanning.
+    discovered = set().union(*discover(Path(args.repo)))
+    outputs["codeql"] = _compact(["actions", *(language for module, language in CODEQL_LANGUAGES.items() if module in discovered)])
     if args.github_output:
         outputs["codes"] = _compact(list(dict.fromkeys(finding.code for finding in plan.findings)))
         outputs["commits"] = _compact(_template_commits(Path(args.repo)))
