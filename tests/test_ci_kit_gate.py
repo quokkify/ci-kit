@@ -50,6 +50,11 @@ class GateTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual([r.result for r in rows], ["ok", "ok"])
 
+    def test_module_without_job_is_not_gated(self):
+        ok, rows = evaluate(["core", "java", "release"], needs(all="success"), [], REF)
+        self.assertTrue(ok)
+        self.assertEqual([r.module for r in rows], ["core", "java"])
+
     def test_cancelled_fails(self):
         ok, rows = evaluate(["core", "java"], needs(java="cancelled"), [], REF)
         self.assertFalse(ok)

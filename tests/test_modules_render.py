@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from module_test_support import ROOT, make_template_repo
+from ci_kit.handoff import AREAS
 from ci_kit.plan import build_plan
 from ci_kit.inputs import load_inputs, module_fields
 
@@ -99,8 +100,24 @@ class ModuleRenderTests(unittest.TestCase):
     def test_java_renders_exact_file_set(self) -> None:
         self.assertEqual(self.rendered_files("java"), {".copier-answers.java.yml", ".ci/modules/java.yml"})
 
+    def test_release_module_renders_area_files(self) -> None:
+        self.assertEqual(self.rendered_files("release"), {
+            ".copier-answers.release.yml", ".ci/modules/release.yml",
+            *AREAS["release"].legacy_paths,
+        })
+        dest = self.render("release", "release_mode=manifest", "toolkit_version=v99.0.0")
+        answers = yaml.safe_load((dest / ".copier-answers.release.yml").read_text())
+        self.assertEqual(
+            {key: answers[key] for key in ("module", "release_mode", "toolkit_version")},
+            {"module": "release", "release_mode": "manifest", "toolkit_version": "v99.0.0"},
+        )
+        self.assertNotIn("project_name", answers)
+        workflow = (dest / ".github/workflows/release.yml").read_text()
+        self.assertIn("mode: manifest", workflow)
+        self.assertIn("release-please.yml@v99.0.0", workflow)
+
     def test_declarations_match_schemas(self) -> None:
-        for module in ("core", "java"):
+        for module in ("core", "java", "release"):
             with self.subTest(module=module):
                 jsonschema.validate(yaml.safe_load(self.decl(module)), self.load_schema(module, 1))
 
