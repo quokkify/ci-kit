@@ -344,27 +344,54 @@ class RolloutTests(unittest.TestCase):
         self.assertLess(events.index("verify"), len(events) - 1)
         self.assertEqual(events[-1], "update")
 
-    def test_rollout_passes_add_module_to_every_stage(self):
+    def run_add_module_rollout(self, status, detail=""):
         calls = []
+        gate_calls = []
 
         def update(arguments, report):
             calls.append(arguments)
             repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
-            return {"schema_version": 6, "repositories": [{"repository": repository, "status": "up-to-date", "detail": ""}]}
+            return {"schema_version": 6, "repositories": [{"repository": repository, "status": status, "detail": detail or
+                    f"https://github.com/{repository}/pull/7"}]}
+
+        def snapshot(repository, pr, **kwargs):
+            gate_calls.append(("snapshot", kwargs))
+            return (SHA, OTHER, OTHER)
+
+        def verify(repository, pr, target, timeout, expected_snapshot=None, **kwargs):
+            gate_calls.append(("verify", kwargs))
+            return SHA
 
         with tempfile.TemporaryDirectory() as temporary, \
              patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
              patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
              patch.object(rollout, "wait_until"), \
              patch.object(rollout, "run_update", side_effect=update), \
-             patch.object(rollout, "verify_pilot", return_value=SHA), \
-             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")), \
+             patch.object(rollout, "verify_pilot", side_effect=verify), \
+             patch.object(rollout, "current_snapshot", side_effect=snapshot), \
              patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
             rollout.rollout(["--write", "--public-only", "--add-module", "labels",
                              "--json-report", str(Path(temporary) / "report.json")])
-        self.assertGreater(len(calls), 1)
-        for arguments in calls:
-            self.assertEqual(arguments[arguments.index("--add-module") + 1], "labels")
+        return calls, gate_calls
+
+    def test_rollout_passes_add_module_to_every_stage(self):
+        for status in ("up-to-date", "pull-request"):
+            with self.subTest(status=status):
+                calls, _ = self.run_add_module_rollout(status)
+                self.assertGreater(len(calls), 1)
+                for arguments in calls:
+                    self.assertEqual(arguments[arguments.index("--add-module") + 1], "labels")
+
+    def test_regression_add_module_pilot_pr_is_gated_on_the_add_branch(self):
+        """Regression guard: a pilot PR from ci-kit/add-labels must not stop the ring on PR identity."""
+        _, gate_calls = self.run_add_module_rollout("pull-request")
+        self.assertTrue(gate_calls)
+        for kind, kwargs in gate_calls:
+            self.assertEqual(kwargs, {"branch": "ci-kit/add-labels"}, kind)
+
+    def test_other_pilot_statuses_stop_the_add_module_rollout(self):
+        with self.assertRaises(gate.GateError):
+            self.run_add_module_rollout("add-rejected", "CIK-ADD-004")
 
     def test_merge_ready_bypasses_the_pilot_gate(self):
         arguments = ["--write", "--public-only", "--auto-merge", "--merge-ready"]

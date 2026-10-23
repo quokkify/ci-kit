@@ -2637,6 +2637,10 @@ def process_repository(
         raise RepositoryProcessError(str(exc), inventory) from exc
 
 
+def add_module_branch(module: str) -> str:
+    return f"ci-kit/add-{module}"
+
+
 def add_module_title(module: str) -> str:
     return f"chore(ci-kit): add {module} module"
 
@@ -2750,7 +2754,7 @@ def add_module_repository(
         return Result(name, "up-to-date")
     if dry_run:
         return Result(name, "would-add", module)
-    branch = f"ci-kit/add-{module}"
+    branch = add_module_branch(module)
     squash_to_base(destination, base)
     head = push_automation_branch(repository, destination, branch=branch, env=env, message=add_module_title(module))
     url = add_module_pull_request(repository, branch=branch, module=module, target_ref=target_ref, head=head, env=env)
