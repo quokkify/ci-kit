@@ -1681,7 +1681,7 @@ def allure_publisher_workflow_errors(path: Path) -> list[str]:
                                   "path": ".toolkit", "persist-credentials": False}:
         errors.append(f"{label}: extractor checkout must follow the called workflow commit")
     extractor = next((step for step in download_steps if isinstance(step, dict) and "run" in step), {})
-    if (extractor.get("run") != "python .toolkit/template/.github/allure/safe_extract.py.jinja"
+    if (extractor.get("run") != "python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja"
             or extractor.get("env", {}).get("ARTIFACT_MANIFEST") != "${{ needs.resolve.outputs.artifact_manifest }}"
             or any("actions/download-artifact@" in str(step.get("uses", "")) for step in download_steps)):
         errors.append(f"{label}: source artifacts must pass bounded extraction before materialization")
@@ -2130,7 +2130,7 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
                 and "${{ runner.temp }}/allure-expanded" in report_text
                 and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
                 in report_text
-                and "python .toolkit/template/.github/allure/safe_extract.py.jinja" in report_text
+                and "python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja" in report_text
                 and "repository: ${{ job.workflow_repository }}" in report_text
                 and "ref: ${{ job.workflow_sha }}" in report_text,
                 f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",

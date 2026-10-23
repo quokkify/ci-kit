@@ -54,6 +54,13 @@ class ReleaseParityTests(unittest.TestCase):
         legacy = {"release_please": True, "release_mode": "manifest"}
         self.assertEqual(module_answers(legacy), {"release": {"release_mode": "manifest"}})
 
+    def test_enrich_release_notes_copies_identical(self) -> None:
+        name = "enrich_release_notes.py.jinja"
+        self.assertEqual(
+            (ROOT / "template/.github/scripts" / name).read_bytes(),
+            (ROOT / "modules/release/template/.github/scripts" / name).read_bytes(),
+        )
+
     def test_release_not_installed_without_release_please(self) -> None:
         self.assertNotIn("release", module_answers({"release_please": False, "release_mode": "single"}))
 
@@ -69,6 +76,59 @@ class ReleaseParityTests(unittest.TestCase):
             any(f.code in ("CIK-CORE-011", "CIK-HANDOFF-002") and "release" in f.module.split(",") for f in findings),
             [(f.code, f.module, f.message) for f in findings],
         )
+
+
+class AllureParityTests(unittest.TestCase):
+    def test_allure_parity(self) -> None:
+        scenarios = scenarios_with("allure_report")
+        self.assertTrue(scenarios)
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                assert_parity("allure", "allure", scenario)
+
+    def test_safe_extract_copies_identical(self) -> None:
+        name = "safe_extract.py.jinja"
+        self.assertEqual(
+            (ROOT / "template/.github/allure" / name).read_bytes(),
+            (ROOT / "modules/allure/template/.github/allure" / name).read_bytes(),
+        )
+
+    def test_module_answers_allure_auto_resolves(self) -> None:
+        base = {"allure_report": True, "allure_source": "auto", "project_name": "p"}
+        component = module_answers({**base, "components": [{"type": "python"}]})
+        self.assertEqual(component["allure"]["allure_source"], "component")
+        external = module_answers({**base, "components": []})
+        self.assertEqual(external["allure"]["allure_source"], "external")
+        self.assertEqual(external["allure"]["project_name"], "p")
+
+    def test_allure_not_installed_without_allure_report(self) -> None:
+        self.assertNotIn("allure", module_answers({"allure_report": False}))
+
+
+class RenovateParityTests(unittest.TestCase):
+    def test_renovate_parity(self) -> None:
+        scenarios = scenarios_with("renovate")
+        self.assertTrue(scenarios)
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                assert_parity("renovate", "renovate", scenario)
+
+    def test_module_answers_renovate_explicit_presets(self) -> None:
+        legacy = {"renovate": True, "renovate_presets": ["default"], "renovate_config_repository": "o/r", "components": [{"type": "python"}]}
+        self.assertEqual(
+            module_answers(legacy)["renovate"],
+            {"renovate_presets": ["default"], "renovate_config_repository": "o/r"},
+        )
+
+    def test_module_answers_renovate_derives_default_presets(self) -> None:
+        legacy = {"renovate": True, "components": [{"type": "python"}, {"type": "node"}], "docker": True}
+        self.assertEqual(
+            module_answers(legacy)["renovate"]["renovate_presets"],
+            ["default", "github-actions", "python", "javascript", "docker"],
+        )
+
+    def test_renovate_not_installed_without_renovate(self) -> None:
+        self.assertNotIn("renovate", module_answers({"renovate": False}))
 
 
 if __name__ == "__main__":

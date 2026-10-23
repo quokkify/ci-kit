@@ -116,8 +116,21 @@ class ModuleRenderTests(unittest.TestCase):
         self.assertIn("mode: manifest", workflow)
         self.assertIn("release-please.yml@v99.0.0", workflow)
 
+    def test_allure_and_renovate_modules_render_area_files(self) -> None:
+        for module in ("allure", "renovate"):
+            with self.subTest(module=module):
+                self.assertEqual(self.rendered_files(module), {
+                    f".copier-answers.{module}.yml", f".ci/modules/{module}.yml",
+                    *AREAS[module].legacy_paths,
+                })
+
+    def test_allure_module_rejects_auto_source(self) -> None:
+        result, _ = self.copy("allure", "allure_source=auto", "toolkit_version=v99.0.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("'auto' is not in ['component', 'external']", result.stderr)
+
     def test_declarations_match_schemas(self) -> None:
-        for module in ("core", "java", "release"):
+        for module in ("core", "java", "release", "allure", "renovate"):
             with self.subTest(module=module):
                 jsonschema.validate(yaml.safe_load(self.decl(module)), self.load_schema(module, 1))
 

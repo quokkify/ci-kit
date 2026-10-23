@@ -17,4 +17,6 @@ MODULES: dict[str, ModuleInfo] = {
     "node": ModuleInfo(("core",), "node", True),
     "docker": ModuleInfo(("core",), "docker", False, fields=("context", "dockerfile", "target")),
     "release": ModuleInfo(("core",)),
+    "allure": ModuleInfo(("core",)),
+    "renovate": ModuleInfo(("core",)),
 }
