@@ -9,7 +9,7 @@ export default {
         reportName: {{ (project_name ~ " test report") | tojson }},
         singleFile: false,
         reportLanguage: "en",
-        groupBy: {{ allure_group_by | tojson }},
+        groupBy: {{ allure_group_by | default(['epic', 'feature', 'story']) | tojson }},
       },
     },
   },

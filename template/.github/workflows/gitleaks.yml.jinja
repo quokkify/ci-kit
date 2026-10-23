@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   scan:
-    name: {{ gitleaks_job_name }}
+    name: {{ gitleaks_job_name | default('gitleaks') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -59,11 +59,11 @@ jobs:
           install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"
       - name: Scan repository
         run: |
-{%- if gitleaks_scan == 'history' %}
+{%- if (gitleaks_scan | default('history')) == 'history' %}
           "$RUNNER_TEMP/bin/gitleaks" git --redact --no-banner --config "$RUNNER_TEMP/gitleaks.toml" --gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore" .
 {%- endif %}
           "$RUNNER_TEMP/bin/gitleaks" dir --redact --no-banner --config "$RUNNER_TEMP/gitleaks.toml" --gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore" .
-{%- if gitleaks_aggregate %}
+{%- if gitleaks_aggregate | default(false) %}
 
   complete:
     name: Gitleaks

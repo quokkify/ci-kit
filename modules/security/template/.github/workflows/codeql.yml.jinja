@@ -24,7 +24,7 @@ jobs:
     uses: quokkify/ci-kit/.github/workflows/codeql-analysis.yml@{{ toolkit_version }}
     with:
       languages-override: {{ codeql_languages | to_json | tojson }}
-{%- if codeql_aggregate %}
+{%- if codeql_aggregate | default(false) %}
 
   complete:
     name: CodeQL
