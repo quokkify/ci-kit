@@ -23,7 +23,7 @@ jobs:
       security-events: write
     uses: quokkify/ci-kit/.github/workflows/codeql-analysis.yml@{{ toolkit_version }}
     with:
-      languages-override: {{ codeql_languages | to_json | tojson }}
+      languages-override: {{ ("'" ~ (codeql_languages | to_json) ~ "'") if codeql_languages else '"[]"' }}
 {%- if codeql_aggregate | default(false) %}
 
   complete:

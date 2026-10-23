@@ -145,6 +145,27 @@ class CodeqlLanguageTests(unittest.TestCase):
         self.assertEqual(select_languages('["go"]', '["actions","python"]'), ["go"])
         self.assertEqual(select_languages("[]", '["actions","python"]'), ["actions", "python"])
 
+    def test_override_renders_the_way_prettier_formats_it(self) -> None:
+        # Regression guard: a double-quoted escaped JSON string failed `prettier --check` in consumers.
+        for override, line in (
+            ([], 'languages-override: "[]"'),
+            (["actions", "java-kotlin"], "languages-override: '[\"actions\", \"java-kotlin\"]'"),
+        ):
+            with self.subTest(override=override):
+                tree = security_tree({"codeql": True, "codeql_languages": override})
+                text = tree[CODEQL].decode()
+                self.assertIn(f"      {line}\n", text)
+                value = yaml.safe_load(text)["jobs"]["codeql"]["with"]["languages-override"]
+                self.assertEqual(value, json.dumps(override))
+                if override and shutil.which("npx"):
+                    out = mkdtemp("codeql-prettier-")
+                    (out / "codeql.yml").write_bytes(tree[CODEQL])
+                    result = subprocess.run(
+                        ["npx", "--yes", "prettier@3", "--check", str(out / "codeql.yml")],
+                        capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_override_is_parsed_not_string_compared(self) -> None:
         self.assertEqual(select_languages("[ ]", '["actions","python"]'), ["actions", "python"])
         self.assertEqual(run_step("override", {"OVERRIDE": "[ ]"})[1], {"plan": "true"})
