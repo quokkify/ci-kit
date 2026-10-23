@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -396,9 +397,14 @@ def migrate_legacy(repo: Path, to: str, *, src_override: str | None = None) -> M
         return failed(str(error))
     except BaseException as error:
         # Includes KeyboardInterrupt: the repository must never keep a half-applied migration.
-        problem = _rollback(repo, head, ignored, porcelain)
+        try:
+            problem = _rollback(repo, head, ignored, porcelain)
+        except Exception as rollback_error:
+            problem = f"rollback raised {rollback_error!r}"
         if problem:
-            error.add_note(f"rollback incomplete: {problem}; inspect the repository")
+            note = f"rollback incomplete: {problem}; inspect the repository"
+            error.add_note(note)
+            print(note, file=sys.stderr)
         raise
     if findings:
         return abort(findings)

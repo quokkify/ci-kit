@@ -29,11 +29,15 @@ def pilot_migration(repository: str, pr: int) -> tuple[tuple[str, ...], str]:
         )
         payload = json.loads(result.stdout)
         head = payload["headRefOid"]
-        checks = parse_marker(payload["body"])["checks_after"]
+        marker = parse_marker(payload["body"])
+        checks = marker["checks_after"]
+        commits = marker["commits"]
     except (subprocess.SubprocessError, ValueError, KeyError, TypeError) as exc:
         raise GateError(f"Pilot migration marker unavailable: {repository}#{pr}: {exc}") from exc
     if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
         raise GateError(f"Pilot PR head unavailable: {repository}#{pr}")
+    if not isinstance(commits, list) or not commits or commits[-1] != head:
+        raise GateError(f"Pilot migration marker does not name the PR head: {repository}#{pr}")
     if not isinstance(checks, list) or not checks or not all(isinstance(check, str) for check in checks):
         raise GateError(f"Pilot migration has no usable checks_after: {repository}#{pr}")
     return tuple(checks), head

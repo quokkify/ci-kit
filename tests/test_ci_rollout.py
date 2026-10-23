@@ -642,13 +642,15 @@ class MigrateLegacyRolloutTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_pilot_migration_parses_checks_after_and_head(self):
-        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "CodeQL"]}) + "\n```"
+        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "CodeQL"], "commits": [SHA]}) + "\n```"
         completed = type("Done", (), {"stdout": json.dumps({"body": body, "headRefOid": SHA})})()
         with patch.object(rollout.subprocess, "run", return_value=completed):
             self.assertEqual(rollout.pilot_migration(REPO, 5), (("ci / gate", "CodeQL"), SHA))
         for payload in ({"body": "no marker", "headRefOid": SHA},
                         {"body": body.replace("checks_after", "other"), "headRefOid": SHA},
-                        {"body": body, "headRefOid": "x"}):
+                        {"body": body, "headRefOid": "x"},
+                        {"body": body, "headRefOid": "b" * 40},
+                        {"body": body.replace(f'"commits": ["{SHA}"]', '"commits": []'), "headRefOid": SHA}):
             completed = type("Done", (), {"stdout": json.dumps(payload)})()
             with self.subTest(payload=payload), patch.object(rollout.subprocess, "run", return_value=completed):
                 with self.assertRaises(gate.GateError):

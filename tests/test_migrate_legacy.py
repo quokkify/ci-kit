@@ -213,6 +213,20 @@ class MigrateLegacyTests(unittest.TestCase):
     def test_any_exception_at_module_copy_rolls_back(self):
         self.failing_stage("module-copy", KeyError("boom"))
 
+    def test_rollback_that_raises_keeps_the_original_exception(self):
+        repo = self.repo()
+        real_run = migration._run
+
+        def update(command, repo_path):
+            real_run(command, repo_path)
+            raise KeyError("boom")
+
+        with mock.patch.object(migration, "_run", side_effect=update), \
+                mock.patch.object(migration, "_rollback", side_effect=OSError("disk")), \
+                self.assertRaises(KeyError) as raised:
+            self.migrate(repo)
+        self.assertTrue(any("rollback incomplete" in note for note in raised.exception.__notes__))
+
     def test_unrestorable_rollback_reports_a_distinct_finding(self):
         repo = self.repo()
         real_copy, real_git = migration._copy, migration._git

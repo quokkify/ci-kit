@@ -51,7 +51,7 @@ my-project/
 ├── .copier-answers.core.yml     # core module answers
 ├── .ci/modules/core.yml         # core module declaration
 ├── README.md                    # written once, then yours
-├── docs/ci-kit.md      # onboarding checklist, refreshed on update
+├── docs/ci-kit.md      # installed modules, doctor check, update steps
 └── .github/
     ├── pull_request_template.md
     ├── renovate.json            # if renovate
@@ -67,7 +67,7 @@ my-project/
         └── release.yml          # if release_please
 ```
 
-Open `docs/ci-kit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
+Open `docs/ci-kit.md` in the generated project and read the installed modules, the `ci-kit doctor` check and the update steps. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
 
 Java/q4j test automation is a separate template: see [quokkify/java-test-automation-template](https://github.com/quokkify/java-test-automation-template).
 
