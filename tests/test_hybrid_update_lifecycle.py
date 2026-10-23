@@ -217,5 +217,51 @@ class FleetHybridUpdateTests(HybridUpdateLifecycleTests):
         self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
 
 
+class FleetModuleOnlyUpdateTests(HybridUpdateLifecycleTests):
+    @unittest.skipUnless(shutil.which("copier"), "Copier is required for the module-only update integration")
+    def test_fleet_update_without_legacy_answers(self):
+        spec = importlib.util.spec_from_file_location("update_copier_fleet", ROOT / "scripts/update_copier_fleet.py")
+        fleet = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault(spec.name, fleet)
+        spec.loader.exec_module(fleet)
+        template = self.template
+        repo = Path(tempfile.mkdtemp(prefix="ci-kit-module-only-"))
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        git(repo, "init", "-q", "-b", "main")
+        git(repo, "config", "user.name", "test")
+        git(repo, "config", "user.email", "test@example.com")
+        entries = [{"id": "app", "name": "App", "path": "."}]
+        _copy_module(template, repo, "core", {})
+        _copy_module(template, repo, "security", {"codeql": True, "gitleaks": True})
+        _copy_module(template, repo, "release", {})
+        _copy_module(template, repo, "python", {QUESTIONS["python"]: entries})
+        canonical = "https://github.com/quokkify/ci-kit.git"
+        names = sorted(path.name for path in repo.glob(".copier-answers*.yml"))
+        self.assertEqual(names, [f".copier-answers.{m}.yml" for m in ("core", "python", "release", "security")])
+        for name in names:
+            path = repo / name
+            path.write_text(re.sub(r"^_src_path:.*$", f"_src_path: {canonical}", path.read_text(), flags=re.MULTILINE))
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "module-only fixture")
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+        with tempfile.TemporaryDirectory() as temporary:
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(Path(temporary).resolve()),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.file://{template}/.insteadOf",
+                "GIT_CONFIG_VALUE_0": canonical,
+            })
+            rows = fleet.apply_module_updates(repo, NEXT_REF, env=env)
+        self.assertEqual(sorted(row["module"] for row in rows), ["core", "python", "release", "security"])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        self.assertFalse((repo / ".copier-answers.yml").exists())
+        for name in names:
+            self.assertEqual(yaml.safe_load((repo / name).read_text())["_commit"], NEXT_REF, name)
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+        inventory = fleet.modules_inventory(NEXT_REF, ("core", "python", "release", "security"), repo)
+        self.assertEqual((inventory.codeql, inventory.release_please, inventory.docker), ("enabled", "enabled", "disabled"))
+
+
 if __name__ == "__main__":
     unittest.main()

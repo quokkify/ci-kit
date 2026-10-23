@@ -197,6 +197,16 @@ def gh_json(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
 
 
+def gh_json_or_none(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
+    """gh_json, but a confirmed HTTP 404 is None instead of an error."""
+    try:
+        return gh_json(arguments, env=env)
+    except FleetUpdateError as exc:
+        if "HTTP 404" in str(exc):
+            return None
+        raise
+
+
 def gh_json_lines(arguments: Sequence[str], *, env: dict[str, str]) -> list[Any]:
     """Read one JSON value per line, including paginated gh API output."""
     completed = run(["gh", *arguments], env=env)
@@ -871,17 +881,27 @@ def modules_inventory(commit: str, modules: Sequence[str], repository_path: Path
         if not is_regular_file(repository_path / path, repository_root=repository_path)
     )
     components = inferred_components(repository_path) or ("none",)
+    security_path = repository_path / ".copier-answers.security.yml"
+    security = (
+        parse_answers(security_path.read_text(encoding="utf-8"))
+        if "security" in modules and is_regular_file(security_path, repository_root=repository_path)
+        else {}
+    )
+
+    def module_state(enabled: bool) -> str:
+        return "enabled" if enabled else "disabled"
+
     return TemplateInventory(
         commit=commit,
         target_commit=None,
         components=tuple(components),
         baseline=f"{len(BASELINE_PATHS) - len(missing_baseline)}/{len(BASELINE_PATHS)}",
         missing_baseline=missing_baseline,
-        docker="unknown",
-        codeql="unknown",
-        allure_report="unknown",
-        release_please="unknown",
-        renovate="unknown",
+        docker=module_state("docker" in modules),
+        codeql=module_state(security.get("codeql") is True),
+        allure_report=module_state("allure" in modules),
+        release_please=module_state("release" in modules),
+        renovate=module_state("renovate" in modules),
         modules=tuple(modules),
         state="modules",
     )
@@ -2785,7 +2805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if health_module is not None and result.inventory is not None:
                 result = replace(result, health=health_module.collect_health(
                     repository.name_with_owner, repository.default_branch, template_ref,
-                    branch, lambda endpoint: gh_json(["api", "--method", "GET", endpoint], env=env),
+                    branch, lambda endpoint: gh_json_or_none(["api", "--method", "GET", endpoint], env=env),
                     health_exceptions.get(repository.name_with_owner),
                 ))
             results.append(result)

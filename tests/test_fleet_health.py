@@ -60,7 +60,7 @@ class API:
             self.commit_calls += 1
             return {"sha": PR_SHA if self.default_stale and self.commit_calls > 1 else DEFAULT_SHA}
         if "/contents/.copier-answers.yml?ref=" in endpoint and self.legacy_missing:
-            raise RuntimeError("HTTP 404")
+            return None
         if "/contents/.copier-answers.core.yml?ref=" in endpoint:
             assert f"ref={DEFAULT_SHA}" in endpoint
             return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
@@ -108,6 +108,18 @@ class HealthTests(TestCase):
         result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", api, now=NOW)
         self.assertEqual(result["applied_template_version"], "v2.0.0")
         self.assertEqual(result["adoption"], "current")
+
+    def test_non_404_legacy_error_does_not_fall_back_to_core(self):
+        api = API()
+        api.legacy_missing = True
+        original = api.__call__
+        def fail_legacy(endpoint):
+            if "/contents/.copier-answers.yml?ref=" in endpoint:
+                raise RuntimeError("HTTP 502")
+            return original(endpoint)
+        result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", fail_legacy, now=NOW)
+        self.assertIsNone(result["applied_template_version"])
+        self.assertEqual(result["adoption"], "unknown")
 
     def test_open_pr_is_not_adoption(self):
         api = API()

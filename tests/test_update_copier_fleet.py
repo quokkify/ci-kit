@@ -2576,6 +2576,20 @@ class ModuleProcessingTests(TestCase):
         self.assertEqual(result.inventory.modules, ("core", "java"))
         self.assertEqual(result.inventory.commit, "v3.0.0")
 
+    def test_module_only_inventory_is_derived_from_module_answers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".copier-answers.security.yml").write_text("codeql: true\ngitleaks: true\n", encoding="utf-8")
+            full = fleet.modules_inventory("v3.0.0", ("core", "security", "release", "docker"), root)
+            self.assertEqual((full.codeql, full.release_please, full.docker, full.allure_report, full.renovate),
+                             ("enabled", "enabled", "enabled", "disabled", "disabled"))
+            (root / ".copier-answers.security.yml").write_text("codeql: false\n", encoding="utf-8")
+            partial = fleet.modules_inventory("v3.0.0", ("core", "security", "allure", "renovate"), root)
+            self.assertEqual((partial.codeql, partial.allure_report, partial.renovate, partial.release_please),
+                             ("disabled", "enabled", "enabled", "disabled"))
+            bare = fleet.modules_inventory("v3.0.0", ("core",), root)
+            self.assertEqual(bare.codeql, "disabled")
+
     def test_pull_request_carries_the_module_table(self) -> None:
         cloned = {".copier-answers.core.yml": CORE_ANSWERS_TEXT}
         with mock.patch.object(fleet, "apply_module_updates", return_value=ROWS), \

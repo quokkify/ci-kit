@@ -35,9 +35,10 @@ LEGACY_VALIDATE = (b"jobs:\n  template-contract:\n    name: Shared template cont
 
 
 def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
-    def read(endpoint):
+    def read(endpoint, *, missing_ok=False):
         if endpoint.endswith(f".copier-answers.yml?ref={SHA}"):
-            raise gate.GateError("HTTP 404")
+            assert missing_ok
+            return None
         if "/.copier-answers.security.yml?" in endpoint:
             content = security
         elif "/.copier-answers.core.yml?" in endpoint:
@@ -49,7 +50,7 @@ def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
 
 
 def pilot_api(answers=b"", validate=LEGACY_VALIDATE):
-    def read(endpoint):
+    def read(endpoint, *, missing_ok=False):
         content = validate if "/validate.yml?" in endpoint else b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
         return {"content": base64.b64encode(content).decode()}
     return read
@@ -244,6 +245,36 @@ class PilotGateTests(unittest.TestCase):
              patch.object(gate, "api", side_effect=module_only_api()):
             with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
                 gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
+
+    def test_api_returns_none_only_for_a_confirmed_404(self):
+        def failing(stderr):
+            return subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+        with patch.object(gate.subprocess, "run", side_effect=failing("gh: Not Found (HTTP 404)")):
+            self.assertIsNone(gate.api("repos/a/b/contents/x", missing_ok=True))
+            with self.assertRaises(gate.GateError):
+                gate.api("repos/a/b/contents/x")
+        for error in (failing("gh: Bad Gateway (HTTP 502)"), subprocess.TimeoutExpired(["gh"], 45)):
+            with self.subTest(error=error), patch.object(gate.subprocess, "run", side_effect=error):
+                with self.assertRaises(gate.GateError):
+                    gate.api("repos/a/b/contents/x", missing_ok=True)
+
+    def test_transient_error_on_legacy_or_security_read_fails_closed(self):
+        def broken(path):
+            def read(endpoint, *, missing_ok=False):
+                if path in endpoint:
+                    raise gate.GateError("HTTP 502")
+                return module_only_api()(endpoint, missing_ok=missing_ok)
+            return read
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=broken(".copier-answers.yml?")):
+            with self.assertRaises(gate.GateError):
+                gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
+        with patch.object(gate, "api", side_effect=broken(".copier-answers.security.yml?")):
+            with self.assertRaises(gate.GateError):
+                gate.template_contexts(REPO, SHA, (), modules_only=True)
+        with patch.object(gate, "api", side_effect=module_only_api(b"- not\n- a mapping\n")):
+            with self.assertRaisesRegex(gate.GateError, "security answers"):
+                gate.template_contexts(REPO, SHA, (), modules_only=True)
 
     def test_explicit_contexts_skip_template_derivation(self):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
