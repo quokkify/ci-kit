@@ -169,6 +169,13 @@ class HandoffFindingsTests(unittest.TestCase):
         found = self.findings(["validate", "security"], {"core"})
         self.assertEqual([(code, module) for code, module, _ in found], [("CIK-HANDOFF-001", "security")])
 
+    def test_handed_off_disabled_feature_needs_no_module(self):
+        def found(answers):
+            return [(f.code, f.module) for f in handoff_findings(Path("."), {"handed_off": ["validate", "security", "renovate"], **answers}, {"core"})]
+
+        self.assertEqual(found({"codeql": False, "gitleaks": False, "renovate": False}), [])
+        self.assertEqual(found({"codeql": False, "gitleaks": True, "renovate": False}), [("CIK-HANDOFF-001", "security")])
+
     def test_hybrid_validate_with_core_render_is_clean(self):
         repo = legacy_repo(handed_off=["validate"], core=True)
         for path in ("README.md", "docs/ci-kit.md", ".github/workflows/copier-update.yml", ".github/pull_request_template.md"):

@@ -271,7 +271,12 @@ class BaseHandoffUpdateTests(unittest.TestCase):
         self.assertIn("## What this project received", (repo / "docs/ci-kit.md").read_text())
         self.assertIn("--skip-legacy", (repo / ".github/workflows/copier-update.yml").read_text())
 
-    def test_core_update_renders_base_after_handoff(self):
+    def test_core_update_from_release_without_base_renders_base_after_handoff(self):
+        """Only core moving from a release without base files (v99.0.0 here) to one with them.
+
+        A core release that already renders base files needs migrate-legacy instead
+        (tests/test_migrate_legacy.py); a bare legacy handoff plus update loses them there.
+        """
         repo = self.unmigrated()
         subprocess.run(
             [shutil.which("copier"), "update", "--trust", "--defaults", "--skip-tasks", "--vcs-ref", "v99.1.0",

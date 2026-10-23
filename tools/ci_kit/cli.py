@@ -103,6 +103,19 @@ def _update(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def _migrate_legacy(args: argparse.Namespace) -> int:
+    from .migrate_legacy import migrate_legacy, render_marker, result_payload
+
+    result = migrate_legacy(Path(args.repo), args.to, src_override=args.template_src)
+    for finding in result.findings:
+        print(format_finding(finding))
+    if not result.findings:
+        print(render_marker(result))
+    if args.json:
+        Path(args.json).write_text(json.dumps(result_payload(result), indent=2) + "\n", encoding="utf-8")
+    return 1 if result.findings else 0
+
+
 def _load_json(text: str, label: str) -> object:
     try:
         return json.loads(text)
@@ -196,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
     update.add_argument("--template-src")
     update.add_argument("--json")
     update.set_defaults(func=_update)
+    migrate_legacy = sub.add_parser("migrate-legacy")
+    migrate_legacy.add_argument("--repo", required=True)
+    migrate_legacy.add_argument("--to", required=True)
+    migrate_legacy.add_argument("--template-src")
+    migrate_legacy.add_argument("--json")
+    migrate_legacy.set_defaults(func=_migrate_legacy)
     gate = sub.add_parser("gate")
     gate.add_argument("--enabled", required=True)
     gate.add_argument("--needs", required=True)

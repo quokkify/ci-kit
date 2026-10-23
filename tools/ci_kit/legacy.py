@@ -12,6 +12,10 @@ ANSWERS = ".copier-answers.yml"
 REQUIRED_ANSWERS = ("_src_path", "_commit", "toolkit_version")
 HEX = "0123456789abcdef"
 LAST_LEGACY_VALIDATE = "v3.8.0"
+# Legacy feature flags per area: with all of them false legacy renders none of the area's files.
+AREA_FLAGS = {
+    "security": ("codeql", "gitleaks"), "release": ("release_please",), "allure": ("allure_report",), "renovate": ("renovate",),
+}
 
 
 def load_answers(repo: Path) -> tuple[dict | None, str | None]:
@@ -41,7 +45,10 @@ def handoff_findings(
     for name in sorted(AREAS):
         area = AREAS[name]
         if name in handed:
-            if area.module not in modules:
+            # A disabled feature has no files to own, so no module is needed for it.
+            flags = AREA_FLAGS.get(name, ())
+            disabled = bool(flags) and all(legacy_answers.get(flag) is False for flag in flags)
+            if area.module not in modules and not disabled:
                 findings.append(Finding("CIK-HANDOFF-001", area.module, f"area {name} is handed off but module {area.module} is not installed", ANSWERS))
             continue
         if area.module not in modules:
