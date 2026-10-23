@@ -34,6 +34,7 @@ def load_answers(repo: Path) -> tuple[dict | None, str | None]:
 def handoff_findings(
     repo: Path, legacy_answers: dict | None, modules: set[str], rendered: set[str] | None = None,
 ) -> list[Finding]:
+    # `ci-kit plan --no-drift` (CodeQL) passes rendered=None, so core/base double ownership is invisible there by design; Validate runs the full plan.
     if legacy_answers is None:
         return []
     handed = legacy_answers.get("handed_off", [])
