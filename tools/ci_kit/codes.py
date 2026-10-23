@@ -8,6 +8,7 @@ CODES: dict[str, str] = {
     "CIK-CORE-005": "Component id is declared more than once, or a component name is used more than once in a module",
     "CIK-CORE-010": "Module declaration drifted from its rendered template",
     "CIK-CORE-011": "Module-owned file drifted from its rendered template",
+    "CIK-CORE-012": "toolkit_version or _commit differs between answers files",
     "CIK-CORE-020": "Gate found a failing or missing module job",
     "CIK-HANDOFF-001": "Area is handed off but its owner module is not installed",
     "CIK-HANDOFF-002": "Module is installed but its area is not handed off",

@@ -161,6 +161,25 @@ def lifecycle_template_repo() -> Path:
     return repo
 
 
+BASE_PATHS = (".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md")
+
+
+def base_handoff_template_repo() -> Path:
+    """v99.0.0: core without the base area (as released before v3.10); v99.1.0: core with it."""
+    repo = make_template_repo(mkdtemp("ci-kit-base-"))
+    core = repo / "modules/core/template"
+    saved = {path: (core / f"{path}.jinja").read_bytes() for path in BASE_PATHS}
+    for path in BASE_PATHS:
+        (core / f"{path}.jinja").unlink()
+    _commit_all(repo, "core: no base area")
+    git(repo, "tag", "-f", "v99.0.0")
+    for path, content in saved.items():
+        (core / f"{path}.jinja").write_bytes(content)
+    _commit_all(repo, "core: base area")
+    git(repo, "tag", "v99.1.0")
+    return repo
+
+
 def overlap_template_repo() -> Path:
     repo = make_template_repo(mkdtemp("ci-kit-overlap-"))
     core = repo / "modules/core/template/.ci/modules/core.yml.jinja"

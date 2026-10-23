@@ -131,5 +131,36 @@ class RenovateParityTests(unittest.TestCase):
         self.assertNotIn("renovate", module_answers({"renovate": False}))
 
 
+class BaseParityTests(unittest.TestCase):
+    STARTERS = ("README.md", ".github/pull_request_template.md")
+
+    def test_base_parity(self) -> None:
+        template = shared_template_repo()
+        core = render_tree(template, None, {"module": "core", "toolkit_version": PIN})
+        self.assertTrue(set(AREAS["base"].legacy_paths) <= set(core))
+        scenarios = [name for name in (p.stem for p in sorted(SCENARIOS.glob("*.yml"))) if name not in scenarios_with("allure_report")]
+        self.assertTrue(scenarios)
+        for scenario in scenarios:
+            with self.subTest(scenario=scenario):
+                legacy = render_tree(template, SCENARIOS / f"{scenario}.yml", {"toolkit_version": PIN})
+                project = yaml.safe_load(legacy[".copier-answers.yml"])["project_name"]
+                expected = render_tree(template, None, {"module": "core", "toolkit_version": PIN, "project_name": project})
+                for path in self.STARTERS:
+                    self.assertEqual(expected[path], legacy[path], path)
+
+    def test_copier_update_keeps_legacy_step_behind_answers_file(self) -> None:
+        template = shared_template_repo()
+        core = render_tree(template, None, {"module": "core", "toolkit_version": PIN})[".github/workflows/copier-update.yml"].decode()
+        legacy = render_tree(template, SCENARIOS / "python.yml", {"toolkit_version": PIN})[".github/workflows/copier-update.yml"].decode()
+        guard = core.index("if [[ -f .copier-answers.yml ]]; then")
+        self.assertLess(guard, core.index('"${command[@]}" .'))
+        self.assertIn('ci-kit update "${update_args[@]}"', core)
+        self.assertIn("FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja", core)
+        self.assertNotIn("FETCH_HEAD:template/", core)
+        # Everything up to the legacy step is the legacy workflow verbatim.
+        prefix = legacy[: legacy.index("          python - <<'PY'")]
+        self.assertTrue(core.startswith(prefix))
+
+
 if __name__ == "__main__":
     unittest.main()

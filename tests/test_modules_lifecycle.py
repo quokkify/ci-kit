@@ -64,7 +64,8 @@ class LifecycleTests(unittest.TestCase):
     def test_update_java_only_changes_java_paths(self):
         update(self.repo, "java", "v99.1.0")
         self.assertEqual(changed_paths(self.repo), {".copier-answers.java.yml", ".ci/modules/java.yml"})
-        self.assertEqual(self.plan().findings, [])
+        # core stays on v99.0.0, so the plan reports the split release.
+        self.assertEqual([f.code for f in self.plan().findings], ["CIK-CORE-012"])
 
     def test_joint_update_changes_both_answers(self):
         update(self.repo, "core", "v99.1.0")
@@ -89,7 +90,7 @@ class LifecycleTests(unittest.TestCase):
         update(self.repo, "java", "v99.1.0")
         self.assertNotIn("<<<<<<<", path.read_text())
         self.assertEqual(list(self.repo.rglob("*.rej")), [])
-        self.assertEqual(self.plan().findings, [])
+        self.assertEqual([f.code for f in self.plan().findings], ["CIK-CORE-012"])
 
     def test_rollback_java_commit_restores_previous_render(self):
         before = snapshot(self.repo)

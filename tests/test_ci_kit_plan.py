@@ -158,6 +158,36 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(codes(plan), ["CIK-CORE-004", "CIK-CORE-003"])
 
 
+    def test_core_012_toolkit_mismatch(self):
+        repo = rendered_repo("core", "allure")
+        self.assertEqual(codes(build_plan(repo, drift=False)), [])
+        answers = repo / ".copier-answers.allure.yml"
+        answers.write_text(answers.read_text().replace("toolkit_version: v99.0.0", "toolkit_version: v98.0.0"))
+        plan = build_plan(repo, drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-012"])
+        self.assertEqual(plan.findings[0].module, "allure")
+        self.assertEqual(plan.findings[0].path, ".copier-answers.allure.yml")
+        self.assertIn("v98.0.0", plan.findings[0].message)
+        self.assertIn("v99.0.0", plan.findings[0].message)
+
+    def test_core_012_commit_mismatch(self):
+        repo = rendered_repo("core", "java")
+        answers = repo / ".copier-answers.java.yml"
+        answers.write_text(answers.read_text().replace("_commit: v99.0.0", "_commit: v98.0.0"))
+        plan = build_plan(repo, drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-012"])
+        self.assertEqual(plan.findings[0].module, "java")
+        self.assertIn("_commit", plan.findings[0].message)
+
+    def test_core_012_includes_legacy_answers(self):
+        repo = rendered_repo("core")
+        (repo / ".copier-answers.yml").write_text(
+            "_commit: v98.0.0\n_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\ntoolkit_version: v98.0.0\n"
+        )
+        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-012"]
+        self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")] * 2)
+
+
 class CliTests(unittest.TestCase):
     def run_cli(self, *argv: str, env: dict | None = None) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()

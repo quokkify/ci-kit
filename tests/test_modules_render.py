@@ -94,7 +94,10 @@ class ModuleRenderTests(unittest.TestCase):
     def test_core_renders_exact_file_set(self) -> None:
         self.assertEqual(
             self.rendered_files("core"),
-            {".copier-answers.core.yml", ".ci/modules/core.yml", ".github/workflows/validate.yml"},
+            {
+                ".copier-answers.core.yml", ".ci/modules/core.yml", ".github/workflows/validate.yml",
+                ".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md",
+            },
         )
 
     def test_java_renders_exact_file_set(self) -> None:

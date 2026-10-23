@@ -16,6 +16,12 @@ REF_RE = re.compile(r"(quokkify/ci-kit/[^@\s]+)@[\w.\-/]+")
 TRUSTED_SRC_RE = re.compile(r"^(https://github\.com/|gh:|git@github\.com:)quokkify/ci-kit(\.git)?$")
 RENDER_TIMEOUT = 300
 DIFF_LINES = 40
+LEGACY_ANSWERS = ".copier-answers.yml"
+# copier.yml _skip_if_exists: rendered once, then owned by the project.
+STARTER_PATHS = frozenset({
+    "README.md", ".github/pull_request_template.md", ".github/renovate.json",
+    ".github/release-please/config.json", ".github/release-please/manifest.json",
+})
 
 
 class RenderError(Exception):
@@ -48,13 +54,18 @@ def render_module(answers_path: Path, dest: Path, src_override: str | None = Non
         raise RenderError(f"cannot render module at {commit}: option-like commit or source")
     data = {key: value for key, value in answers.items() if not str(key).startswith("_")}
     dest.mkdir(parents=True, exist_ok=True)
+    # core reads the legacy answers beside its own to decide whether it owns the base area.
+    legacy = answers_path.parent / LEGACY_ANSWERS
+    seeded = answers_path.name != LEGACY_ANSWERS and legacy.is_file()
+    if seeded:
+        shutil.copyfile(legacy, dest / LEGACY_ANSWERS)
     with tempfile.TemporaryDirectory() as tmp:
         data_file = Path(tmp) / "data.yml"
         data_file.write_text(yaml.safe_dump(data))
         try:
             result = subprocess.run(
                 [
-                    *_copier(), "copy", "--defaults", "--quiet",
+                    *_copier(), "copy", "--defaults", "--quiet", "--trust",
                     "--vcs-ref", commit, "--data-file", str(data_file),
                     "-a", answers_path.name, "--", src, str(dest),
                 ],
@@ -68,7 +79,7 @@ def render_module(answers_path: Path, dest: Path, src_override: str | None = Non
     rendered: dict[str, bytes] = {}
     for path in sorted(dest.rglob("*")):
         rel = path.relative_to(dest)
-        if path.is_file() and ".git" not in rel.parts and rel.as_posix() != answers_path.name:
+        if path.is_file() and ".git" not in rel.parts and rel.as_posix() != answers_path.name and not (seeded and rel.as_posix() == LEGACY_ANSWERS):
             rendered[rel.as_posix()] = path.read_bytes()
     return rendered
 
@@ -109,7 +120,7 @@ def drift_findings(repo: Path, answers: dict[str, Path], src_override: str | Non
 
     for module, files in renders.items():
         for path, expected in files.items():
-            if path in contested:
+            if path in contested or path in STARTER_PATHS:
                 continue
             target = repo / path
             if not target.is_file():

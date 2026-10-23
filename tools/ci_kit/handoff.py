@@ -25,6 +25,9 @@ AREAS: dict[str, Area] = {
     "renovate": Area(module="renovate", legacy_paths=(".github/renovate.json",)),
 }
 
+# Areas whose module renders their files only once legacy hands them off (copier.yml _exclude).
+HANDOFF_GATED = frozenset({"base"})
+
 
 def area_for_module(module: str) -> str | None:
     for name, area in AREAS.items():

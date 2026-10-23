@@ -7,6 +7,9 @@ _templates_suffix: .jinja
 # stored answers apart from a fresh copy.
 _external_data:
   stored_answers: "{{ _copier_conf.answers_file }}"
+  # The legacy answers next to a module's answers. core renders the base area
+  # only when legacy is absent or has handed base off.
+  legacy_answers: .copier-answers.yml
 _exclude:
   # Rendered before file generation: Copier's --defaults does not validate
   # retained question defaults and can discard invalid boolean answers. Skip
@@ -43,6 +46,12 @@ _exclude:
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/safe_extract.py{% endif %}"
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/workflows/allure-report.yml{% endif %}"
+  # core takes the base area over from legacy only after the handoff; while
+  # legacy still renders these files, core must not overwrite them.
+  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}.github/workflows/copier-update.yml{% endif %}"
+  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}docs/ci-kit.md{% endif %}"
+  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}/README.md{% endif %}"
+  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}.github/pull_request_template.md{% endif %}"
   # The security module renders each workflow only when its flag is set.
   - "{% if module == 'security' and not codeql %}.github/workflows/codeql.yml{% endif %}"
   - "{% if module == 'security' and not gitleaks %}.github/workflows/gitleaks.yml{% endif %}"
