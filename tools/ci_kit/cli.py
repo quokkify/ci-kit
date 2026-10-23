@@ -96,6 +96,28 @@ def _update(args: argparse.Namespace) -> int:
     return 1 if findings else 0
 
 
+def _add(args: argparse.Namespace) -> int:
+    from .add import add_module
+
+    result = add_module(Path(args.repo), args.module, args.to, src_override=args.template_src)
+    if result.installed:
+        print(f"{result.module}: added at {result.ref} {' '.join(result.commits)}")
+    elif not result.findings:
+        print(f"{result.module}: already installed")
+    for finding in result.findings:
+        print(format_finding(finding))
+    if args.json:
+        payload = {
+            "module": result.module,
+            "ref": result.ref,
+            "installed": result.installed,
+            "commits": result.commits,
+            "findings": [{"code": f.code, "module": f.module, "message": f.message, "path": f.path} for f in result.findings],
+        }
+        Path(args.json).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return 1 if result.findings else 0
+
+
 def _load_json(text: str, label: str) -> object:
     try:
         return json.loads(text)
@@ -188,6 +210,13 @@ def main(argv: list[str] | None = None) -> int:
     update.add_argument("--template-src")
     update.add_argument("--json")
     update.set_defaults(func=_update)
+    add = sub.add_parser("add")
+    add.add_argument("--module", required=True)
+    add.add_argument("--repo", required=True)
+    add.add_argument("--to", required=True)
+    add.add_argument("--template-src")
+    add.add_argument("--json")
+    add.set_defaults(func=_add)
     gate = sub.add_parser("gate")
     gate.add_argument("--enabled", required=True)
     gate.add_argument("--needs", required=True)
