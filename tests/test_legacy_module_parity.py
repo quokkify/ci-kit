@@ -231,6 +231,9 @@ class ModuleOptionsTests(unittest.TestCase):
             ({**allure, "allure_group_by": "feature"}, "allure_group_by"),
             ({**allure, "allure_group_by": ["feature", ""]}, "allure_group_by"),
             ({**allure, "allure_group_by": ["feature", 3]}, "allure_group_by"),
+            ({**allure, "allure_group_by": []}, "allure_group_by"),
+            *(({**security, "gitleaks_job_name": name}, "gitleaks_job_name")
+              for name in ("true", "No", "OFF", "null", "y", "123", "1.5", "1e3", "0x1F", "0o17", "2024-01-01")),
         )
         for data, message in cases:
             with self.subTest(data=data):
