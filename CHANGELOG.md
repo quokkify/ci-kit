@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.11.1](https://github.com/quokkify/ci-kit/compare/v3.11.0...v3.11.1) (2026-10-23)
+
+
+### 🐛 Bug Fixes
+
+* **security:** render a non-empty CodeQL override the way Prettier formats it ([#500](https://github.com/quokkify/ci-kit/issues/500)) ([f623b50](https://github.com/quokkify/ci-kit/commit/f623b50f65a6a9ade3afcf98747bd7b2e7e98914))
+
 ## [3.11.0](https://github.com/quokkify/ci-kit/compare/v3.10.0...v3.11.0) (2026-10-23)
 
 
