@@ -52,3 +52,17 @@ jobs:
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
         with:
           category: "/language:{% raw %}${{ matrix.language }}{% endraw %}"
+{%- if codeql_aggregate | default(false) %}
+
+  complete:
+    name: CodeQL
+    if: always()
+    needs: analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CodeQL analysis to pass
+        env:
+          ANALYZE_RESULT: {% raw %}${{ needs.analyze.result }}{% endraw %}
+        run: test "$ANALYZE_RESULT" = success
+{%- endif %}

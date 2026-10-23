@@ -157,6 +157,9 @@ PILOT_CHECKS = {
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
+# Code scanning publishes the CodeQL check run on pull request heads only; on the default branch
+# CodeQL is verified by workflow identity instead.
+PULL_REQUEST_ONLY_TEMPLATE_CHECKS = ("CodeQL",)
 PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
@@ -183,20 +186,18 @@ def module_answers(repository: str, sha: str, module: str) -> dict:
 
 
 def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False) -> tuple[str, ...]:
-    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs."""
+    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs.
+
+    The codeql/gitleaks contexts come from the security module answers. Before security is handed off, legacy answers
+    can predate a pilot's renamed scan job, so the pilot's own checks (PILOT_CHECKS) cover security instead.
+    """
     import base64
     import yaml
-    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts
+    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts, security_contexts
 
-    if modules_only:
-        contexts = list(CHECKS_AFTER["core"])
-        security = module_answers(repository, sha, "security")
-        for answer, context in (("codeql", "CodeQL"), ("gitleaks", "gitleaks")):
-            if security.get(answer) is True:
-                contexts.append(context)
-        return tuple(contexts)
-    if "validate" in handed_off:
-        return tuple(CHECKS_AFTER["core"])
+    security = security_contexts(module_answers(repository, sha, "security")) if modules_only or "security" in handed_off else []
+    if modules_only or "validate" in handed_off:
+        return (*CHECKS_AFTER["core"], *security)
     contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
     try:
         contexts = check_contexts(yaml.safe_load(base64.b64decode(contents["content"]).decode()))
@@ -204,13 +205,13 @@ def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *,
         raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: {exc}") from exc
     if not contexts:
         raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: validate.yml has no jobs")
-    return tuple(contexts)
+    return (*contexts, *security)
 
 
 def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
     contexts = tuple(dict.fromkeys((*PILOT_CHECKS[repository], *template)))
     if pr is None:
-        pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
+        pull_request_only = (*PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ()), *PULL_REQUEST_ONLY_TEMPLATE_CHECKS)
         contexts = tuple(context for context in contexts if context not in pull_request_only)
     return contexts
 

@@ -24,6 +24,7 @@ from ci_kit.plan import build_plan
 from ci_kit.update import commit_all, run_update
 from module_test_support import ROOT, git, lifecycle_template_repo, mkdtemp
 from test_hybrid_update_lifecycle import NEXT_REF, REF, hybrid_validate_repo
+from test_legacy_module_parity import OPTIONS
 
 SCENARIOS = sorted(path.stem for path in (ROOT / "tests/scenarios").glob("*.yml"))
 CODEQL = ".github/workflows/codeql.yml"
@@ -282,6 +283,47 @@ class MigrateLegacyTests(unittest.TestCase):
         self.assertEqual([f.code for f in result.findings], ["CIK-MIGRATE-005"])
         self.assertIn("required checks", result.findings[0].message)
         self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+
+    def test_every_module_option_migrates(self):
+        repo = hybrid_validate_repo(self.template, "allure-external", overrides=OPTIONS)
+        before = tree(repo)
+        result = self.migrate(repo)
+        self.assert_migrated(repo, before, result)
+        self.assertEqual(result.checks_after, ["ci / gate", "CodeQL", OPTIONS["gitleaks_job_name"], "Gitleaks"])
+        security = yaml.safe_load((repo / ".copier-answers.security.yml").read_text())
+        allure = yaml.safe_load((repo / ".copier-answers.allure.yml").read_text())
+        for key in ("gitleaks_job_name", "gitleaks_scan", "gitleaks_aggregate", "codeql_aggregate"):
+            self.assertEqual(security[key], OPTIONS[key], key)
+        self.assertEqual(allure["allure_group_by"], OPTIONS["allure_group_by"])
+        self.assertEqual(yaml.safe_load((repo / CODEQL).read_text())["jobs"]["complete"]["name"], "CodeQL")
+
+    def test_codeql_aggregate_loss_is_005(self):
+        repo = hybrid_validate_repo(self.template, "python", overrides={"codeql_aggregate": True})
+        head = git(repo, "rev-parse", "HEAD")
+        real = migration._copy
+
+        def drop(repo_path, module, to, src, data):
+            if module == "security":
+                data = {**data, "codeql_aggregate": False}
+            return real(repo_path, module, to, src, data)
+
+        with mock.patch.object(migration, "_copy", side_effect=drop):
+            result = self.migrate(repo)
+        self.assertEqual([(f.code, f.path) for f in result.findings], [("CIK-MIGRATE-005", CODEQL)])
+        self.assertIn("complete", result.findings[0].message)
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+
+    def test_security_checks_follow_gitleaks_options(self):
+        self.assertEqual(migration.checks_before({"codeql": True, "gitleaks": True}), ["ci / gate", "CodeQL", "gitleaks"])
+        self.assertEqual(
+            migration.checks_before({"codeql": True, "gitleaks": True, "gitleaks_job_name": "Secrets", "gitleaks_aggregate": True,
+                                     "codeql_aggregate": True}),
+            ["ci / gate", "CodeQL", "Secrets", "Gitleaks"],
+        )
+        self.assertEqual(migration.checks_before({"codeql": False, "gitleaks": False, "gitleaks_aggregate": True}), ["ci / gate"])
+        for name in (None, "", 7):
+            with self.subTest(name=name):
+                self.assertEqual(migration.checks_before({"gitleaks": True, "gitleaks_job_name": name}), ["ci / gate", "gitleaks"])
 
     def test_codeql_category_matches_reusable_workflow(self):
         reusable = yaml.safe_load((ROOT / ".github/workflows/codeql-analysis.yml").read_text())

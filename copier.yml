@@ -246,6 +246,11 @@ codeql_languages:
     {% if language is not string %}Every codeql_languages entry must be a string.{% elif language not in allowed_codeql_languages %}Unsupported CodeQL language: {{ language }}.{% elif language in codeql_language_state.seen %}Duplicate CodeQL language: {{ language }}.{% else %}{% set codeql_language_state.seen = codeql_language_state.seen + [language] %}{% endif %}
     {% endfor %}
     {% endif %}
+codeql_aggregate:
+  type: bool
+  help: Add a complete job named CodeQL that passes only when every CodeQL analysis passes, for rulesets that require that context.
+  default: false
+  when: "{{ module in ['legacy', 'security'] and codeql }}"
 
 handed_off:
   type: yaml
@@ -273,6 +278,32 @@ gitleaks:
   type: bool
   help: Generate the checksum-verified Gitleaks workflow and stable gitleaks check context.
   default: true
+gitleaks_job_name:
+  type: str
+  help: Display name of the Gitleaks scan job, which is its required status check context.
+  default: gitleaks
+  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
+  # Rendered unquoted: refuse names YAML 1.1 reads as null, bool, number or date (no letters, or a reserved word,
+  # hex, octal, binary or exponent form).
+  validator: >-
+    {% if gitleaks_job_name is not string or not (gitleaks_job_name | regex_search('^[A-Za-z0-9](?:[A-Za-z0-9 ._()/-]{0,98}[A-Za-z0-9._()/-])?$')) %}
+    gitleaks_job_name must be a non-empty job name of up to 100 letters, digits, spaces, and ._()/- characters, without leading or trailing spaces.
+    {% elif not (gitleaks_job_name | regex_search('[A-Za-z]')) or (gitleaks_job_name | regex_search('(?i)^(?:null|true|false|yes|no|on|off|y|n|0x[0-9a-f_]+|0o[0-7_]+|0b[01_]+|[0-9][0-9._]*e[-+]?[0-9]+)$')) %}
+    gitleaks_job_name must not read as a YAML null, boolean, number, or date.
+    {% endif %}
+gitleaks_scan:
+  type: str
+  help: "What Gitleaks scans: history scans every commit and the current tree; tree scans only the current tree."
+  default: history
+  choices:
+    - history
+    - tree
+  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
+gitleaks_aggregate:
+  type: bool
+  help: Add a complete job named Gitleaks that passes only when the scan passes, for rulesets that require that context.
+  default: false
+  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
 
 allure_report:
   when: "{{ module == 'legacy' }}"
@@ -340,6 +371,21 @@ allure_pages_url:
   default: https://owner.github.io/repository
   when: "{{ (module == 'allure' and allure_publish_pages) or (module == 'legacy' and allure_report and allure_publish_pages) }}"
   validator: "{% if not (allure_pages_url | regex_search('^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*$')) %}Use a full HTTPS Pages base URL without query, fragment, or trailing slash.{% endif %}"
+allure_group_by:
+  type: yaml
+  help: Labels the Allure awesome report groups test results by, in order.
+  default: [epic, feature, story]
+  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  validator: >-
+    {% if allure_group_by is string or allure_group_by is mapping or allure_group_by is not sequence %}
+    allure_group_by must be a YAML list of label names.
+    {% elif not allure_group_by %}
+    allure_group_by must name at least one label.
+    {% else %}
+    {% for label in allure_group_by %}
+    {% if label is not string or not (label | trim) %}Every allure_group_by entry must be a non-empty string.{% endif %}
+    {% endfor %}
+    {% endif %}
 release_please:
   when: "{{ module == 'legacy' }}"
   type: bool

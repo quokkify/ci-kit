@@ -24,3 +24,17 @@ jobs:
     uses: quokkify/ci-kit/.github/workflows/codeql-analysis.yml@{{ toolkit_version }}
     with:
       languages-override: {{ codeql_languages | to_json | tojson }}
+{%- if codeql_aggregate | default(false) %}
+
+  complete:
+    name: CodeQL
+    if: always()
+    needs: codeql
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CodeQL analysis to pass
+        env:
+          ANALYZE_RESULT: {% raw %}${{ needs.codeql.result }}{% endraw %}
+        run: test "$ANALYZE_RESULT" = success
+{%- endif %}

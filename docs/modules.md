@@ -11,10 +11,12 @@ ci-kit consumers move from the single legacy Copier template to modules (`core` 
 | `python` | `.ci/modules/python.yml` | `python_components` |
 | `node` | `.ci/modules/node.yml` | `node_components` |
 | `docker` | `.ci/modules/docker.yml` | `docker_images` |
-| `security` | `.ci/modules/security.yml` | `codeql`, `gitleaks`, `codeql_languages` |
+| `security` | `.ci/modules/security.yml` | `codeql`, `gitleaks`, `codeql_languages`, `codeql_aggregate`, `gitleaks_job_name`, `gitleaks_scan`, `gitleaks_aggregate` |
 | `release` | `.ci/modules/release.yml` | `release_mode` |
 | `allure` | `.ci/modules/allure.yml` | `allure_*` |
 | `renovate` | `.ci/modules/renovate.yml` | `renovate_config_repository`, `renovate_presets` |
+
+The repository options `gitleaks_job_name`, `gitleaks_scan`, `gitleaks_aggregate`, `codeql_aggregate` and `allure_group_by` (an `allure_*` answer) are answered the same way in the legacy template and in the owning module, so `migrate-legacy` carries them over; see [usage](usage.md#repository-options).
 
 A new repository is `core` plus any of `security`, `release`, `allure` and `renovate` plus one language module per stack. The legacy template is transitional: it stays until v4.0.0, where it is removed together with `migrate-legacy`.
 
