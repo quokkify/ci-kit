@@ -61,10 +61,12 @@ def _entries(components: list[dict], language: str, test_command: str | None, al
     return entries
 
 
-def hybrid_validate_repo(template: Path, scenario: str, test_command: str | None = None, ref: str = REF) -> Path:
+def hybrid_validate_repo(
+    template: Path, scenario: str, test_command: str | None = None, ref: str = REF, overrides: dict | None = None,
+) -> Path:
     """A repository where legacy hands `validate` off to `core`, built without any migration code."""
     data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
-    repo = legacy_scenario_repo(template, scenario, ref, overrides={"handed_off": ["validate"]})
+    repo = legacy_scenario_repo(template, scenario, ref, overrides={**(overrides or {}), "handed_off": ["validate"]})
     _copy_module(template, repo, "core", {}, ref)
     components = data.get("components") or []
     for language in MODULE_ORDER:

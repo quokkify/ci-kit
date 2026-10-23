@@ -30,7 +30,9 @@ CODEQL_WORKFLOW = "quokkify/ci-kit/.github/workflows/codeql-analysis.yml@"
 # The analyze category of legacy codeql.yml and the reusable codeql-analysis.yml;
 # a different category would start new code scanning analyses instead of continuing the old ones.
 CODEQL_CATEGORY = "/language:${{ matrix.language }}"
-SECURITY_CHECKS = (("codeql", "CodeQL"), ("gitleaks", "gitleaks"))
+# The aggregate (`complete`) jobs: Gitleaks adds its own context, CodeQL reports the CodeQL context code scanning already requires.
+GITLEAKS_AGGREGATE_CHECK = "Gitleaks"
+CODEQL_AGGREGATE_JOB = "complete"
 
 
 @dataclass
@@ -61,7 +63,14 @@ def render_marker(result: MigrateLegacyResult) -> str:
 
 
 def _security_checks(answers: dict) -> list[str]:
-    return [*CHECKS_AFTER["core"], *(context for key, context in SECURITY_CHECKS if answers.get(key) is True)]
+    checks = [*CHECKS_AFTER["core"]]
+    if answers.get("codeql") is True:
+        checks.append("CodeQL")
+    if answers.get("gitleaks") is True:
+        checks.append(str(answers.get("gitleaks_job_name", "gitleaks")))
+        if answers.get("gitleaks_aggregate") is True and GITLEAKS_AGGREGATE_CHECK not in checks:
+            checks.append(GITLEAKS_AGGREGATE_CHECK)
+    return checks
 
 
 def checks_before(legacy: dict) -> list[str]:
@@ -204,10 +213,15 @@ def _codeql_finding(repo: Path, before: bytes | None, after: bytes | None, to: s
     if before is None or after is None:
         return None if before == after else fail(f"{CODEQL_PATH} is {'removed' if after is None else 'added'} by the migration")
     try:
-        languages, category = _codeql_before(yaml.safe_load(before))
-        planned = _codeql_after(repo, yaml.safe_load(after), to)
-    except (KeyError, TypeError, StopIteration, ValueError, yaml.YAMLError) as error:
+        old, new = yaml.safe_load(before), yaml.safe_load(after)
+        languages, category = _codeql_before(old)
+        planned = _codeql_after(repo, new, to)
+        # The legacy aggregate job needs analyze, the module one needs the reusable workflow call: compare their names only.
+        aggregates = [(data["jobs"].get(CODEQL_AGGREGATE_JOB) or {}).get("name") for data in (old, new)]
+    except (KeyError, TypeError, StopIteration, ValueError, AttributeError, yaml.YAMLError) as error:
         return fail(f"{CODEQL_PATH} cannot be compared with the legacy workflow: {error}")
+    if aggregates[0] != aggregates[1]:
+        return fail(f"CodeQL {CODEQL_AGGREGATE_JOB} job name changes from {aggregates[0]} to {aggregates[1]}")
     if category != CODEQL_CATEGORY:
         return fail(f"legacy CodeQL category {category} differs from {CODEQL_CATEGORY}")
     if languages != planned:

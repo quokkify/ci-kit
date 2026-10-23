@@ -3,9 +3,11 @@ from __future__ import annotations
 ALLURE_KEYS = (
     "allure_external_workflow_name", "allure_external_workflow_path", "allure_external_artifact_prefix",
     "allure_external_artifact_min_count", "allure_external_artifact_max_count", "allure_categories_file",
-    "allure_publish_pages", "allure_pages_url", "project_name",
+    "allure_publish_pages", "allure_pages_url", "allure_group_by", "project_name",
 )
-SECURITY_KEYS = ("codeql", "gitleaks", "codeql_languages")
+SECURITY_KEYS = (
+    "codeql", "gitleaks", "codeql_languages", "codeql_aggregate", "gitleaks_job_name", "gitleaks_scan", "gitleaks_aggregate",
+)
 RENOVATE_LANGUAGE_PRESETS = {"python": "python", "node": "javascript", "java": "java"}
 
 
