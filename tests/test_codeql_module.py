@@ -157,7 +157,9 @@ class CodeqlLanguageTests(unittest.TestCase):
                 self.assertIn(f"      {line}\n", text)
                 value = yaml.safe_load(text)["jobs"]["codeql"]["with"]["languages-override"]
                 self.assertEqual(value, json.dumps(override))
-                if override and shutil.which("npx"):
+                if override:
+                    if not (os.environ.get("CI_KIT_PRETTIER_CHECK") and shutil.which("npx")):
+                        self.skipTest("set CI_KIT_PRETTIER_CHECK=1 (and have npx) to run prettier@3 --check, which needs the npm registry")
                     out = mkdtemp("codeql-prettier-")
                     (out / "codeql.yml").write_bytes(tree[CODEQL])
                     result = subprocess.run(
