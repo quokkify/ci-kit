@@ -182,21 +182,23 @@ def module_answers(repository: str, sha: str, module: str) -> dict:
     return answers
 
 
-def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False) -> tuple[str, ...]:
-    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs."""
+def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False,
+                      legacy: dict | None = None) -> tuple[str, ...]:
+    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs.
+
+    With the legacy answers, the codeql/gitleaks contexts follow them until security is handed off, then the security module answers.
+    """
     import base64
     import yaml
-    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts
+    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts, security_contexts
 
     if modules_only:
-        contexts = list(CHECKS_AFTER["core"])
-        security = module_answers(repository, sha, "security")
-        for answer, context in (("codeql", "CodeQL"), ("gitleaks", "gitleaks")):
-            if security.get(answer) is True:
-                contexts.append(context)
-        return tuple(contexts)
+        return (*CHECKS_AFTER["core"], *security_contexts(module_answers(repository, sha, "security")))
+    security = []
+    if legacy is not None:
+        security = security_contexts(module_answers(repository, sha, "security") if "security" in handed_off else legacy)
     if "validate" in handed_off:
-        return tuple(CHECKS_AFTER["core"])
+        return (*CHECKS_AFTER["core"], *security)
     contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
     try:
         contexts = check_contexts(yaml.safe_load(base64.b64decode(contents["content"]).decode()))
@@ -204,7 +206,7 @@ def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *,
         raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: {exc}") from exc
     if not contexts:
         raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: validate.yml has no jobs")
-    return tuple(contexts)
+    return (*contexts, *security)
 
 
 def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
@@ -325,7 +327,9 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
         handed_off = answers.get("handed_off")
         if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
             handed_off = []
-        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off), modules_only=modules_only))
+        contexts = pilot_contexts(repository, pr, template_contexts(
+            repository, sha, tuple(handed_off), modules_only=modules_only, legacy=None if modules_only else answers,
+        ))
     ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
     wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
     if current_snapshot(repository, pr, branch) != snapshot:

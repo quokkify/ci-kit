@@ -16,7 +16,7 @@ from .drift import RENDER_TIMEOUT, STARTER_PATHS, TRUSTED_SRC_RE, RenderError, _
 from .handoff import AREAS
 from .legacy import ANSWERS, load_answers
 from .legacy_answers import module_answers
-from .migration_marker import CHECKS_AFTER, MARKER
+from .migration_marker import CHECKS_AFTER, MARKER, security_contexts
 from .plan import ANSWERS_RE, Finding, build_plan, discover
 from .update import _git, _read, _rejects, commit_all, copier_update_command, update_order
 
@@ -30,8 +30,6 @@ CODEQL_WORKFLOW = "quokkify/ci-kit/.github/workflows/codeql-analysis.yml@"
 # The analyze category of legacy codeql.yml and the reusable codeql-analysis.yml;
 # a different category would start new code scanning analyses instead of continuing the old ones.
 CODEQL_CATEGORY = "/language:${{ matrix.language }}"
-# The aggregate (`complete`) jobs: Gitleaks adds its own context, CodeQL reports the CodeQL context code scanning already requires.
-GITLEAKS_AGGREGATE_CHECK = "Gitleaks"
 CODEQL_AGGREGATE_JOB = "complete"
 
 
@@ -63,14 +61,7 @@ def render_marker(result: MigrateLegacyResult) -> str:
 
 
 def _security_checks(answers: dict) -> list[str]:
-    checks = [*CHECKS_AFTER["core"]]
-    if answers.get("codeql") is True:
-        checks.append("CodeQL")
-    if answers.get("gitleaks") is True:
-        checks.append(str(answers.get("gitleaks_job_name", "gitleaks")))
-        if answers.get("gitleaks_aggregate") is True and GITLEAKS_AGGREGATE_CHECK not in checks:
-            checks.append(GITLEAKS_AGGREGATE_CHECK)
-    return checks
+    return [*CHECKS_AFTER["core"], *security_contexts(answers)]
 
 
 def checks_before(legacy: dict) -> list[str]:

@@ -10,6 +10,8 @@ from .inputs import WORKFLOWS
 
 MARKER = "<!-- ci-kit-migrate -->"
 CHECKS_AFTER = {"core": ["ci / gate"]}
+# The aggregate (`complete`) jobs: Gitleaks adds its own context, CodeQL reports the CodeQL context code scanning already requires.
+GITLEAKS_AGGREGATE_CHECK = "Gitleaks"
 CONTRACT_JOB = "template-contract"
 CONTRACT_CHECK = "Shared template contract"
 USES_RE = re.compile(r"^quokkify/ci-kit/\.github/workflows/([a-z-]+)\.yml@(\S+)$")
@@ -46,6 +48,18 @@ def check_contexts(data: dict) -> list[str]:
             raise MappingError(f"job {job_id} has no ci-kit workflow to derive a check name from", str(job_id))
         name = job.get("name") or str(job_id)
         contexts.append(f"{name} / {'build' if target[0] == 'docker' else 'ci'}")
+    return contexts
+
+
+def security_contexts(answers: dict) -> list[str]:
+    """Required contexts of the codeql/gitleaks workflows, from legacy or security module answers."""
+    contexts = []
+    if answers.get("codeql") is True:
+        contexts.append("CodeQL")
+    if answers.get("gitleaks") is True:
+        contexts.append(str(answers.get("gitleaks_job_name", "gitleaks")))
+        if answers.get("gitleaks_aggregate") is True and GITLEAKS_AGGREGATE_CHECK not in contexts:
+            contexts.append(GITLEAKS_AGGREGATE_CHECK)
     return contexts
 
 

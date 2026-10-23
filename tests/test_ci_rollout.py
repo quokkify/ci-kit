@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import rollout_copier_fleet as rollout
 import verify_ci_gate as gate
@@ -18,6 +20,7 @@ SHA = "a" * 40
 GITHUB_RUN_VARIABLES = ("GITHUB_EVENT_NAME", "GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
 OTHER = "b" * 40
 REPO = "quokkify/skills"
+CUSTOM_GITLEAKS = "Scan current tree (legacy history pending baseline)"
 
 
 def workflow(sha=SHA, outcome="success", status="completed", identifier=1):
@@ -233,6 +236,32 @@ class PilotGateTests(unittest.TestCase):
                                    (b"codeql: true\ngitleaks: false\n", {"ci / gate", "CodeQL"})):
             with self.subTest(security=security), patch.object(gate, "api", side_effect=module_only_api(security)):
                 self.assertEqual(set(gate.template_contexts(REPO, SHA, (), modules_only=True)), expected)
+
+    def test_template_contexts_follow_gitleaks_options(self):
+        options = (b"codeql: true\ngitleaks: true\ngitleaks_job_name: " + CUSTOM_GITLEAKS.encode()
+                   + b"\ngitleaks_aggregate: true\ncodeql_aggregate: true\n")
+        expected = ("ci / gate", "CodeQL", CUSTOM_GITLEAKS, "Gitleaks")
+        with patch.object(gate, "api", side_effect=module_only_api(options)):
+            self.assertEqual(gate.template_contexts(REPO, SHA, (), modules_only=True), expected)
+        legacy = yaml.safe_load(options)
+        with patch.object(gate, "api", side_effect=AssertionError("security answers must come from the legacy answers")):
+            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate",), legacy=legacy), expected)
+            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate",), legacy={"codeql": True, "gitleaks": True}),
+                             ("ci / gate", "CodeQL", "gitleaks"))
+        # Once security is handed off, the security module answers own the contexts, not the stale legacy ones.
+        with patch.object(gate, "api", side_effect=module_only_api(options)):
+            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate", "security"), legacy={"gitleaks": True}), expected)
+        with patch.object(gate, "api", side_effect=module_only_api()):
+            self.assertEqual(gate.template_contexts(REPO, SHA, (), modules_only=True), ("ci / gate", "CodeQL", "gitleaks"))
+
+    def test_legacy_pilot_expects_custom_gitleaks_contexts(self):
+        answers = b"handed_off: [validate]\ngitleaks: true\ngitleaks_job_name: " + CUSTOM_GITLEAKS.encode() + b"\ngitleaks_aggregate: true\n"
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=pilot_api(answers)), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
+            self.assertEqual(ready.call_args.args[2], ("gitleaks", "ci / gate", CUSTOM_GITLEAKS, "Gitleaks"))
 
     def test_pilot_without_legacy_uses_core_answers(self):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
