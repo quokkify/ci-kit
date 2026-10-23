@@ -210,13 +210,29 @@ class CliTests(unittest.TestCase):
             code, _, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
             pairs = [line.split("=", 1) for line in target.read_text().splitlines()]
         self.assertEqual(code, 0)
-        self.assertEqual([key for key, _ in pairs], ["modules", "java", "python", "node", "docker", "codes", "commits"])
+        self.assertEqual([key for key, _ in pairs], ["modules", "java", "python", "node", "docker", "codeql", "codes", "commits"])
         lines = dict(pairs)
+        self.assertEqual(lines["codeql"], '["actions","python"]')
         self.assertEqual([entry["id"] for entry in json.loads(lines["python"])], ["app-python"])
         self.assertEqual(json.loads(lines["node"]), [])
         self.assertEqual(json.loads(lines["docker"]), [])
         self.assertEqual(json.loads(lines["java"]), [])
         self.assertEqual(lines["codes"], "[]")
+
+    def test_plan_outputs_codeql_languages(self):
+        repo = rendered_repo("core", "java", "node")
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "out"
+            code, _, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()), "--github-output", str(target))
+            lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(lines["codeql"]), ["actions", "javascript-typescript", "java-kotlin"])
+
+    def test_plan_outputs_codeql_actions_only_without_language_modules(self):
+        repo = rendered_repo("core")
+        code, out, _ = self.run_cli("plan", "--repo", str(repo), "--template-src", str(shared_template_repo()))
+        self.assertEqual(code, 0)
+        self.assertIn('codeql=["actions"]', out.splitlines())
 
     def test_plan_writes_codes_and_commits_outputs(self):
         repo = rendered_repo("core", "java")

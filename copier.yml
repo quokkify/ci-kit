@@ -43,6 +43,9 @@ _exclude:
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/allurerc.mjs{% endif %}"
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/safe_extract.py{% endif %}"
   - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/workflows/allure-report.yml{% endif %}"
+  # The security module renders each workflow only when its flag is set.
+  - "{% if module == 'security' and not codeql %}.github/workflows/codeql.yml{% endif %}"
+  - "{% if module == 'security' and not gitleaks %}.github/workflows/gitleaks.yml{% endif %}"
 
 # Written once when the project is generated, then owned by the project.
 # The template ships a starter README and a minimal Renovate config; real
@@ -71,7 +74,7 @@ project_name:
   default: my-project
 
 toolkit_version:
-  when: "{{ module in ['legacy', 'core', 'release', 'allure'] }}"
+  when: "{{ module in ['legacy', 'core', 'security', 'release', 'allure'] }}"
   type: str
   help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's
@@ -215,15 +218,15 @@ docker:
   type: bool
   default: false
 codeql:
-  when: "{{ module == 'legacy' }}"
+  when: "{{ module in ['legacy', 'security'] }}"
   type: bool
   help: Generate the CodeQL workflow. Code scanning needs GitHub Advanced Security, which private repositories do not receive by default.
   default: true
 codeql_languages:
   type: yaml
-  help: "Optional explicit CodeQL language list. Empty derives the list from components, which is wrong for a repository whose source is not described by components. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
+  help: "Optional explicit CodeQL language list. Empty derives the list from components (legacy) or the installed language modules (security); that is wrong for a repository whose source they do not describe. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
   default: []
-  when: "{{ module == 'legacy' and codeql }}"
+  when: "{{ module in ['legacy', 'security'] and codeql }}"
   validator: >-
     {% set allowed_codeql_languages = ['actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'] %}
     {% if codeql_languages is string or codeql_languages is mapping or codeql_languages is not sequence %}
@@ -257,7 +260,7 @@ handed_off:
     {% endif %}
 
 gitleaks:
-  when: "{{ module == 'legacy' }}"
+  when: "{{ module in ['legacy', 'security'] }}"
   type: bool
   help: Generate the checksum-verified Gitleaks workflow and stable gitleaks check context.
   default: true

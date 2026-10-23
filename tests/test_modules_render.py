@@ -130,7 +130,7 @@ class ModuleRenderTests(unittest.TestCase):
         self.assertIn("'auto' is not in ['component', 'external']", result.stderr)
 
     def test_declarations_match_schemas(self) -> None:
-        for module in ("core", "java", "release", "allure", "renovate"):
+        for module in ("core", "java", "security", "release", "allure", "renovate"):
             with self.subTest(module=module):
                 jsonschema.validate(yaml.safe_load(self.decl(module)), self.load_schema(module, 1))
 

@@ -16,6 +16,7 @@ MODULES: dict[str, ModuleInfo] = {
     "python": ModuleInfo(("core",), "python", True),
     "node": ModuleInfo(("core",), "node", True),
     "docker": ModuleInfo(("core",), "docker", False, fields=("context", "dockerfile", "target")),
+    "security": ModuleInfo(("core",)),
     "release": ModuleInfo(("core",)),
     "allure": ModuleInfo(("core",)),
     "renovate": ModuleInfo(("core",)),

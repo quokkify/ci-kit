@@ -10,6 +10,9 @@ from .gate import evaluate, render_summary
 from .inputs import WORKFLOWS
 from .plan import Finding, build_plan, discover
 
+# Ordered as the legacy CodeQL workflow iterated python, node, then java components.
+CODEQL_LANGUAGES = {"python": "python", "node": "javascript-typescript", "java": "java-kotlin"}
+
 
 def _compact(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
@@ -52,6 +55,7 @@ def _plan(args: argparse.Namespace) -> int:
     plan = build_plan(Path(args.repo), src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules)}
     outputs.update({module: _compact(plan.matrices.get(module, [])) for module in WORKFLOWS})
+    outputs["codeql"] = _compact(["actions", *(language for module, language in CODEQL_LANGUAGES.items() if module in plan.modules)])
     if args.github_output:
         outputs["codes"] = _compact(list(dict.fromkeys(finding.code for finding in plan.findings)))
         outputs["commits"] = _compact(_template_commits(Path(args.repo)))

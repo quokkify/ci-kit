@@ -5,6 +5,7 @@ ALLURE_KEYS = (
     "allure_external_artifact_min_count", "allure_external_artifact_max_count", "allure_categories_file",
     "allure_publish_pages", "allure_pages_url", "project_name",
 )
+SECURITY_KEYS = ("codeql", "gitleaks", "codeql_languages")
 RENOVATE_LANGUAGE_PRESETS = {"python": "python", "node": "javascript", "java": "java"}
 
 
@@ -20,6 +21,8 @@ def legacy_renovate_presets(legacy: dict) -> list[str]:
 
 def module_answers(legacy: dict) -> dict[str, dict]:
     modules: dict[str, dict] = {}
+    if legacy.get("codeql") or legacy.get("gitleaks"):
+        modules["security"] = {key: legacy[key] for key in SECURITY_KEYS if key in legacy}
     if legacy.get("release_please"):
         modules["release"] = {"release_mode": legacy["release_mode"]}
     if legacy.get("allure_report"):
