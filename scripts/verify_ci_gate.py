@@ -157,6 +157,9 @@ PILOT_CHECKS = {
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
+# Code scanning publishes the CodeQL check run on pull request heads only; on the default branch
+# CodeQL is verified by workflow identity instead.
+PULL_REQUEST_ONLY_TEMPLATE_CHECKS = ("CodeQL",)
 PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
@@ -182,22 +185,18 @@ def module_answers(repository: str, sha: str, module: str) -> dict:
     return answers
 
 
-def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False,
-                      legacy: dict | None = None) -> tuple[str, ...]:
+def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False) -> tuple[str, ...]:
     """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs.
 
-    With the legacy answers, the codeql/gitleaks contexts follow them until security is handed off, then the security module answers.
+    The codeql/gitleaks contexts come from the security module answers. Before security is handed off, legacy answers
+    can predate a pilot's renamed scan job, so the pilot's own checks (PILOT_CHECKS) cover security instead.
     """
     import base64
     import yaml
     from ci_kit.migration_marker import CHECKS_AFTER, check_contexts, security_contexts
 
-    if modules_only:
-        return (*CHECKS_AFTER["core"], *security_contexts(module_answers(repository, sha, "security")))
-    security = []
-    if legacy is not None:
-        security = security_contexts(module_answers(repository, sha, "security") if "security" in handed_off else legacy)
-    if "validate" in handed_off:
+    security = security_contexts(module_answers(repository, sha, "security")) if modules_only or "security" in handed_off else []
+    if modules_only or "validate" in handed_off:
         return (*CHECKS_AFTER["core"], *security)
     contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
     try:
@@ -212,7 +211,7 @@ def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *,
 def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
     contexts = tuple(dict.fromkeys((*PILOT_CHECKS[repository], *template)))
     if pr is None:
-        pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
+        pull_request_only = (*PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ()), *PULL_REQUEST_ONLY_TEMPLATE_CHECKS)
         contexts = tuple(context for context in contexts if context not in pull_request_only)
     return contexts
 
@@ -327,9 +326,7 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
         handed_off = answers.get("handed_off")
         if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
             handed_off = []
-        contexts = pilot_contexts(repository, pr, template_contexts(
-            repository, sha, tuple(handed_off), modules_only=modules_only, legacy=None if modules_only else answers,
-        ))
+        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off), modules_only=modules_only))
     ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
     wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
     if current_snapshot(repository, pr, branch) != snapshot:

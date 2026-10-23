@@ -208,6 +208,7 @@ def _codeql_finding(repo: Path, before: bytes | None, after: bytes | None, to: s
         languages, category = _codeql_before(old)
         planned = _codeql_after(repo, new, to)
         # The legacy aggregate job needs analyze, the module one needs the reusable workflow call: compare their names only.
+        # That is enough: CIK-MIGRATE-003 already pinned the legacy file to the legacy render, so its job shape is the template's.
         aggregates = [(data["jobs"].get(CODEQL_AGGREGATE_JOB) or {}).get("name") for data in (old, new)]
     except (KeyError, TypeError, StopIteration, ValueError, AttributeError, yaml.YAMLError) as error:
         return fail(f"{CODEQL_PATH} cannot be compared with the legacy workflow: {error}")

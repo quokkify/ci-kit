@@ -57,7 +57,8 @@ def security_contexts(answers: dict) -> list[str]:
     if answers.get("codeql") is True:
         contexts.append("CodeQL")
     if answers.get("gitleaks") is True:
-        contexts.append(str(answers.get("gitleaks_job_name", "gitleaks")))
+        name = answers.get("gitleaks_job_name")
+        contexts.append(name if isinstance(name, str) and name.strip() else "gitleaks")
         if answers.get("gitleaks_aggregate") is True and GITLEAKS_AGGREGATE_CHECK not in contexts:
             contexts.append(GITLEAKS_AGGREGATE_CHECK)
     return contexts

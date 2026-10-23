@@ -321,6 +321,9 @@ class MigrateLegacyTests(unittest.TestCase):
             ["ci / gate", "CodeQL", "Secrets", "Gitleaks"],
         )
         self.assertEqual(migration.checks_before({"codeql": False, "gitleaks": False, "gitleaks_aggregate": True}), ["ci / gate"])
+        for name in (None, "", 7):
+            with self.subTest(name=name):
+                self.assertEqual(migration.checks_before({"gitleaks": True, "gitleaks_job_name": name}), ["ci / gate", "gitleaks"])
 
     def test_codeql_category_matches_reusable_workflow(self):
         reusable = yaml.safe_load((ROOT / ".github/workflows/codeql-analysis.yml").read_text())
