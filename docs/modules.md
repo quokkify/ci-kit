@@ -11,6 +11,7 @@ ci-kit consumers move from the single legacy Copier template to modules (`core` 
 | `python` | `.ci/modules/python.yml` | `python_components` |
 | `node` | `.ci/modules/node.yml` | `node_components` |
 | `docker` | `.ci/modules/docker.yml` | `docker_images` |
+| `labels` | `.ci/modules/labels.yml` | `toolkit_version` |
 
 A language declaration is `schema_version: 1` plus `components`, one mapping per component. Required fields: `id` (stable job identifier), `name` (display name), `path` (component directory, no `..` segment or glob characters), and the language version (`java_version` for `java`). Every other field is optional and mirrors an input of the module's reusable workflow in snake_case (for example `run_lint`, `test_command`, `timeout_minutes`); every `*_version` is a string such as `"3.12"`, and unknown keys are rejected. `docker` components need only `id`; `name`, `context`, `dockerfile` and `target` are optional.
 
@@ -83,6 +84,16 @@ The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` tr
 ## Updating hybrid repositories
 
 `ci-kit update` processes answers files in the order legacy, `core`, language modules, others, with one commit per answers file. The fleet `update` mode runs its own legacy pipeline first and then `ci-kit update --skip-legacy --to <ref>`, so `ci-kit` updates only the modules; files of handed-off areas are left to their module. The consumer's `copier-update.yml` runs the same `ci-kit update --repo . --to "$ref" --skip-legacy` after the legacy update. A `.rej` file or Copier failure stops the run with `CIK-UPDATE-001` ([runbook](errors/CIK-UPDATE-001.md)).
+
+## Adding a module
+
+`ci-kit add --module <m> --repo <path> --to <ref> [--template-src <src>] [--json <file>]` installs one module into a repository that already runs `core` at `<ref>`:
+
+```bash
+ci-kit add --module labels --repo . --to v3.10.0
+```
+
+It refuses to start on a dirty tree (`CIK-ADD-001`), an unknown or `legacy` module (`CIK-ADD-002`), a required module that is missing, at another ref, or from an untrusted source (`CIK-ADD-003`), or a file the module would render that already exists (`CIK-ADD-004`). A module whose answers file is already present is reported as installed and left alone (exit 0). Otherwise it runs `copier copy` with the module's answers file and commits `chore(ci-kit): add <m> module`. When Copier fails or the plan check reports findings, it resets to the starting `HEAD`, removes only the files it created, and reports `CIK-ADD-005`. The template source is `_src_path` from `.copier-answers.core.yml` unless `--template-src` is given. `--json` writes `module`, `ref`, `installed`, `commits`, and `findings` (each `{code, module, message, path}`); the command exits 1 when there are findings.
 
 ## Adding a handoff area
 

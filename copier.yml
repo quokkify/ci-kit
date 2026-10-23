@@ -53,7 +53,7 @@ _skip_if_exists:
 module:
   type: str
   help: Template module to apply. legacy keeps the single combined template.
-  choices: [legacy, core, java, python, node, docker]
+  choices: [legacy, core, java, python, node, docker, labels]
   default: legacy
 
 project_name:
@@ -63,7 +63,7 @@ project_name:
   default: my-project
 
 toolkit_version:
-  when: "{{ module in ['legacy', 'core'] }}"
+  when: "{{ module in ['legacy', 'core', 'labels'] }}"
   type: str
   help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's

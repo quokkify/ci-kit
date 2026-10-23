@@ -1,0 +1,62 @@
+name: Reusable label sync
+
+on:
+  workflow_call:
+    inputs:
+      manifest-url:
+        description: Organization label manifest in EndBug/label-sync format.
+        type: string
+        default: https://raw.githubusercontent.com/quokkify/.github/main/labels.yml
+      delete-other-labels:
+        description: Delete labels listed in no config file. Keep false until issue kinds have moved to Issue Types. Aliases still merge and delete a matched old label when its target already exists or several aliases of one target match.
+        type: boolean
+        default: false
+      dry-run:
+        description: Only report the label changes.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    name: Sync labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out project labels
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/labels.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Select label config files
+        id: config
+        env:
+          MANIFEST_URL: ${{ inputs.manifest-url }}
+          PROJECT_LABELS: .github/labels.yml
+        run: |
+          set -euo pipefail
+          if [[ ! "$MANIFEST_URL" =~ ^https://[^[:space:]]+\.ya?ml$ ]]; then
+            printf 'manifest-url must be an https URL of a .yml or .yaml file: %s\n' "$MANIFEST_URL" >&2
+            exit 2
+          fi
+          files=("$MANIFEST_URL")
+          if [[ -f "$PROJECT_LABELS" ]]; then
+            files+=("$PROJECT_LABELS")
+          else
+            printf 'No %s in this repository; syncing the organization manifest only.\n' "$PROJECT_LABELS" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            printf 'files<<EOF\n'
+            printf '%s\n' "${files[@]}"
+            printf 'EOF\n'
+          } >> "$GITHUB_OUTPUT"
+      - name: Sync labels
+        uses: EndBug/label-sync@52074158190acb45f3077f9099fea818aa43f97a # v2.3.3
+        with:
+          config-file: ${{ steps.config.outputs.files }}
+          delete-other-labels: ${{ inputs.delete-other-labels }}
+          dry-run: ${{ inputs.dry-run }}

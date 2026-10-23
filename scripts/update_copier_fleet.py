@@ -46,6 +46,7 @@ DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
 PR_TITLE = "chore(template): update shared project template"
+PR_LABEL = "area: template"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
     "public fleet automation and are updated by a maintainer running this script without "
@@ -1091,6 +1092,11 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("failed", "Update failed; raw error below.", "**Re-run** for this repository; investigate if it fails again."))
     elif status in {"unsafe-answers-file", "unknown-module", "foreign-module-template"}:
         facts.append(Fact("gap", f"{markdown_text(status.replace('-', ' ').capitalize())}: {markdown_text(result.detail)}.", "**Fix** the module answers file in the repository."))
+    elif status in {"needs-update-first", "add-rejected"}:
+        step = "**Update** the repository to the target template release first, then re-run." if status == "needs-update-first" else "**Fix** the cause named by the code (see docs/errors), then re-run."
+        facts.append(Fact("gap", f"{markdown_text(status.replace('-', ' ').capitalize())}: {markdown_text(result.detail)}.", step))
+    elif status == "would-add":
+        facts.append(Fact("drift", f"Module {markdown_text(result.detail)} would be added.", "**Open** the add-module PR: run write mode for this repository."))
     elif status == "would-update":
         inventory = result.inventory
         version = f" {markdown_text(inventory.commit)} → {markdown_text(inventory.target_commit)}" if inventory and inventory.target_commit and inventory.target_commit != inventory.commit else ""
@@ -2118,15 +2124,7 @@ def squash_to_base(repository_path: Path, base: str) -> None:
     run(["git", "reset", "--soft", base], cwd=repository_path)
 
 
-def ensure_pull_request(
-    repository: Repository,
-    *,
-    branch: str,
-    changed: Sequence[str],
-    env: dict[str, str],
-    modules: Sequence[dict[str, str]] = (),
-    auto_merge: bool = False,
-) -> str:
+def existing_pull_request(repository: Repository, branch: str, *, env: dict[str, str]) -> str | None:
     owner = repository.name_with_owner.split("/", 1)[0].casefold()
     listed = gh_json(
         [
@@ -2151,8 +2149,21 @@ def ensure_pull_request(
         and str((pull.get("headRepositoryOwner") or {}).get("login", "")).casefold() == owner
         and pull.get("headRefName") == branch
     ]
+    return existing[0]["url"] if existing else None
+
+
+def ensure_pull_request(
+    repository: Repository,
+    *,
+    branch: str,
+    changed: Sequence[str],
+    env: dict[str, str],
+    modules: Sequence[dict[str, str]] = (),
+    auto_merge: bool = False,
+) -> str:
+    existing = existing_pull_request(repository, branch, env=env)
     if existing:
-        return existing[0]["url"]
+        return existing
 
     body = (
         "## Summary\n\n"
@@ -2175,7 +2186,7 @@ def ensure_pull_request(
         "Do not edit the automation branch directly; make project-specific changes after merging "
         "or adjust the Copier answers/template.\n"
     )
-    completed = run(
+    return create_pull_request(
         [
             "gh",
             "pr",
@@ -2193,7 +2204,20 @@ def ensure_pull_request(
         ],
         env=env,
     )
-    return completed.stdout.strip()
+
+
+def create_pull_request(command: Sequence[str], *, env: dict[str, str]) -> str:
+    """Create a pull request labelled PR_LABEL, unlabelled where the repository lacks it.
+
+    gh resolves labels before it creates the pull request, so an unknown label fails
+    the whole command without creating anything and the unlabelled retry is safe.
+    """
+    try:
+        return run([*command, "--label", PR_LABEL], env=env).stdout.strip()
+    except FleetUpdateError as exc:
+        if f"could not add label: '{PR_LABEL}' not found" not in str(exc):
+            raise
+    return run(command, env=env).stdout.strip()
 
 
 AUTO_MERGE_HEAD_POLL_SECONDS = 2
@@ -2613,6 +2637,130 @@ def process_repository(
         raise RepositoryProcessError(str(exc), inventory) from exc
 
 
+def add_module_branch(module: str) -> str:
+    return f"ci-kit/add-{module}"
+
+
+def add_module_title(module: str) -> str:
+    return f"chore(ci-kit): add {module} module"
+
+
+def run_ci_kit_add(repository_path: Path, module: str, target_ref: str, *, env: dict[str, str]) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix="ci-kit-add-") as temporary:
+        report_path = Path(temporary) / "add.json"
+        completed = run(
+            [
+                sys.executable,
+                "-m",
+                "ci_kit.cli",
+                "add",
+                "--module",
+                module,
+                "--repo",
+                str(repository_path),
+                "--to",
+                target_ref,
+                "--json",
+                str(report_path),
+            ],
+            env=ci_kit_environment(env),
+            check=False,
+        )
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            report = None
+    if not isinstance(report, dict):
+        raise FleetUpdateError(f"ci-kit add failed: exit {completed.returncode}")
+    if completed.returncode and not report.get("findings"):
+        raise FleetUpdateError(f"ci-kit add failed: exit {completed.returncode}")
+    return report
+
+
+def add_module_pull_request(repository: Repository, *, branch: str, module: str, target_ref: str, env: dict[str, str]) -> str:
+    existing = existing_pull_request(repository, branch, env=env)
+    if existing:
+        return existing
+    body = (
+        "## Summary\n\n"
+        f"Adds the `{module}` module from the shared [`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) template "
+        f"at `{target_ref}`.\n\n"
+        f"Merging this pull request triggers the `{module}` module's workflow on `main`.\n"
+    )
+    return create_pull_request(
+        [
+            "gh",
+            "pr",
+            "create",
+            "--repo",
+            repository.name_with_owner,
+            "--base",
+            repository.default_branch,
+            "--head",
+            branch,
+            "--title",
+            add_module_title(module),
+            "--body",
+            body,
+        ],
+        env=env,
+    )
+
+
+def add_module_repository(
+    repository: Repository,
+    *,
+    module: str,
+    target_ref: str | None,
+    dry_run: bool,
+    env: dict[str, str],
+    workspace: Path,
+    expected_template: str,
+) -> Result:
+    name = repository.name_with_owner
+    try:
+        files = fetch_answers_files(name, env=env)
+    except UnsafeAnswersFileError as exc:
+        return Result(name, "unsafe-answers-file", str(exc))
+    if not files:
+        return Result(name, "not-managed")
+    if module in files:
+        return Result(name, "up-to-date")
+    core = files.get("core")
+    if core is None:
+        return Result(name, "add-rejected", "CIK-ADD-003")
+    core_answers = parse_answers(core)
+    core_source = core_answers.get("_src_path")
+    if not isinstance(core_source, str) or not TRUSTED_SRC_RE.fullmatch(core_source):
+        return Result(name, "foreign-module-template", f"core: {core_source if isinstance(core_source, str) else 'missing _src_path'}")
+    if not target_ref:
+        raise FleetUpdateError("add-module requires a resolved template ref")
+    core_commit = answers_commit(core_answers)
+    if core_commit != target_ref:
+        return Result(name, "needs-update-first", f"core {core_commit or 'unknown'}, target {target_ref}")
+
+    destination = workspace / name.replace("/", "--")
+    clone_repository(repository, destination, env=env)
+    base = git_head(destination)
+    report = run_ci_kit_add(destination, module, target_ref, env=env)
+    codes = [
+        finding["code"]
+        for finding in report.get("findings") or []
+        if isinstance(finding, dict) and isinstance(finding.get("code"), str)
+    ]
+    if codes:
+        return Result(name, "add-rejected", ", ".join(codes))
+    if not report.get("installed"):
+        return Result(name, "up-to-date")
+    if dry_run:
+        return Result(name, "would-add", module)
+    branch = add_module_branch(module)
+    squash_to_base(destination, base)
+    push_automation_branch(repository, destination, branch=branch, env=env, message=add_module_title(module))
+    url = add_module_pull_request(repository, branch=branch, module=module, target_ref=target_ref, env=env)
+    return Result(name, "pull-request", url)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org", default="quokkify")
@@ -2636,6 +2784,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip Copier and pushes; only evaluate and merge open automation PRs. Requires --write --auto-merge.",
     )
+    parser.add_argument(
+        "--add-module",
+        choices=sorted(module for module in MODULES if module != LEGACY_MODULE),
+        help="Install this module in every managed repository through a ci-kit/add-<module> pull request; incompatible with --auto-merge and --merge-ready.",
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -2645,6 +2798,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.add_module and (args.auto_merge or args.merge_ready):
+        parser.error("--add-module cannot be combined with --auto-merge or --merge-ready")
     if args.auto_merge and args.dry_run:
         parser.error("--auto-merge cannot be combined with --dry-run")
     if args.merge_ready and not (args.write and args.auto_merge):
@@ -2759,6 +2914,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 if args.merge_ready:
                     result = merge_ready_repository(repository, branch=branch, env=env, expected_template=args.template_repository)
+                elif args.add_module:
+                    result = add_module_repository(
+                        repository,
+                        module=args.add_module,
+                        target_ref=template_ref,
+                        dry_run=args.dry_run,
+                        env=env,
+                        workspace=workspace,
+                        expected_template=args.template_repository,
+                    )
                 else:
                     result = process_repository(
                         repository,

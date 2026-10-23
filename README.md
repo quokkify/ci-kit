@@ -25,10 +25,13 @@ Call supported workflows from a job with an exact release tag: `uses: quokkify/c
 | Java CI | [`java-ci.yml`](.github/workflows/java-ci.yml) | Yes | Build and test Gradle or Maven projects with a selected JDK. |
 | Docker build | [`docker-build.yml`](.github/workflows/docker-build.yml) | Yes | Build without pushing by default; optionally authenticate and push an image. |
 | Release Please | [`release-please.yml`](.github/workflows/release-please.yml) | Yes | Create release PRs and immutable releases in single-package or manifest mode. |
+| Label sync | [`labels-sync.yml`](.github/workflows/labels-sync.yml) | Yes | Sync the organization label manifest plus an optional project `.github/labels.yml`; never deletes unlisted labels by default, but aliases merge old labels into their target. A project file must be a non-empty list and must not reuse a manifest name or alias. |
 | Trusted Allure publisher | [`allure-publisher.yml`](.github/workflows/allure-publisher.yml) | Yes | Validate completed PR-run artifacts, generate an Allure report, and optionally publish a safe comment and Pages preview. |
 | Runner detection | [`reusable-detect-runner.yml`](.github/workflows/reusable-detect-runner.yml) | Internal | Select a trusted self-hosted runner for this repository's own validation jobs; it is not a supported consumer API. |
 
 The [`Auto-update Copier-managed repositories`](.github/workflows/copier-fleet-auto-update.yml) workflow is repository automation, not a reusable workflow: it audits public Copier-managed consumers for template drift on most days and opens template-update pull requests after every release, plus weekly as a safety net.
+
+To install a new module (for example `labels`) across the fleet, run the updater with `--add-module`; see [usage](docs/usage.md).
 
 ## Start a project from the template
 
@@ -61,6 +64,7 @@ my-project/
     └── workflows/
         ├── validate.yml         # core module
         ├── copier-update.yml
+        ├── labels.yml           # labels module
         ├── codeql.yml           # if codeql
         ├── gitleaks.yml         # if gitleaks
         ├── allure-report.yml    # if allure_report

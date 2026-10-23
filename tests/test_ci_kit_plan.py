@@ -157,6 +157,16 @@ class PlanTests(unittest.TestCase):
         plan = build_plan(repo, drift=False)
         self.assertEqual(codes(plan), ["CIK-CORE-004", "CIK-CORE-003"])
 
+    def test_labels_requires_core(self):
+        plan = build_plan(rendered_repo("labels"), drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-003"])
+
+    def test_core_with_labels_has_no_findings_and_no_matrix(self):
+        plan = build_plan(rendered_repo("core", "labels"), drift=False)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual(plan.modules, ["core", "labels"])
+        self.assertNotIn("labels", plan.matrices)
+
 
 class CliTests(unittest.TestCase):
     def run_cli(self, *argv: str, env: dict | None = None) -> tuple[int, str, str]:

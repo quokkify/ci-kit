@@ -51,6 +51,7 @@ def rollout(arguments: list[str]) -> None:
             or args.branch != "automation/copier-template-update"):
         raise GateError("Full rollout requires the public quokkify fleet and standard automation branch")
     pilots = tuple(PILOT_CHECKS)
+    pilot_branch = {"branch": fleet.add_module_branch(args.add_module)} if args.add_module else {}
     if any(pilot in args.exclude for pilot in pilots):
         raise GateError("Full rollout cannot exclude a pilot")
     target = fleet.resolve_template_ref(args.template_repository, args.template_ref, env=os.environ.copy())
@@ -99,9 +100,9 @@ def rollout(arguments: list[str]) -> None:
                     if not match:
                         raise GateError(f"Unrecognized pilot PR: {repository}")
                     pr = int(match[1])
-                snapshot = current_snapshot(repository, pr)
+                snapshot = current_snapshot(repository, pr, **pilot_branch)
                 timeout = PILOT_TIMEOUTS.get(repository, DEFAULT_PILOT_TIMEOUT)
-                sha = verify_pilot(repository, pr, target, timeout=timeout, expected_snapshot=snapshot)
+                sha = verify_pilot(repository, pr, target, timeout=timeout, expected_snapshot=snapshot, **pilot_branch)
                 verified.append((repository, pr, snapshot))
                 gates.append({"repository": repository, "revision": sha, "base_revision": snapshot[1],
                               "merge_revision": snapshot[2], "pull_request": pr, "result": "success"})
@@ -110,9 +111,9 @@ def rollout(arguments: list[str]) -> None:
             if fleet.resolve_template_commit(args.template_repository, target, env=os.environ.copy()) != template_sha:
                 raise GateError("Template tag changed before fanout")
             for repository, pr, snapshot in verified:
-                if current_snapshot(repository, pr) != snapshot:
+                if current_snapshot(repository, pr, **pilot_branch) != snapshot:
                     raise GateError(f"Pilot changed before fanout: {repository}")
-                if verify_pilot(repository, pr, target, timeout=0, expected_snapshot=snapshot) != snapshot[0]:
+                if verify_pilot(repository, pr, target, timeout=0, expected_snapshot=snapshot, **pilot_branch) != snapshot[0]:
                     raise GateError(f"Pilot changed before fanout: {repository}")
             remaining = [*base]
             for repository in pilots:
