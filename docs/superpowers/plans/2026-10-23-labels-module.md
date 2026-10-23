@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Ветка `feat/label-sync` (worktree `~/Code/quokkify/.worktrees/ci-kit/feat-label-sync`), PR #467, база `main`.
+- Ветка `feat/label-sync`, PR #467, база `main`.
 - Модуль `labels`: `requires=("core",)`, `job=None`, вопросы — только `toolkit_version`; файлы — ровно таблица spec §4.
 - Форма реестра совпадает с веткой spec #6: `ModuleInfo.job: str | None = None` (поле остаётся вторым позиционным).
 - Коды `CIK-ADD-001..005` — тексты spec §5; каждый в `tools/ci_kit/codes.py` + `docs/errors/<code>.md` по образцу `docs/errors/CIK-UPDATE-001.md`.
@@ -103,4 +103,4 @@
 
 - [ ] **Step 1:** `git push --force-with-lease` ветки; описание PR #467 переписать под модуль: что рендерит `labels`, `ci-kit add`, `--add-module`, раскатка (renovate-presets#63 → релиз → `--add-module labels` dry-run → пилоты → остальные), test plan с результатами задач 1–3. Убрать упоминание migration PR.
 - [ ] **Step 2:** Дождаться CI; единственная ожидаемая ошибка — покрытие пресета до renovate-presets#63.
-- [ ] **Step 3:** `cmux agent message surface:1000030046` (вкладка «RFC ci-kit, PR #73»): #467 готов к мёржу, команды раскатки, условия (смёржен #63, релиз после v3.10.0).
+- [ ] **Step 3:** Уведомить владельца спеки #6 (`2026-10-23-legacy-exit-design.md`): #467 готов к мёржу, передать команды раскатки и условия (смёржен #63, релиз после v3.10.0).

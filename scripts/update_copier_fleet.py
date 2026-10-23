@@ -2677,15 +2677,15 @@ def run_ci_kit_add(repository_path: Path, module: str, target_ref: str, *, env: 
     return report
 
 
-def add_module_pull_request(repository: Repository, *, branch: str, module: str, target_ref: str, head: str, env: dict[str, str]) -> str:
+def add_module_pull_request(repository: Repository, *, branch: str, module: str, target_ref: str, env: dict[str, str]) -> str:
     existing = existing_pull_request(repository, branch, env=env)
     if existing:
         return existing
     body = (
         "## Summary\n\n"
         f"Adds the `{module}` module from the shared [`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) template "
-        f"at `{target_ref}` (commit `{head}`).\n\n"
-        f"Merging this pull request triggers the `{module}` module's workflow on the default branch.\n"
+        f"at `{target_ref}`.\n\n"
+        f"Merging this pull request triggers the `{module}` module's workflow on `main`.\n"
     )
     return create_pull_request(
         [
@@ -2756,8 +2756,8 @@ def add_module_repository(
         return Result(name, "would-add", module)
     branch = add_module_branch(module)
     squash_to_base(destination, base)
-    head = push_automation_branch(repository, destination, branch=branch, env=env, message=add_module_title(module))
-    url = add_module_pull_request(repository, branch=branch, module=module, target_ref=target_ref, head=head, env=env)
+    push_automation_branch(repository, destination, branch=branch, env=env, message=add_module_title(module))
+    url = add_module_pull_request(repository, branch=branch, module=module, target_ref=target_ref, env=env)
     return Result(name, "pull-request", url)
 
 

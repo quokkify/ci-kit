@@ -159,6 +159,15 @@ class AddTests(unittest.TestCase):
         self.assertEqual(result.commits, [])
         self.assertUnchanged(repo, before_head, before_status)
 
+    def test_unexpected_exception_rolls_back_005(self):
+        repo = core_repo()
+        before_head, before_status = head(repo), status(repo)
+        with mock.patch("ci_kit.add.build_plan", side_effect=ValueError("boom")):
+            result = add(repo)
+        self.assertEqual([f.code for f in result.findings], ["CIK-ADD-005"])
+        self.assertFalse(result.installed)
+        self.assertUnchanged(repo, before_head, before_status)
+
     def test_copier_failure_rolls_back(self):
         repo = core_repo()
         (repo / ".gitignore").write_text("cache/\n*.log\n")

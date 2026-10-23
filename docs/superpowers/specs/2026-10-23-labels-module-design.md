@@ -40,7 +40,7 @@
 | `tools/ci_kit/gate.py` | модуль с `job is None` не оценивается: он не входит в `needs` `ci / gate` |
 | `tools/ci_kit/schemas/labels.v1.json` | `schema_version: 1`, других ключей нет |
 | `template/docs/ci-kit.md.jinja` | без строки `labels.yml` (legacy его не рендерит) |
-| `scripts/validate.py` | проверка вызова `labels-sync.yml@<toolkit_version>` переезжает с legacy-сценариев на рендер модуля |
+| `scripts/validate.py` | проверка legacy-сценария удалена; рендер модуля покрыт `tests/test_labels_workflow.py` |
 
 `ci-kit update`, `plan`, `doctor`, drift и fleet `update` обрабатывают модуль без изменений: они идут по answers-файлам. Проверка покрытия пресета (`scripts/validate.py`, `TEMPLATE_WORKFLOW_SOURCES`) уже читает `modules/*/template`; путь у потребителя тот же, renovate-presets#63 остаётся верным.
 

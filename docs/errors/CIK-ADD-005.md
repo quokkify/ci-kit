@@ -4,7 +4,7 @@ Installing the module failed and the repository was rolled back to its starting 
 
 ## Cause
 
-Copier failed (the message carries its first error line), the commit could not be created, or `ci-kit plan` reported findings on the repository with the new module installed. The command resets to the original `HEAD` and deletes only files that did not exist before it ran, ignored ones included; files that were already present (for example `.venv/`) are kept.
+Copier failed (the message carries its first error line), the commit could not be created, or `ci-kit plan` reported findings on the repository with the new module installed. The command resets to the original `HEAD` and removes files created at paths that did not exist before it ran, ignored ones included; files that were already present (for example `.venv/`) are kept. Files created inside a directory that already existed but was entirely untracked or ignored may remain.
 
 ## Fix
 

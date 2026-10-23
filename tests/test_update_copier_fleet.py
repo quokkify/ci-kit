@@ -2784,7 +2784,8 @@ class AddModuleTests(TestCase):
         body = command[command.index("--body") + 1]
         self.assertIn("labels", body)
         self.assertIn("v3.9.0", body)
-        self.assertIn("d" * 40, body)
+        self.assertIn("workflow on `main`", body)
+        self.assertNotIn("d" * 40, body)
 
     def test_existing_pr_is_reused(self) -> None:
         listed = [{"url": self.URL, "number": 7, "isCrossRepository": False,

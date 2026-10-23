@@ -27,7 +27,7 @@ class _AddFailed(Exception):
 
 def _copy(src: str, ref: str, module: str, dest: Path) -> None:
     command = [
-        *_copier(), "copy", "--trust", "--defaults", "--vcs-ref", ref,
+        *_copier(), "copy", "--trust", "--defaults", "--skip-tasks", "--vcs-ref", ref,
         "-d", f"module={module}", "-d", f"toolkit_version={ref}",
         "--answers-file", f".copier-answers.{module}.yml", "--", src, str(dest),
     ]
@@ -128,8 +128,8 @@ def add_module(repo: Path, module: str, to: str, *, src_override: str | None = N
         findings = build_plan(repo, src_override=src_override).findings
         if findings:
             first = findings[0]
-            raise _AddFailed(f"plan check failed after install: {first.code} {first.module}: {first.message.splitlines()[0]}")
-    except (_AddFailed, RuntimeError) as error:
+            raise _AddFailed(f"plan check failed after install: {first.code} {first.module}: {(first.message.splitlines() or [""])[0]}")
+    except Exception as error:
         _rollback(repo, head, before)
         result.findings.append(Finding("CIK-ADD-005", module, str(error), answers_name))
         return result
