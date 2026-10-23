@@ -31,6 +31,8 @@ Call supported workflows from a job with an exact release tag: `uses: quokkify/c
 
 The [`Auto-update Copier-managed repositories`](.github/workflows/copier-fleet-auto-update.yml) workflow is repository automation, not a reusable workflow: it audits public Copier-managed consumers for template drift on most days and opens template-update pull requests after every release, plus weekly as a safety net.
 
+To install a new module (for example `labels`) across the fleet, run the updater with `--add-module`; see [usage](docs/usage.md).
+
 ## Start a project from the template
 
 You need `git`, [`gh`](https://cli.github.com/) (authenticated), and [Copier](https://copier.readthedocs.io/) 9.18.2 or newer (`uv tool install copier` or `pipx install copier`).

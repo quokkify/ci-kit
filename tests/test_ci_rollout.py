@@ -344,6 +344,28 @@ class RolloutTests(unittest.TestCase):
         self.assertLess(events.index("verify"), len(events) - 1)
         self.assertEqual(events[-1], "update")
 
+    def test_rollout_passes_add_module_to_every_stage(self):
+        calls = []
+
+        def update(arguments, report):
+            calls.append(arguments)
+            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
+            return {"schema_version": 6, "repositories": [{"repository": repository, "status": "up-to-date", "detail": ""}]}
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=update), \
+             patch.object(rollout, "verify_pilot", return_value=SHA), \
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")), \
+             patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
+            rollout.rollout(["--write", "--public-only", "--add-module", "labels",
+                             "--json-report", str(Path(temporary) / "report.json")])
+        self.assertGreater(len(calls), 1)
+        for arguments in calls:
+            self.assertEqual(arguments[arguments.index("--add-module") + 1], "labels")
+
     def test_merge_ready_bypasses_the_pilot_gate(self):
         arguments = ["--write", "--public-only", "--auto-merge", "--merge-ready"]
         with patch.object(rollout.subprocess, "run") as run, \

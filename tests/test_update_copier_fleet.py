@@ -11,7 +11,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest import TestCase, main, mock, skipUnless
 
@@ -2702,6 +2702,118 @@ class PullRequestLabelTests(TestCase):
     def test_failure_naming_another_label_is_not_retried(self) -> None:
         with self.assertRaisesRegex(fleet.FleetUpdateError, "'other' not found"):
             self.create((1, "could not add label: 'other' not found\n"), (0, ""))
+
+
+class AddModuleTests(TestCase):
+    REPOSITORY = fleet.Repository("quokkify/example", "main")
+    CORE = "_commit: v3.8.0\n_src_path: gh:quokkify/ci-kit\n"
+    LABELS = "_commit: v3.9.0\n_src_path: gh:quokkify/ci-kit\n"
+    URL = "https://github.com/quokkify/example/pull/7"
+
+    def add(self, files, *, dry_run=False, report=None, listed=(), subprocess_run=None, target="v3.9.0"):
+        report = report or {"module": "labels", "ref": target, "installed": True, "commits": ["c" * 40], "findings": []}
+        mocks = {
+            "clone": mock.patch.object(fleet, "clone_repository"),
+            "ci_kit": mock.patch.object(fleet, "run_ci_kit_add", return_value=report),
+            "push": mock.patch.object(fleet, "push_automation_branch", return_value="d" * 40),
+            "head": mock.patch.object(fleet, "git_head", return_value="b" * 40),
+            "squash": mock.patch.object(fleet, "squash_to_base"),
+            "gh_json": mock.patch.object(fleet, "gh_json", return_value=list(listed)),
+            "subprocess": mock.patch.object(
+                fleet.subprocess, "run",
+                side_effect=subprocess_run or (lambda command, **_: subprocess.CompletedProcess(command, 0, self.URL + "\n", "")),
+            ),
+            "files": mock.patch.object(fleet, "fetch_answers_files", return_value=files),
+        }
+        with tempfile.TemporaryDirectory() as workspace, ExitStack() as stack:
+            started = {name: stack.enter_context(patcher) for name, patcher in mocks.items()}
+            result = fleet.add_module_repository(
+                self.REPOSITORY, module="labels", target_ref=target, dry_run=dry_run, env={},
+                workspace=Path(workspace), expected_template="quokkify/ci-kit",
+            )
+        return result, started
+
+    def test_installed_module_is_up_to_date(self) -> None:
+        result, started = self.add({"core": self.CORE, "labels": self.LABELS})
+        self.assertEqual(result.status, "up-to-date")
+        started["clone"].assert_not_called()
+        started["ci_kit"].assert_not_called()
+
+    def test_repository_without_core_is_rejected_without_cloning(self) -> None:
+        result, started = self.add({"legacy": "x"})
+        self.assertEqual((result.status, result.detail), ("add-rejected", "CIK-ADD-003"))
+        started["clone"].assert_not_called()
+
+    def test_core_behind_target_needs_update_first(self) -> None:
+        result, started = self.add({"core": self.CORE})
+        self.assertEqual(result.status, "needs-update-first")
+        started["clone"].assert_not_called()
+        started["push"].assert_not_called()
+
+    def test_dry_run_would_add(self) -> None:
+        result, started = self.add({"core": self.CORE.replace("v3.8.0", "v3.9.0")}, dry_run=True)
+        self.assertEqual(result.status, "would-add")
+        started["ci_kit"].assert_called_once()
+        started["push"].assert_not_called()
+        started["subprocess"].assert_not_called()
+
+    def test_findings_reject_with_codes(self) -> None:
+        report = {"module": "labels", "ref": "v3.9.0", "installed": False, "commits": [],
+                  "findings": [{"code": "CIK-ADD-004", "module": "labels", "message": "m", "path": "p"}]}
+        result, started = self.add({"core": self.CORE.replace("v3.8.0", "v3.9.0")}, report=report)
+        self.assertEqual((result.status, result.detail), ("add-rejected", "CIK-ADD-004"))
+        started["push"].assert_not_called()
+
+    def test_raced_install_is_up_to_date(self) -> None:
+        report = {"module": "labels", "ref": "v3.9.0", "installed": False, "commits": [], "findings": []}
+        result, started = self.add({"core": self.CORE.replace("v3.8.0", "v3.9.0")}, report=report)
+        self.assertEqual(result.status, "up-to-date")
+        started["push"].assert_not_called()
+
+    def test_write_opens_labelled_pr_on_add_branch(self) -> None:
+        result, started = self.add({"core": self.CORE.replace("v3.8.0", "v3.9.0")})
+        self.assertEqual((result.status, result.detail), ("pull-request", self.URL))
+        push = started["push"].call_args
+        self.assertEqual(push.kwargs["branch"], "ci-kit/add-labels")
+        self.assertEqual(push.kwargs["message"], "chore(ci-kit): add labels module")
+        command = started["subprocess"].call_args.args[0]
+        self.assertEqual(command[:3], ["gh", "pr", "create"])
+        self.assertEqual(command[-2:], ["--label", "area: template"])
+        self.assertEqual(command[command.index("--base") + 1], "main")
+        self.assertEqual(command[command.index("--head") + 1], "ci-kit/add-labels")
+        body = command[command.index("--body") + 1]
+        self.assertIn("labels", body)
+        self.assertIn("v3.9.0", body)
+        self.assertIn("d" * 40, body)
+
+    def test_existing_pr_is_reused(self) -> None:
+        listed = [{"url": self.URL, "number": 7, "isCrossRepository": False,
+                   "headRepositoryOwner": {"login": "quokkify"}, "headRefName": "ci-kit/add-labels"}]
+        result, started = self.add({"core": self.CORE.replace("v3.8.0", "v3.9.0")}, listed=listed)
+        self.assertEqual((result.status, result.detail), ("pull-request", self.URL))
+        started["push"].assert_called_once()
+        started["subprocess"].assert_not_called()
+
+    def test_add_module_rejects_auto_merge_and_merge_ready(self) -> None:
+        for extra in (["--auto-merge"], ["--auto-merge", "--merge-ready"]):
+            with self.subTest(extra=extra), redirect_stderr(StringIO()), self.assertRaises(SystemExit) as raised:
+                fleet.main(["--add-module", "labels", "--write", *extra])
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_legacy_is_not_an_addable_module(self) -> None:
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as raised:
+            fleet.build_parser().parse_args(["--add-module", "legacy", "--dry-run"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_new_statuses_render_in_reports(self) -> None:
+        results = [fleet.Result("quokkify/a", "needs-update-first", "core v3.8.0"), fleet.Result("quokkify/b", "would-add", "labels"),
+                   fleet.Result("quokkify/c", "add-rejected", "CIK-ADD-004")]
+        counts = {result.status: 1 for result in results}
+        markdown = fleet.markdown_report(results, counts, {"mode": "dry-run"})
+        self.assertNotIn("Unrecognized status", markdown)
+        self.assertIn("CIK-ADD-004", markdown)
+        payload = json.loads(fleet.json_report(results, counts))
+        self.assertEqual({row["status"] for row in payload["repositories"]}, set(counts))
 
 
 class ModuleUpdateRunnerTests(TestCase):
