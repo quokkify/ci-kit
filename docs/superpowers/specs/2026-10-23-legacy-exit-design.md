@@ -61,7 +61,7 @@
 |---|---|---|
 | D1 | Включение фичи = установка модуля; флаги `allure_report`, `release_please`, `renovate` исчезают. В `security` остаются флаги `codeql` и `gitleaks`. | Модульная схема RFC; CodeQL и gitleaks включают раздельно. |
 | D2 | `security`, `release`, `allure` требуют `core` (`MODULES[...].requires`); `renovate` — тоже. | `toolkit_version` и `copier-update.yml` живут в `core`. |
-| D3 | `codeql.yml` — тонкий вызов нового reusable `.github/workflows/codeql.yml` ci-kit (`workflow_call`). Он запускает `ci-kit plan`, анализирует `actions` + языки установленных модулей (`java` → `java-kotlin`, `python` → `python`, `node` → `javascript-typescript`); непустой `codeql_languages` заменяет вывод. Имена jobs `Analyze (<lang>)` и check context `CodeQL` сохраняются. | Добавление языкового модуля включает анализ без перерендера; rulesets не меняются. |
+| D3 | `codeql.yml` — тонкий вызов нового reusable `.github/workflows/codeql.yml` ci-kit (`workflow_call`). Он запускает `ci-kit plan`, анализирует `actions` + языки установленных модулей (`java` → `java-kotlin`, `python` → `python`, `node` → `javascript-typescript`); непустой `codeql_languages` заменяет вывод. Required contexts не меняются: `CodeQL` (результат code scanning, `tool: CodeQL`) и `gitleaks` (`gitleaks.yml` остаётся полным workflow). Jobs анализа получают префикс вызывающего job (`codeql / Analyze (<lang>)`); ни один ruleset флита их не требует (проверено: skills, q4j, archgate, marketdesk). | Добавление языкового модуля включает анализ без перерендера; rulesets не меняются. |
 | D4 | `allure_source` без `auto`; в режиме `component` источник — `Validate` (`core`). | `auto` зависел от legacy `components`. |
 | D5 | `renovate_presets` — явный список; default для новой копии — `[default, github-actions]`, языковые пресеты (`python`, `javascript`, `java`, `docker`) добавляются явно. | Вывод из `components`/`docker` уходит вместе с legacy; переделка — #489. |
 | D6 | `docs/ci-kit.md` (core) — один текст для любого набора модулей: схема модулей, ссылки на `docs/modules.md` и `ci-kit doctor`; без таблицы файлов. | Таблица зависела бы от других модулей и давала бы drift при добавлении модуля. |
@@ -150,7 +150,7 @@ Fleet `update` на v4.0.0:
 ## 7. Тесты
 
 - Рендер каждого нового модуля: набор файлов; для всех legacy-сценариев — файлы модуля равны файлам соответствующей legacy-области на тех же ответах (кроме `codeql.yml`, `docs/ci-kit.md`); actionlint.
-- Reusable `codeql.yml`: языки из `plan`, override `codeql_languages`; регрессия — имена jobs `Analyze (<lang>)` и workflow `CodeQL` как у legacy для каждого сценария.
+- Reusable `codeql.yml`: языки из `plan`, override `codeql_languages`; регрессия — для каждого legacy-сценария тот же набор языков и та же `category: /language:<lang>`, что у legacy `codeql.yml` (иначе code scanning заведёт новые анализы вместо продолжения старых).
 - `migrate-legacy`: все legacy-сценарии мигрируют с эквивалентностью; негативный тест на каждый `CIK-MIGRATE-*`; откат с ignored-файлами; lifecycle migrate → `update` на следующий ref → revert.
 - Без legacy: `ci-kit update`, `copier-update.yml`, `fleet_health`, `verify_ci_gate`, fleet audit.
 - `CIK-CORE-012` (`toolkit_version` расходится между answers-файлами).
