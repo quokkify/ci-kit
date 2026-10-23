@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -94,14 +95,27 @@ def _ignored(repo: Path) -> set[str]:
     return {os.fsdecode(path) for path in result.stdout.split(b"\0") if path}
 
 
-def _rollback(repo: Path, head: str, ignored: set[str]) -> None:
-    """Restore head and remove what the migration created, keeping ignored files that existed before it."""
+def _porcelain(repo: Path) -> str:
+    return _git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored")
+
+
+def _rollback(repo: Path, head: str, ignored: set[str], porcelain: str) -> str | None:
+    """Restore head and remove what the migration created, keeping ignored files that existed before it.
+
+    Returns what could not be restored, or None once HEAD and the tree (ignored files included) match the snapshot.
+    """
     _git(repo, "reset", "-q", "--hard", head, check=False)
     _git(repo, "clean", "-qfd", check=False)
     for path in sorted(_ignored(repo) - ignored):
         (repo / path).unlink(missing_ok=True)
     # Directories that held only the removed files are now empty and untracked.
     _git(repo, "clean", "-qfd", check=False)
+    problems = []
+    if _git(repo, "rev-parse", "HEAD", check=False) != head:
+        problems.append(f"HEAD is not {head[:7]}")
+    if _porcelain(repo) != porcelain:
+        problems.append("the working tree differs from before the migration")
+    return "; ".join(problems) or None
 
 
 def _tracked(repo: Path) -> dict[str, bytes]:
@@ -149,6 +163,13 @@ def _copy(repo: Path, module: str, to: str, src: str, data: dict) -> str | None:
             *_copier(), "copy", "--defaults", "--quiet", "--trust", "--overwrite", "--skip-tasks",
             "--vcs-ref", to, "--data-file", str(data_file), "-a", f".copier-answers.{module}.yml", "--", src, ".",
         ], repo)
+
+
+def _pin_source(repo: Path, module: str, src: str) -> None:
+    """The override only selects where to render from: the answers keep the source the legacy answers name."""
+    path = repo / f".copier-answers.{module}.yml"
+    pinned = yaml.safe_dump({"_src_path": src}, default_flow_style=False, width=float("inf")).rstrip("\n")
+    path.write_text(re.sub(r"^_src_path:.*$", lambda _: pinned, path.read_text(), count=1, flags=re.MULTILINE))
 
 
 def _render_legacy(repo: Path, src_override: str | None) -> dict[str, bytes]:
@@ -316,17 +337,23 @@ def migrate_legacy(repo: Path, to: str, *, src_override: str | None = None) -> M
     before_checks = checks_before(legacy)
     head = _git(repo, "rev-parse", "HEAD")
     ignored = _ignored(repo)
+    porcelain = _porcelain(repo)
     before = _tracked(repo)
     starters = _starters(repo)
     commits: list[str] = []
 
     def abort(findings: list[Finding]) -> MigrateLegacyResult:
-        _rollback(repo, head, ignored)
+        problem = _rollback(repo, head, ignored, porcelain)
+        if problem:
+            findings = [*findings, Finding("CIK-MIGRATE-005", MODULE, f"rollback incomplete: {problem}; inspect the repository", None)]
         result.findings = findings
         return result
 
     def failed(message: str) -> MigrateLegacyResult:
-        return abort([Finding("CIK-MIGRATE-005", MODULE, f"{message}; rolled back to {head[:7]}", None)])
+        problem = _rollback(repo, head, ignored, porcelain)
+        outcome = f"rolled back to {head[:7]}" if problem is None else f"rollback incomplete: {problem}; inspect the repository"
+        result.findings = [Finding("CIK-MIGRATE-005", MODULE, f"{message}; {outcome}", None)]
+        return result
 
     def commit(message: str) -> None:
         rejects = _rejects(repo)
@@ -336,6 +363,12 @@ def migrate_legacy(repo: Path, to: str, *, src_override: str | None = None) -> M
         sha = commit_all(repo, message)
         if sha:
             commits.append(sha)
+
+    def copy(module: str, data: dict) -> str | None:
+        problem = _copy(repo, module, to, src, data)
+        if not problem:
+            _pin_source(repo, module, str(legacy["_src_path"]))
+        return problem
 
     try:
         flow = "[" + ", ".join(AREAS) + "]"
@@ -348,12 +381,12 @@ def migrate_legacy(repo: Path, to: str, *, src_override: str | None = None) -> M
         commit(f"chore(ci-kit): hand off {', '.join(MIGRATED)} to modules")
         # copy, not update: Copier would treat the base files legacy just dropped as deletions by the project.
         core = {key: value for key, value in _read(repo / ".copier-answers.core.yml").items() if not str(key).startswith("_")}
-        problem = _copy(repo, "core", to, src, core)
+        problem = copy("core", core)
         if problem:
             return failed(f"copier copy of core failed: {problem}")
         commit("chore(ci-kit): render core base files")
         for module in modules:
-            problem = _copy(repo, module, to, src, translated[module])
+            problem = copy(module, translated[module])
             if problem:
                 return failed(f"copier copy of {module} failed: {problem}")
             commit(f"chore(ci-kit): add {module} module")
@@ -361,6 +394,12 @@ def migrate_legacy(repo: Path, to: str, *, src_override: str | None = None) -> M
         findings = equivalence_findings(repo, before, modules, to, (before_checks, after_checks), src_override)
     except (OSError, ValueError, RuntimeError) as error:
         return failed(str(error))
+    except BaseException as error:
+        # Includes KeyboardInterrupt: the repository must never keep a half-applied migration.
+        problem = _rollback(repo, head, ignored, porcelain)
+        if problem:
+            error.add_note(f"rollback incomplete: {problem}; inspect the repository")
+        raise
     if findings:
         return abort(findings)
     result.modules = modules

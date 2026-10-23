@@ -576,5 +576,84 @@ class RolloutTests(unittest.TestCase):
             self.assertIn("fanout not started", summary)
 
 
+class MigrateLegacyRolloutTests(unittest.TestCase):
+    ARGUMENTS = ["--write", "--public-only", "--migrate-legacy"]
+
+    def run_rollout(self, statuses, migration):
+        events = []
+
+        def update(arguments, report):
+            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
+            events.append(("update", repository, arguments))
+            status = statuses.get(repository, "pull-request")
+            detail = f"https://github.com/{repository}/pull/5" if status == "pull-request" else ""
+            return {"repositories": [{"repository": repository, "status": status, "detail": detail}]}
+
+        calls = []
+
+        def verify(repository, pr, target, timeout, expected_snapshot=None, **kwargs):
+            calls.append((repository, pr, kwargs))
+            return SHA
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=update), \
+             patch.object(rollout, "pilot_migration", side_effect=migration), \
+             patch.object(rollout, "verify_pilot", side_effect=verify), \
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
+            try:
+                rollout.rollout([*self.ARGUMENTS, "--json-report", str(Path(temporary) / "report.json")])
+            finally:
+                self.events, self.calls = events, calls
+
+    def test_rollout_migrate_legacy_pilots(self):
+        self.assertEqual(rollout.MIGRATE_LEGACY_PILOTS,
+                         ("quokkify/gh-pages-subdir-action", "quokkify/skills", "quokkify/q4j"))
+        self.run_rollout({}, lambda repository, pr: ((f"{repository}: ci / gate", "CodeQL"), SHA))
+        self.assertEqual([event[1] for event in self.events[:-1]], list(rollout.MIGRATE_LEGACY_PILOTS))
+        self.assertEqual(self.events[-1][1], "remaining")
+        self.assertEqual({repository for repository, _, _ in self.calls}, set(rollout.MIGRATE_LEGACY_PILOTS))
+        for repository, pr, kwargs in self.calls:
+            self.assertEqual(pr, 5)
+            self.assertEqual(kwargs["contexts"], (f"{repository}: ci / gate", "CodeQL"))
+            self.assertEqual(kwargs["branch"], "ci-kit/migrate-legacy")
+        for event in self.events:
+            self.assertIn("--migrate-legacy", event[2])
+
+    def test_non_pull_request_pilot_status_stops_with_repository_and_status(self):
+        target = rollout.MIGRATE_LEGACY_PILOTS[1]
+        for status in ("not-applicable", "needs-update-first", "migrate-rejected", "would-migrate"):
+            with self.subTest(status=status):
+                with self.assertRaisesRegex(gate.GateError, f"{target}.*{status}"):
+                    self.run_rollout({target: status}, lambda repository, pr: (("ci / gate",), SHA))
+                self.assertFalse(any(event[1] == "remaining" for event in self.events))
+
+    def test_moved_head_or_unusable_marker_stops_before_fanout(self):
+        def unusable(repository, pr):
+            raise gate.GateError(f"migrate marker unusable: {repository}")
+
+        with self.assertRaises(gate.GateError):
+            self.run_rollout({}, unusable)
+        self.assertEqual(self.calls, [])
+        with self.assertRaisesRegex(gate.GateError, "head moved"):
+            self.run_rollout({}, lambda repository, pr: (("ci / gate",), "b" * 40))
+        self.assertEqual(self.calls, [])
+
+    def test_pilot_migration_parses_checks_after_and_head(self):
+        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "CodeQL"]}) + "\n```"
+        completed = type("Done", (), {"stdout": json.dumps({"body": body, "headRefOid": SHA})})()
+        with patch.object(rollout.subprocess, "run", return_value=completed):
+            self.assertEqual(rollout.pilot_migration(REPO, 5), (("ci / gate", "CodeQL"), SHA))
+        for payload in ({"body": "no marker", "headRefOid": SHA},
+                        {"body": body.replace("checks_after", "other"), "headRefOid": SHA},
+                        {"body": body, "headRefOid": "x"}):
+            completed = type("Done", (), {"stdout": json.dumps(payload)})()
+            with self.subTest(payload=payload), patch.object(rollout.subprocess, "run", return_value=completed):
+                with self.assertRaises(gate.GateError):
+                    rollout.pilot_migration(REPO, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

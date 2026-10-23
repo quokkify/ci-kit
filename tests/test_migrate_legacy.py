@@ -178,6 +178,72 @@ class MigrateLegacyTests(unittest.TestCase):
         self.assertFalse((repo / "cache").exists())
         self.assertEqual((repo / "kept.log").read_text(), "existed before\n")
 
+    def failing_stage(self, stage: str, error: BaseException):
+        repo = self.repo()
+        (repo / ".gitignore").write_text("*.log\n")
+        commit_all(repo, "ignore logs")
+        (repo / "kept.log").write_text("existed before\n")
+        head = git(repo, "rev-parse", "HEAD")
+        status = git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored")
+        real_run, real_copy = migration._run, migration._copy
+
+        def update(command, repo_path):
+            problem = real_run(command, repo_path)
+            (repo_path / "made.log").write_text("made by the migration\n")
+            raise error
+
+        def copy(repo_path, module, *args):
+            problem = real_copy(repo_path, module, *args)
+            (repo_path / "made.log").write_text("made by the migration\n")
+            if module == "security":
+                raise error
+            return problem
+
+        patch = {"legacy-update": ("_run", update), "module-copy": ("_copy", copy)}[stage]
+        with mock.patch.object(migration, patch[0], side_effect=patch[1]), self.assertRaises(type(error)):
+            self.migrate(repo)
+        self.assertEqual(git(repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(git(repo, "status", "--porcelain", "--untracked-files=all", "--ignored"), status)
+        self.assertFalse((repo / "made.log").exists())
+        self.assertEqual((repo / "kept.log").read_text(), "existed before\n")
+
+    def test_any_exception_at_legacy_update_rolls_back(self):
+        self.failing_stage("legacy-update", KeyboardInterrupt())
+
+    def test_any_exception_at_module_copy_rolls_back(self):
+        self.failing_stage("module-copy", KeyError("boom"))
+
+    def test_unrestorable_rollback_reports_a_distinct_finding(self):
+        repo = self.repo()
+        real_copy, real_git = migration._copy, migration._git
+
+        def tampered(repo_path, module, *args):
+            problem = real_copy(repo_path, module, *args)
+            if module == "security":
+                (repo_path / ".github/workflows/gitleaks.yml").write_text("name: gitleaks\n")
+            return problem
+
+        def no_restore(repo_path, *args, **kwargs):
+            return "" if args[0] in ("reset", "clean") else real_git(repo_path, *args, **kwargs)
+
+        with mock.patch.object(migration, "_copy", side_effect=tampered), mock.patch.object(migration, "_git", side_effect=no_restore):
+            result = self.migrate(repo)
+        messages = [f.message for f in result.findings]
+        self.assertTrue(any(message.startswith("rollback incomplete") for message in messages), messages)
+        self.assertFalse(any("rolled back" in message for message in messages), messages)
+
+    def test_new_answers_keep_the_legacy_template_source(self):
+        repo = self.repo()
+        with tempfile.TemporaryDirectory() as tmp:
+            alias = Path(tmp) / "template-alias"
+            alias.symlink_to(self.template)
+            result = migrate_legacy(repo, REF, src_override=str(alias))
+        self.assertEqual(result.findings, [])
+        legacy = yaml.safe_load((repo / ".copier-answers.yml").read_text())["_src_path"]
+        for path in sorted(repo.glob(".copier-answers.*.yml")):
+            with self.subTest(path=path.name):
+                self.assertEqual(yaml.safe_load(path.read_text())["_src_path"], legacy)
+
     def test_codeql_language_change_is_005(self):
         repo = self.repo("python")
         head = git(repo, "rev-parse", "HEAD")

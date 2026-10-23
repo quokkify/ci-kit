@@ -43,7 +43,7 @@ copier copy https://github.com/quokkify/ci-kit.git my-project \
   -a .copier-answers.core.yml -d module=core
 ```
 
-Run the same commands with `.` instead of `my-project` from the root of an existing repository. The first command applies the legacy template (shared files and optional features); it hands the `validate` area to the `core` module, so the second command adds `core`, which owns `validate.yml`. Add a language module per stack the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). Together they write:
+Run the same commands with `.` instead of `my-project` from the root of an existing repository. A new repository is `core` plus any of the `security`, `release`, `allure` and `renovate` modules plus one language module per stack, each added the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). The first command applies the legacy template, which is transitional until v4.0.0; it hands `validate` to `core`, and `ci-kit migrate-legacy` hands the remaining areas to modules. Together they write:
 
 ```text
 my-project/

@@ -133,6 +133,10 @@ class RenovateParityTests(unittest.TestCase):
 
 class BaseParityTests(unittest.TestCase):
     STARTERS = ("README.md", ".github/pull_request_template.md")
+    # docs/ci-kit.md no longer holds the file list, a checklist or the copier update command (D6);
+    # the legacy README, removed in v4, still describes it that way.
+    LEGACY_GUIDE = b"for the generated files, a first-day checklist, and the `copier update` command;"
+    CORE_GUIDE = b"for the installed modules, the installation check, and the update steps;"
 
     def test_base_parity(self) -> None:
         template = shared_template_repo()
@@ -146,7 +150,7 @@ class BaseParityTests(unittest.TestCase):
                 project = yaml.safe_load(legacy[".copier-answers.yml"])["project_name"]
                 expected = render_tree(template, None, {"module": "core", "toolkit_version": PIN, "project_name": project})
                 for path in self.STARTERS:
-                    self.assertEqual(expected[path], legacy[path], path)
+                    self.assertEqual(expected[path], legacy[path].replace(self.LEGACY_GUIDE, self.CORE_GUIDE), path)
 
     def test_copier_update_keeps_legacy_step_behind_answers_file(self) -> None:
         template = shared_template_repo()

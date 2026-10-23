@@ -60,7 +60,7 @@ cd my-project
 copier update --trust
 ```
 
-Every generated repository is the legacy template plus the `core` module and its language modules (see [modules](modules.md)); together they provide the shared baseline workflows:
+A new repository is the `core` module, any of the `security`, `release`, `allure` and `renovate` modules, and one language module per stack (see [modules](modules.md)). The legacy template is transitional until v4.0.0; repositories that still use it move with `ci-kit migrate-legacy`. The shared baseline workflows are:
 
 - `validate.yml`, owned by the `core` module, runs the Python, Node.js, Java, and Docker jobs declared by the language modules; the legacy template no longer renders it ([CIK-LEGACY-006](errors/CIK-LEGACY-006.md));
 - `codeql.yml` analyzes GitHub Actions plus the languages inferred from `components` when `codeql` is enabled;

@@ -18,6 +18,9 @@ from unittest import TestCase, main, mock, skipUnless
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+from ci_kit.migration_marker import parse_marker  # noqa: E402
 SPEC = importlib.util.spec_from_file_location(
     "update_copier_fleet", ROOT / "scripts/update_copier_fleet.py"
 )
@@ -3837,6 +3840,123 @@ class MergeReadyTests(TestCase):
         process_mock.assert_not_called()
         clone_mock.assert_not_called()
         resolve_mock.assert_not_called()
+
+
+class MigrateLegacyModeTests(TestCase):
+    LEGACY = "_commit: v3.10.0\n_src_path: gh:quokkify/ci-kit\nhanded_off:\n  - validate\n"
+    FINDINGS = [
+        {"code": "CIK-MIGRATE-003", "module": "release", "message": ".github/workflows/release.yml differs\n--- a\n+++ b", "path": ".github/workflows/release.yml"},
+        {"code": "CIK-MIGRATE-005", "module": "legacy", "message": "legacy still renders x", "path": ".copier-answers.yml"},
+    ]
+
+    def migrate(self, files, *, dry_run=True, findings=(), push_sha="b" * 40, existing=None):
+        from ci_kit.migrate_legacy import MigrateLegacyResult
+        from ci_kit.plan import Finding
+
+        migrated = MigrateLegacyResult(
+            "v3.10.0", ["security", "release"], ["a" * 40, "c" * 40], ["ci / gate", "CodeQL"], ["ci / gate", "CodeQL"],
+            [Finding(item["code"], item["module"], item["message"], item["path"]) for item in findings],
+        )
+        calls: list[list[str]] = []
+
+        def fake_run(command, **_):
+            calls.append(list(command))
+            if command[:3] == ["gh", "pr", "create"]:
+                return subprocess.CompletedProcess(command, 0, "https://github.com/quokkify/example/pull/42\n", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(fleet, "fetch_answers_files", return_value=files), \
+             mock.patch.object(fleet, "clone_repository", side_effect=materialize_files({})), \
+             mock.patch.object(fleet, "run_ci_kit_migrate_legacy", return_value=migrated) as migrate_mock, \
+             mock.patch.object(fleet, "push_automation_branch", return_value=push_sha) as push_mock, \
+             mock.patch.object(fleet, "run", side_effect=fake_run), \
+             mock.patch.object(fleet, "gh_json", return_value=existing or []), \
+             mock.patch.object(fleet, "git_head", return_value=push_sha), \
+             mock.patch.object(fleet, "squash_to_base"), \
+             tempfile.TemporaryDirectory() as temporary:
+            outcome = fleet.migrate_legacy_repository(
+                fleet.Repository("quokkify/example", "main"),
+                target_ref="v3.10.0", dry_run=dry_run, env={}, workspace=Path(temporary),
+            )
+        return outcome, migrate_mock, push_mock, calls
+
+    def test_migrate_legacy_flag_opens_marked_pr(self) -> None:
+        outcome, migrate_mock, push_mock, calls = self.migrate({"legacy": self.LEGACY, "core": CORE_ANSWERS_TEXT}, dry_run=False)
+        self.assertEqual((outcome.status, outcome.detail), ("pull-request", "https://github.com/quokkify/example/pull/42"))
+        migrate_mock.assert_called_once()
+        self.assertNotIn("--template-src", migrate_mock.call_args.args + tuple(migrate_mock.call_args.kwargs))
+        self.assertEqual(push_mock.call_args.kwargs["branch"], "ci-kit/migrate-legacy")
+        create = next(c for c in calls if c[:3] == ["gh", "pr", "create"])
+        self.assertEqual(create[create.index("--head") + 1], "ci-kit/migrate-legacy")
+        self.assertEqual(create[create.index("--title") + 1], "chore(ci-kit): hand off base, security, release, allure, renovate to modules")
+        body = create[create.index("--body") + 1]
+        self.assertIn("| module | answers file |", body)
+        self.assertIn("| release | `.copier-answers.release.yml` |", body)
+        marker = parse_marker(body)
+        self.assertEqual(marker["modules"], ["security", "release"])
+        self.assertEqual(marker["commits"], [push_mock.return_value])
+        self.assertEqual(marker["checks_after"], ["ci / gate", "CodeQL"])
+
+    def test_existing_pull_request_body_is_updated(self) -> None:
+        _, _, _, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, existing=[{"url": "https://github.com/quokkify/example/pull/7"}])
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "pr", "create"]])
+        self.assertTrue([c for c in calls if c[:3] == ["gh", "pr", "edit"]])
+
+    def test_dry_run_reports_would_migrate_without_pushing(self) -> None:
+        outcome, migrate_mock, push_mock, calls = self.migrate({"legacy": self.LEGACY})
+        self.assertEqual((outcome.status, outcome.detail), ("would-migrate", "core, security, release"))
+        migrate_mock.assert_called_once()
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:2] == ["gh", "pr"]])
+
+    def test_migrate_legacy_rejection_reports_codes(self) -> None:
+        outcome, _, push_mock, calls = self.migrate({"legacy": self.LEGACY}, dry_run=False, findings=self.FINDINGS)
+        self.assertEqual((outcome.status, outcome.detail), ("migrate-rejected", "CIK-MIGRATE-003, CIK-MIGRATE-005"))
+        self.assertIn("+++ b", outcome.migration["findings"][0]["message"])
+        push_mock.assert_not_called()
+        self.assertFalse([c for c in calls if c[:3] == ["gh", "pr", "create"]])
+        report = json.loads(fleet.json_report([outcome], {"migrate-rejected": 1}))
+        self.assertEqual(report["repositories"][0]["migration"]["findings"][0]["code"], "CIK-MIGRATE-003")
+        self.assertEqual(fleet.results_from_report(report)[0].migration, outcome.migration)
+        self.assertIn("CIK-MIGRATE-003", fleet.markdown_report([outcome], {"migrate-rejected": 1}))
+
+    def test_not_applicable_foreign_and_stale_repositories_are_not_migrated(self) -> None:
+        cases = (
+            ({"core": CORE_ANSWERS_TEXT}, "not-applicable"),
+            ({"legacy": self.LEGACY + "".join(f"  - {area}\n" for area in fleet.MIGRATED)}, "not-applicable"),
+            ({"legacy": "_commit: v3.10.0\n_src_path: gh:someone/else\n"}, "foreign-template"),
+            ({"legacy": LEGACY_ANSWERS_TEXT}, "needs-update-first"),
+        )
+        for files, status in cases:
+            with self.subTest(status=status):
+                outcome, migrate_mock, push_mock, _ = self.migrate(files, dry_run=False)
+                self.assertEqual(outcome.status, status)
+                migrate_mock.assert_not_called()
+                push_mock.assert_not_called()
+
+    def test_migrate_legacy_rejects_auto_merge(self) -> None:
+        for extra in (["--auto-merge", "--write"], ["--merge-ready", "--write", "--auto-merge"]):
+            with self.subTest(extra=extra), mock.patch("sys.stderr", new_callable=StringIO) as stderr, \
+                    self.assertRaises(SystemExit) as raised:
+                fleet.main(["--migrate-legacy", *extra])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("cannot be combined with --migrate-legacy", stderr.getvalue())
+
+    @mock.patch.dict("os.environ", {"GH_TOKEN": "t"}, clear=False)
+    def test_main_routes_migrate_legacy_to_its_branch_and_fails_on_rejection(self) -> None:
+        repository = fleet.Repository("quokkify/example", "main")
+        outcome = fleet.Result("quokkify/example", "migrate-rejected", "CIK-MIGRATE-003")
+        with mock.patch.object(fleet.shutil, "which", return_value="/usr/bin/tool"), \
+             mock.patch.object(fleet, "discover_repositories", return_value=[repository]), \
+             mock.patch.object(fleet, "resolve_template_ref", return_value="v3.10.0"), \
+             mock.patch.object(fleet, "migrate_legacy_repository", return_value=outcome) as migrate_mock, \
+             mock.patch.object(fleet, "process_repository") as process_mock, \
+             redirect_stdout(StringIO()):
+            status = fleet.main(["--dry-run", "--migrate-legacy"])
+        self.assertEqual(status, 1)
+        self.assertEqual(migrate_mock.call_args.kwargs["branch"], "ci-kit/migrate-legacy")
+        self.assertEqual(migrate_mock.call_args.kwargs["target_ref"], "v3.10.0")
+        process_mock.assert_not_called()
 
 
 class ReleaseHelperDriftTests(TestCase):
