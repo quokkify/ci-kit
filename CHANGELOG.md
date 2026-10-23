@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.10.0](https://github.com/quokkify/ci-kit/compare/v3.9.0...v3.10.0) (2026-10-23)
+
+
+### ✨ Features
+
+* **modules:** hand every legacy area to modules and add migrate-legacy ([#495](https://github.com/quokkify/ci-kit/issues/495)) ([5acfb7e](https://github.com/quokkify/ci-kit/commit/5acfb7ed493ff51df7b235ba3d4e102e04941843))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.176.2 ([#479](https://github.com/quokkify/ci-kit/issues/479)) ([a970466](https://github.com/quokkify/ci-kit/commit/a9704667997086182c5bffcea4b5109726c7ce8d))
+* **renovate:** update renovate to v44.176.3 ([#494](https://github.com/quokkify/ci-kit/issues/494)) ([b1b182a](https://github.com/quokkify/ci-kit/commit/b1b182a2f4854d0063b881924ffef40dac159747))
+
 ## [3.9.0](https://github.com/quokkify/ci-kit/compare/v3.8.0...v3.9.0) (2026-10-22)
 
 
