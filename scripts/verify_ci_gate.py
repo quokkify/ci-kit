@@ -157,9 +157,6 @@ PILOT_CHECKS = {
 PILOT_PULL_REQUEST_ONLY_CHECKS = {
     "quokkify/q4j": ("Tests pipeline complete",),
 }
-# Code scanning publishes the CodeQL check run on pull request heads only; on the default branch
-# CodeQL is verified by workflow identity instead.
-PULL_REQUEST_ONLY_TEMPLATE_CHECKS = ("CodeQL",)
 PILOT_BRANCH = "automation/copier-template-update"
 DEFAULT_PILOT_TIMEOUT = 900
 # Pilot CI that outlasts the default wait: the q4j module tests take 16 to 34 minutes.
@@ -210,8 +207,11 @@ def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *,
 
 def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
     contexts = tuple(dict.fromkeys((*PILOT_CHECKS[repository], *template)))
+    # Code scanning publishes an interim neutral CodeQL check run before every analysis has uploaded, so the
+    # context is never required; pilot_ready proves CodeQL by the codeql.yml workflow run instead.
+    contexts = tuple(context for context in contexts if context != "CodeQL")
     if pr is None:
-        pull_request_only = (*PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ()), *PULL_REQUEST_ONLY_TEMPLATE_CHECKS)
+        pull_request_only = PILOT_PULL_REQUEST_ONLY_CHECKS.get(repository, ())
         contexts = tuple(context for context in contexts if context not in pull_request_only)
     return contexts
 
