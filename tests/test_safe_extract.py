@@ -279,7 +279,7 @@ class SafeExtractTest(TestCase):
     def test_core_download_selects_per_artifact_layout_only_for_source_artifacts(self) -> None:
         step = next(
             step for step in CORE["jobs"]["download"]["steps"]
-            if step.get("run") == "python .toolkit/template/.github/allure/safe_extract.py.jinja"
+            if step.get("run") == "python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja"
         )
         self.assertEqual(
             step["env"]["MATERIALIZE_LAYOUT"],

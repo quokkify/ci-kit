@@ -81,6 +81,8 @@ def evaluate(
         rows.append(Row("plan", ref, RESULT_LABELS.get(plan_result, plan_result), "template", "", ",".join(plan_codes)))
     for module in enabled:
         info = MODULES.get(module)
+        if info and info.job is None:
+            continue
         job_id = info.job if info else module
         handled.add(job_id)
         result = _result(needs, job_id)

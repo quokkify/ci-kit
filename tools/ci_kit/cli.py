@@ -10,6 +10,9 @@ from .gate import evaluate, render_summary
 from .inputs import WORKFLOWS
 from .plan import Finding, build_plan, discover
 
+# Ordered as the legacy CodeQL workflow iterated python, node, then java components.
+CODEQL_LANGUAGES = {"python": "python", "node": "javascript-typescript", "java": "java-kotlin"}
+
 
 def _compact(value: object) -> str:
     return json.dumps(value, separators=(",", ":"))
@@ -49,9 +52,13 @@ def _template_commits(repo: Path) -> dict[str, str]:
 
 
 def _plan(args: argparse.Namespace) -> int:
-    plan = build_plan(Path(args.repo), src_override=args.template_src)
+    plan = build_plan(Path(args.repo), drift=not args.no_drift, src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules)}
     outputs.update({module: _compact(plan.matrices.get(module, [])) for module in WORKFLOWS})
+    # Every discovered module counts, loaded or not: a broken declaration must
+    # not silently drop its language from security scanning.
+    discovered = set().union(*discover(Path(args.repo)))
+    outputs["codeql"] = _compact(["actions", *(language for module, language in CODEQL_LANGUAGES.items() if module in discovered)])
     if args.github_output:
         outputs["codes"] = _compact(list(dict.fromkeys(finding.code for finding in plan.findings)))
         outputs["commits"] = _compact(_template_commits(Path(args.repo)))
@@ -94,6 +101,19 @@ def _update(args: argparse.Namespace) -> int:
         }
         Path(args.json).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return 1 if findings else 0
+
+
+def _migrate_legacy(args: argparse.Namespace) -> int:
+    from .migrate_legacy import migrate_legacy, render_marker, result_payload
+
+    result = migrate_legacy(Path(args.repo), args.to, src_override=args.template_src)
+    for finding in result.findings:
+        print(format_finding(finding))
+    if not result.findings:
+        print(render_marker(result))
+    if args.json:
+        Path(args.json).write_text(json.dumps(result_payload(result), indent=2) + "\n", encoding="utf-8")
+    return 1 if result.findings else 0
 
 
 def _load_json(text: str, label: str) -> object:
@@ -175,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--repo", required=True)
     plan.add_argument("--github-output")
     plan.add_argument("--template-src")
+    plan.add_argument("--no-drift", action="store_true")
     plan.set_defaults(func=_plan)
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--repo", required=True)
@@ -188,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
     update.add_argument("--template-src")
     update.add_argument("--json")
     update.set_defaults(func=_update)
+    migrate_legacy = sub.add_parser("migrate-legacy")
+    migrate_legacy.add_argument("--repo", required=True)
+    migrate_legacy.add_argument("--to", required=True)
+    migrate_legacy.add_argument("--template-src")
+    migrate_legacy.add_argument("--json")
+    migrate_legacy.set_defaults(func=_migrate_legacy)
     gate = sub.add_parser("gate")
     gate.add_argument("--enabled", required=True)
     gate.add_argument("--needs", required=True)

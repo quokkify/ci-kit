@@ -55,6 +55,39 @@ def _rel(repo: Path, path: Path) -> str:
     return path.relative_to(repo).as_posix()
 
 
+def _version_findings(repo: Path, answers: dict[str, Path]) -> list[Finding]:
+    # One toolkit release for every answers file (legacy included) until modules release independently.
+    files = dict(answers)
+    legacy = repo / ".copier-answers.yml"
+    if legacy.is_file():
+        files["legacy"] = legacy
+    values: dict[str, dict] = {}
+    for module, path in files.items():
+        try:
+            data = yaml.safe_load(path.read_text())
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict):
+            values[module] = data
+    reference = next((module for module in ("core", "legacy") if module in values), None)
+    if reference is None:
+        return []
+    findings: list[Finding] = []
+    for key in ("toolkit_version", "_commit"):
+        expected = values[reference].get(key)
+        if not expected:
+            continue
+        for module in sorted(values):
+            actual = values[module].get(key)
+            if module != reference and actual and actual != expected:
+                findings.append(Finding(
+                    "CIK-CORE-012", module,
+                    f"{key} {actual} in {files[module].name} differs from {expected} in {files[reference].name}",
+                    files[module].name,
+                ))
+    return findings
+
+
 def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
     repo = Path(repo)
     answers, declarations = discover(repo)
@@ -121,12 +154,16 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
                 findings.append(Finding("CIK-CORE-005", module, f"component name {name} is used by more than one component in module {module}", f".ci/modules/{module}.yml"))
             module_names.add(name)
 
+    findings.extend(_version_findings(repo, answers))
+
     modules = sorted(loaded)
     module_owned: set[str] = set()
+    rendered: set[str] | None = None
     if drift and modules:
         from .drift import drift_findings
 
         findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override, module_owned))
+        rendered = set(module_owned)
     module_owned.update(f".ci/modules/{module}.yml" for module in modules)
     legacy_path = repo / ".copier-answers.yml"
     if legacy_path.exists():
@@ -141,7 +178,7 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             owned_areas = [area for area in AREAS.values() if area.module in loaded]
         for area in owned_areas:
             module_owned.update(area.legacy_paths)
-        findings.extend(handoff_findings(repo, legacy_answers, set(answers)))
+        findings.extend(handoff_findings(repo, legacy_answers, set(answers), rendered))
         findings.extend(legacy_findings(repo, module_owned))
     matrices = {module: [fill(module, component) for component in loaded[module].get("components", [])] for module in modules if module in WORKFLOWS}
     return Plan(modules=modules, matrices=matrices, findings=findings, module_owned=module_owned)

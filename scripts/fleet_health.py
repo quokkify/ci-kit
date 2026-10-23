@@ -157,6 +157,9 @@ def collect_health(repository: str, default_branch: str, target: str | None, aut
         sha = revision(request, repository, branch)
         result["default_sha"] = sha
         content = request(f"repos/{repository}/contents/.copier-answers.yml?ref={sha}")
+        if content is None:
+            # request returns None for a confirmed 404: a repository fully handed off to modules has no legacy answers file.
+            content = request(f"repos/{repository}/contents/.copier-answers.core.yml?ref={sha}")
         if not isinstance(content, dict) or content.get("encoding") != "base64" or not isinstance(content.get("content"), str):
             raise HealthUnavailable("applied template answers unavailable")
         answers = yaml.safe_load(base64.b64decode("".join(content["content"].split()), validate=True).decode("utf-8"))

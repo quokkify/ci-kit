@@ -1,0 +1,16 @@
+export default {
+  name: {{ project_name | tojson }},
+  output: "./allure-report",
+  historyPath: "./allure-history/history.jsonl",
+  historyLimit: 20,
+  plugins: {
+    awesome: {
+      options: {
+        reportName: {{ (project_name ~ " test report") | tojson }},
+        singleFile: false,
+        reportLanguage: "en",
+        groupBy: ["epic", "feature", "story"],
+      },
+    },
+  },
+};

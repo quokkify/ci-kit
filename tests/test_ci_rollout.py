@@ -34,8 +34,23 @@ LEGACY_VALIDATE = (b"jobs:\n  template-contract:\n    name: Shared template cont
                    b"  app:\n    name: App Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v1.2.3\n")
 
 
+def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
+    def read(endpoint, *, missing_ok=False):
+        if endpoint.endswith(f".copier-answers.yml?ref={SHA}"):
+            assert missing_ok
+            return None
+        if "/.copier-answers.security.yml?" in endpoint:
+            content = security
+        elif "/.copier-answers.core.yml?" in endpoint:
+            content = b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n"
+        else:
+            raise AssertionError(endpoint)
+        return {"content": base64.b64encode(content).decode()}
+    return read
+
+
 def pilot_api(answers=b"", validate=LEGACY_VALIDATE):
-    def read(endpoint):
+    def read(endpoint, *, missing_ok=False):
         content = validate if "/validate.yml?" in endpoint else b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
         return {"content": base64.b64encode(content).decode()}
     return read
@@ -211,6 +226,55 @@ class PilotGateTests(unittest.TestCase):
             with self.subTest(handed_off=handed_off), patch.object(gate, "api", side_effect=pilot_api()) as read:
                 self.assertEqual(gate.template_contexts(REPO, SHA, handed_off), ("Shared template contract", "App Python / ci"))
                 self.assertIn(f"/contents/.github/workflows/validate.yml?ref={SHA}", read.call_args.args[0])
+
+    def test_template_contexts_for_module_repo(self):
+        for security, expected in ((b"codeql: true\ngitleaks: true\n", {"ci / gate", "CodeQL", "gitleaks"}),
+                                   (b"codeql: false\ngitleaks: true\n", {"ci / gate", "gitleaks"}),
+                                   (b"codeql: true\ngitleaks: false\n", {"ci / gate", "CodeQL"})):
+            with self.subTest(security=security), patch.object(gate, "api", side_effect=module_only_api(security)):
+                self.assertEqual(set(gate.template_contexts(REPO, SHA, (), modules_only=True)), expected)
+
+    def test_pilot_without_legacy_uses_core_answers(self):
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=module_only_api()), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
+            self.assertEqual(ready.call_args.args[2], ("gitleaks", "ci / gate", "CodeQL"))
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=module_only_api()):
+            with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
+                gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
+
+    def test_api_returns_none_only_for_a_confirmed_404(self):
+        def failing(stderr):
+            return subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+        with patch.object(gate.subprocess, "run", side_effect=failing("gh: Not Found (HTTP 404)")):
+            self.assertIsNone(gate.api("repos/a/b/contents/x", missing_ok=True))
+            with self.assertRaises(gate.GateError):
+                gate.api("repos/a/b/contents/x")
+        for error in (failing("gh: Bad Gateway (HTTP 502)"), subprocess.TimeoutExpired(["gh"], 45)):
+            with self.subTest(error=error), patch.object(gate.subprocess, "run", side_effect=error):
+                with self.assertRaises(gate.GateError):
+                    gate.api("repos/a/b/contents/x", missing_ok=True)
+
+    def test_transient_error_on_legacy_or_security_read_fails_closed(self):
+        def broken(path):
+            def read(endpoint, *, missing_ok=False):
+                if path in endpoint:
+                    raise gate.GateError("HTTP 502")
+                return module_only_api()(endpoint, missing_ok=missing_ok)
+            return read
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=broken(".copier-answers.yml?")):
+            with self.assertRaises(gate.GateError):
+                gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
+        with patch.object(gate, "api", side_effect=broken(".copier-answers.security.yml?")):
+            with self.assertRaises(gate.GateError):
+                gate.template_contexts(REPO, SHA, (), modules_only=True)
+        with patch.object(gate, "api", side_effect=module_only_api(b"- not\n- a mapping\n")):
+            with self.assertRaisesRegex(gate.GateError, "security answers"):
+                gate.template_contexts(REPO, SHA, (), modules_only=True)
 
     def test_explicit_contexts_skip_template_derivation(self):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
@@ -510,6 +574,87 @@ class RolloutTests(unittest.TestCase):
             self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — rollout stopped\n"))
             self.assertIn("**Rollout stopped:** failed.", summary)
             self.assertIn("fanout not started", summary)
+
+
+class MigrateLegacyRolloutTests(unittest.TestCase):
+    ARGUMENTS = ["--write", "--public-only", "--migrate-legacy"]
+
+    def run_rollout(self, statuses, migration):
+        events = []
+
+        def update(arguments, report):
+            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
+            events.append(("update", repository, arguments))
+            status = statuses.get(repository, "pull-request")
+            detail = f"https://github.com/{repository}/pull/5" if status == "pull-request" else ""
+            return {"repositories": [{"repository": repository, "status": status, "detail": detail}]}
+
+        calls = []
+
+        def verify(repository, pr, target, timeout, expected_snapshot=None, **kwargs):
+            calls.append((repository, pr, kwargs))
+            return SHA
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
+             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
+             patch.object(rollout, "wait_until"), \
+             patch.object(rollout, "run_update", side_effect=update), \
+             patch.object(rollout, "pilot_migration", side_effect=migration), \
+             patch.object(rollout, "verify_pilot", side_effect=verify), \
+             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
+            try:
+                rollout.rollout([*self.ARGUMENTS, "--json-report", str(Path(temporary) / "report.json")])
+            finally:
+                self.events, self.calls = events, calls
+
+    def test_rollout_migrate_legacy_pilots(self):
+        self.assertEqual(rollout.MIGRATE_LEGACY_PILOTS,
+                         ("quokkify/gh-pages-subdir-action", "quokkify/skills", "quokkify/q4j"))
+        self.run_rollout({}, lambda repository, pr: ((f"{repository}: ci / gate", "CodeQL"), SHA))
+        self.assertEqual([event[1] for event in self.events[:-1]], list(rollout.MIGRATE_LEGACY_PILOTS))
+        self.assertEqual(self.events[-1][1], "remaining")
+        self.assertEqual({repository for repository, _, _ in self.calls}, set(rollout.MIGRATE_LEGACY_PILOTS))
+        for repository, pr, kwargs in self.calls:
+            self.assertEqual(pr, 5)
+            self.assertEqual(kwargs["contexts"], (f"{repository}: ci / gate", "CodeQL"))
+            self.assertEqual(kwargs["branch"], "ci-kit/migrate-legacy")
+        for event in self.events:
+            self.assertIn("--migrate-legacy", event[2])
+
+    def test_non_pull_request_pilot_status_stops_with_repository_and_status(self):
+        target = rollout.MIGRATE_LEGACY_PILOTS[1]
+        for status in ("not-applicable", "needs-update-first", "migrate-rejected", "would-migrate"):
+            with self.subTest(status=status):
+                with self.assertRaisesRegex(gate.GateError, f"{target}.*{status}"):
+                    self.run_rollout({target: status}, lambda repository, pr: (("ci / gate",), SHA))
+                self.assertFalse(any(event[1] == "remaining" for event in self.events))
+
+    def test_moved_head_or_unusable_marker_stops_before_fanout(self):
+        def unusable(repository, pr):
+            raise gate.GateError(f"migrate marker unusable: {repository}")
+
+        with self.assertRaises(gate.GateError):
+            self.run_rollout({}, unusable)
+        self.assertEqual(self.calls, [])
+        with self.assertRaisesRegex(gate.GateError, "head moved"):
+            self.run_rollout({}, lambda repository, pr: (("ci / gate",), "b" * 40))
+        self.assertEqual(self.calls, [])
+
+    def test_pilot_migration_parses_checks_after_and_head(self):
+        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "CodeQL"], "commits": [SHA]}) + "\n```"
+        completed = type("Done", (), {"stdout": json.dumps({"body": body, "headRefOid": SHA})})()
+        with patch.object(rollout.subprocess, "run", return_value=completed):
+            self.assertEqual(rollout.pilot_migration(REPO, 5), (("ci / gate", "CodeQL"), SHA))
+        for payload in ({"body": "no marker", "headRefOid": SHA},
+                        {"body": body.replace("checks_after", "other"), "headRefOid": SHA},
+                        {"body": body, "headRefOid": "x"},
+                        {"body": body, "headRefOid": "b" * 40},
+                        {"body": body.replace(f'"commits": ["{SHA}"]', '"commits": []'), "headRefOid": SHA}):
+            completed = type("Done", (), {"stdout": json.dumps(payload)})()
+            with self.subTest(payload=payload), patch.object(rollout.subprocess, "run", return_value=completed):
+                with self.assertRaises(gate.GateError):
+                    rollout.pilot_migration(REPO, 5)
 
 
 if __name__ == "__main__":

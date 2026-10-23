@@ -10,6 +10,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
+from ci_kit.legacy import handoff_findings
 from ci_kit.plan import build_plan
 from module_test_support import ROOT, mkdtemp, render, run_copier, shared_template_repo
 
@@ -128,14 +129,60 @@ class HandoffTests(unittest.TestCase):
         answers.write_text(answers.read_text().replace("_commit: v99.0.0", "_commit: v0.0.0-missing"))
         wf = repo / ".github/workflows/validate.yml"
         wf.write_text(wf.read_text().replace("@v99.0.0", "@v1.2.3"))
-        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-010"])
+        # The edited _commit also disagrees with the legacy answers.
+        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-012", "CIK-CORE-010"])
         wf.write_text("a: [")
-        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-010"])
+        self.assertEqual(codes(repo, drift=True), ["CIK-CORE-012", "CIK-CORE-010"])
 
     def test_module_only_repo_runs_no_legacy_checks(self):
         from module_test_support import rendered_repo
 
         self.assertEqual(codes(rendered_repo("core")), [])
+
+
+class HandoffFindingsTests(unittest.TestCase):
+    def findings(self, handed_off, modules, rendered=None):
+        return [(f.code, f.module, f.message) for f in handoff_findings(Path("."), {"handed_off": handed_off}, set(modules), rendered)]
+
+    def test_core_and_validate_only_is_clean(self):
+        self.assertEqual(self.findings(["validate"], {"core"}), [])
+        self.assertEqual(self.findings(["validate"], {"core", "java"}, {".github/workflows/validate.yml"}), [])
+
+    def test_installed_security_without_security_handoff_is_002(self):
+        found = self.findings(["validate"], {"core", "security"})
+        self.assertEqual([(code, module) for code, module, _ in found], [("CIK-HANDOFF-002", "security")])
+        self.assertIn("(security)", found[0][2])
+
+    def test_base_conflicts_only_when_core_renders_its_files(self):
+        self.assertEqual(self.findings(["validate"], {"core"}, {".github/workflows/validate.yml"}), [])
+        found = self.findings(["validate"], {"core"}, {".github/workflows/validate.yml", "docs/ci-kit.md"})
+        self.assertEqual([(code, module) for code, module, _ in found], [("CIK-HANDOFF-002", "core")])
+        self.assertIn("(base)", found[0][2])
+        self.assertEqual(self.findings(["validate", "base"], {"core"}, {"docs/ci-kit.md"}), [])
+
+    def test_one_finding_per_module_across_its_areas(self):
+        found = self.findings([], {"core", "release"}, {".github/workflows/validate.yml", "README.md", ".github/workflows/release.yml"})
+        self.assertEqual([(code, module) for code, module, _ in found], [("CIK-HANDOFF-002", "core"), ("CIK-HANDOFF-002", "release")])
+        self.assertIn("(base, validate)", found[0][2])
+
+    def test_handed_off_area_without_module_is_001_not_002(self):
+        found = self.findings(["validate", "security"], {"core"})
+        self.assertEqual([(code, module) for code, module, _ in found], [("CIK-HANDOFF-001", "security")])
+
+    def test_handed_off_disabled_feature_needs_no_module(self):
+        def found(answers):
+            return [(f.code, f.module) for f in handoff_findings(Path("."), {"handed_off": ["validate", "security", "renovate"], **answers}, {"core"})]
+
+        self.assertEqual(found({"codeql": False, "gitleaks": False, "renovate": False}), [])
+        self.assertEqual(found({"codeql": False, "gitleaks": True, "renovate": False}), [("CIK-HANDOFF-001", "security")])
+
+    def test_hybrid_validate_with_core_render_is_clean(self):
+        repo = legacy_repo(handed_off=["validate"], core=True)
+        for path in ("README.md", "docs/ci-kit.md", ".github/workflows/copier-update.yml", ".github/pull_request_template.md"):
+            self.assertTrue((repo / path).is_file(), path)
+        # core was copied after legacy and left the legacy-owned base files alone.
+        self.assertIn("## What this project received", (repo / "docs/ci-kit.md").read_text())
+        self.assertEqual(codes(repo, drift=True), [])
 
 
 class LegacyTests(unittest.TestCase):
@@ -157,7 +204,8 @@ class LegacyTests(unittest.TestCase):
     def test_legacy_002_commit_mismatch(self):
         repo = legacy_repo()
         edit_answers(repo, _commit="v98.0.0")
-        self.assertEqual(codes(repo), ["CIK-LEGACY-002"])
+        # The legacy _commit also disagrees with the core answers.
+        self.assertEqual(codes(repo), ["CIK-CORE-012", "CIK-LEGACY-002"])
 
     def test_legacy_003_ref_mismatch(self):
         repo = legacy_repo()

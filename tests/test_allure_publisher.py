@@ -364,7 +364,7 @@ class AllureHistoryTransportTests(TestCase):
         self.assertLess(names.index('Build report without write privileges'), names.index('Upload updated Allure history'))
         self.assertEqual(CORE['jobs']['generate']['permissions'], {'actions': 'read', 'contents': 'read'})
         restore = generate_step('Restore previous Allure history')
-        self.assertEqual(restore['run'], 'python .toolkit/template/.github/allure/safe_extract.py.jinja')
+        self.assertEqual(restore['run'], 'python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja')
         self.assertEqual(restore['env']['ARTIFACT_MANIFEST'], '${{ steps.history.outputs.artifact_manifest }}')
         self.assertNotIn('MATERIALIZE_ROOT', restore['env'])
         self.assertEqual(generate_step('Install restored Allure history')['env']['EXPANDED_ROOT'], restore['env']['OUTPUT_ROOT'])

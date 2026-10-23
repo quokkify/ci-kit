@@ -45,7 +45,7 @@ Copier asks a few questions:
 - whether Release Please is needed;
 - whether Renovate is needed.
 
-The legacy template hands the `validate` area to the `core` module and no longer writes `.github/workflows/validate.yml`. Add `core`, which owns it, and one language module per stack (see [modules](modules.md)):
+A new repository is the `core` module, any of the `security`, `release`, `allure` and `renovate` modules you need, and one language module per stack (see [modules](modules.md)). The legacy template above is transitional until v4.0.0: it hands `validate` to `core` and no longer writes `.github/workflows/validate.yml`. Add `core`, and repeat the command with `-a .copier-answers.<module>.yml -d module=<module>` for each other module:
 
 ```bash
 copier copy \
@@ -70,7 +70,7 @@ gh repo create quokkify/my-project --private --source=. --push
 
 Commit `.copier-answers.yml` and the module answers files (`.copier-answers.<module>.yml`). They are not secrets. They are the receipts Copier needs for future updates.
 
-Before merging generated CI, open the module declarations in `.ci/modules/` and confirm that component directories match the real project. Then work through the checklist in the generated `docs/ci-kit.md`.
+Before merging generated CI, open the module declarations in `.ci/modules/` and confirm that component directories match the real project. Then follow the installation check and update steps in the generated `docs/ci-kit.md`.
 
 ## 2. Update a project created by Copier
 

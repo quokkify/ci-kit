@@ -11,6 +11,14 @@ ci-kit consumers move from the single legacy Copier template to modules (`core` 
 | `python` | `.ci/modules/python.yml` | `python_components` |
 | `node` | `.ci/modules/node.yml` | `node_components` |
 | `docker` | `.ci/modules/docker.yml` | `docker_images` |
+| `security` | `.ci/modules/security.yml` | `codeql`, `gitleaks`, `codeql_languages` |
+| `release` | `.ci/modules/release.yml` | `release_mode` |
+| `allure` | `.ci/modules/allure.yml` | `allure_*` |
+| `renovate` | `.ci/modules/renovate.yml` | `renovate_config_repository`, `renovate_presets` |
+
+A new repository is `core` plus any of `security`, `release`, `allure` and `renovate` plus one language module per stack. The legacy template is transitional: it stays until v4.0.0, where it is removed together with `migrate-legacy`.
+
+Until v4.0.0, `core` looks for the legacy `.copier-answers.yml` beside its own answers, so a hand-run `copier copy` or `copier update` on a repository without it prints a `MissingFileWarning` for `.copier-answers.yml`. The warning is harmless: `core` then owns every base file.
 
 A language declaration is `schema_version: 1` plus `components`, one mapping per component. Required fields: `id` (stable job identifier), `name` (display name), `path` (component directory, no `..` segment or glob characters), and the language version (`java_version` for `java`). Every other field is optional and mirrors an input of the module's reusable workflow in snake_case (for example `run_lint`, `test_command`, `timeout_minutes`); every `*_version` is a string such as `"3.12"`, and unknown keys are rejected. `docker` components need only `id`; `name`, `context`, `dockerfile` and `target` are optional.
 
@@ -34,9 +42,13 @@ The fleet inventory and the health report classify every repository by its answe
 | `hybrid(<areas>)` | Legacy answers plus module answers (`.copier-answers.<module>.yml`); `<areas>` lists `handed_off`. `hybrid()` means modules are installed but nothing is handed off, which `ci-kit plan` reports as `CIK-HANDOFF-002`. |
 | `modules` | Module answers only; the legacy template is gone. |
 
-`handed_off` is a legacy answer: a YAML list of area names (currently `validate`, owned by `core`) whose files legacy stops rendering. `validate` is required and is the default for a new copy: the legacy template no longer ships `validate.yml`, so a list without it, or stored answers without the key, are refused by Copier and reported by `ci-kit plan` as `CIK-LEGACY-006` ([runbook](errors/CIK-LEGACY-006.md)). Duplicates and unknown areas are rejected by the Copier validator. Every file has exactly one owner at any moment: `ci-kit plan` reports `CIK-HANDOFF-001` when an area is handed off but its module is missing, `CIK-HANDOFF-002` when a module is installed but legacy still owns its area, and `CIK-HANDOFF-003` for a malformed `handed_off`. Legacy contract checks (`CIK-LEGACY-*`) apply only to legacy-owned files.
+`handed_off` is a legacy answer: a YAML list of area names whose files legacy stops rendering. There are six areas: `validate` and `base` (owned by `core`), `security`, `release`, `allure` and `renovate` (each owned by the module of the same name). `validate` is required and is the default for a new copy: the legacy template no longer ships `validate.yml`, so a list without it, or stored answers without the key, are refused by Copier and reported by `ci-kit plan` as `CIK-LEGACY-006` ([runbook](errors/CIK-LEGACY-006.md)). Duplicates and unknown areas are rejected by the Copier validator. Every file has exactly one owner at any moment: `ci-kit plan` reports `CIK-HANDOFF-001` when an area is handed off but its module is missing, `CIK-HANDOFF-002` when a module is installed but legacy still owns its area, and `CIK-HANDOFF-003` for a malformed `handed_off`. Legacy contract checks (`CIK-LEGACY-*`) apply only to legacy-owned files.
 
 ## Migrating one repository
+
+`ci-kit migrate-legacy --repo <path> --to <ref>` (v3.10.x only; removed in v4.0.0) hands every remaining legacy area (`base`, `security`, `release`, `allure`, `renovate`) to modules in one run. It needs a clean tree, legacy and `core` at `<ref>`, and files that equal the legacy render (`CIK-MIGRATE-001` to `CIK-MIGRATE-004`). It runs `copier update` of legacy with every area handed off, renders `core`, then adds one module per enabled feature, each as its own commit. Every file keeps its content except `codeql.yml` (same CodeQL languages and category), `docs/ci-kit.md` (core's text) and the starter files, which are never touched; anything else is `CIK-MIGRATE-005`. Any failure after the first commit, including an interrupt, rolls back to the original `HEAD` and removes the files the run created, ignored ones included; if the rollback cannot restore the tree, the finding says `rollback incomplete` instead of `rolled back`. The new answers files keep the template source of the legacy answers. Required checks do not change, so no ruleset switch is needed.
+
+`update_copier_fleet.py --migrate-legacy` runs it for each repository and opens a PR on `ci-kit/migrate-legacy` (statuses `would-migrate` and `migrate-rejected`; incompatible with `--auto-merge` and `--merge-ready`). `rollout_copier_fleet.py --migrate-legacy` runs the pilot ring `gh-pages-subdir-action`, `skills`, `q4j`, waits for each PR's checks and head, and only then opens the rest. The fleet never passes `--template-src`. The rollout order is: dry-run for all repositories, the pilot ring, the rest, then a pause of one release before v4. Revert the migration PR to give the areas back to legacy.
 
 The legacy-validate migration (`ci-kit migrate`, `update_copier_fleet.py --migrate`, `rollout_copier_fleet.py --migrate`) is retired: every consumer is already on the `core` module. Migration PRs that were already opened stay revertible; see [CIK-LEGACY-006](errors/CIK-LEGACY-006.md) for the path from a legacy `validate.yml` to modules and for the retirement details.
 

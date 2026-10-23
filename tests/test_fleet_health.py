@@ -31,6 +31,7 @@ PR_SHA = "b" * 40
 class API:
     def __init__(self):
         self.applied = "v2.0.0"
+        self.legacy_missing = False
         self.rule_checks = [{"context": "Validate", "integration_id": 7}]
         self.classic = {"checks": []}
         self.pulls = []
@@ -58,6 +59,11 @@ class API:
         if endpoint == "repos/acme/demo/commits/main":
             self.commit_calls += 1
             return {"sha": PR_SHA if self.default_stale and self.commit_calls > 1 else DEFAULT_SHA}
+        if "/contents/.copier-answers.yml?ref=" in endpoint and self.legacy_missing:
+            return None
+        if "/contents/.copier-answers.core.yml?ref=" in endpoint:
+            assert f"ref={DEFAULT_SHA}" in endpoint
+            return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
         if "/contents/.copier-answers.yml?ref=" in endpoint:
             assert f"ref={DEFAULT_SHA}" in endpoint
             return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
@@ -95,6 +101,25 @@ class HealthTests(TestCase):
         self.assertEqual(result["default_ci"]["checks"][0]["app_id"], 7)
         self.assertIsNone(result["pull_request"])
         self.assertEqual(result["pull_request_observation"]["status"], "observed")
+
+    def test_health_reads_core_answers_without_legacy(self):
+        api = API()
+        api.legacy_missing = True
+        result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", api, now=NOW)
+        self.assertEqual(result["applied_template_version"], "v2.0.0")
+        self.assertEqual(result["adoption"], "current")
+
+    def test_non_404_legacy_error_does_not_fall_back_to_core(self):
+        api = API()
+        api.legacy_missing = True
+        original = api.__call__
+        def fail_legacy(endpoint):
+            if "/contents/.copier-answers.yml?ref=" in endpoint:
+                raise RuntimeError("HTTP 502")
+            return original(endpoint)
+        result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", fail_legacy, now=NOW)
+        self.assertIsNone(result["applied_template_version"])
+        self.assertEqual(result["adoption"], "unknown")
 
     def test_open_pr_is_not_adoption(self):
         api = API()
@@ -194,6 +219,16 @@ class HealthTests(TestCase):
         self.assertEqual(result["required_checks"]["checks"][0]["context"], "Validate")
         self.assertEqual(result["default_ci"]["checks"][0]["status"], "passed")
         self.assertEqual(result["default_ci"]["status"], "unknown")
+
+    def test_classic_protection_404_is_no_classic_checks(self):
+        # The fleet request adapter returns None for a confirmed 404: no classic protection, not unknown evidence.
+        api = API()
+        api.classic = None
+        self.assertEqual(api.collect()["required_checks"]["status"], "active")
+        api = API()
+        api.classic = None
+        api.rule_checks = []
+        self.assertEqual(api.collect()["required_checks"]["status"], "unprotected")
 
     def test_evaluate_disabled_and_empty_rules_are_not_active(self):
         api = API()

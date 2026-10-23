@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
 from .drift import RENDER_TIMEOUT, TRUSTED_SRC_RE, _copier
+from .handoff import AREAS, HANDOFF_GATED
 from .modules import MODULES
 from .plan import Finding, build_plan, discover
 
@@ -23,16 +27,19 @@ class ModuleUpdate:
     commit: str | None
 
 
-def update_order(answers: dict[str, Path]) -> list[str]:
-    names = sorted(answers)
-    rest = [name for name in names if name not in (LEGACY, "core")]
-    languages = [name for name in rest if name in MODULES and MODULES[name].language]
-    others = [name for name in rest if not (name in MODULES and MODULES[name].language)]
-    head = [name for name in (LEGACY, "core") if name in answers]
-    return head + languages + others
+# Feature modules, then languages. labels joins after renovate once it exists.
+MODULE_ORDER = ("security", "release", "allure", "renovate", "labels", "java", "python", "node", "docker")
 
 
-def copier_update_command(answers_file: str, ref: str, *, trust: bool, data: dict[str, str]) -> list[str]:
+def update_order(modules: Iterable[str]) -> list[str]:
+    names = set(modules)
+    fixed = [LEGACY, "core", *(name for name in MODULE_ORDER if name in MODULES)]
+    return [name for name in fixed if name in names] + sorted(names - set(fixed))
+
+
+def copier_update_command(
+    answers_file: str, ref: str, *, trust: bool, data: dict[str, str], exclude: tuple[str, ...] = (),
+) -> list[str]:
     if ref.startswith("-"):
         raise ValueError(f"option-like ref: {ref}")
     command = [
@@ -43,6 +50,8 @@ def copier_update_command(answers_file: str, ref: str, *, trust: bool, data: dic
         command.append("--trust")
     for key, value in data.items():
         command += ["-d", f"{key}={value}"]
+    for pattern in exclude:
+        command += ["-x", pattern]
     return [*command, "--", "."]
 
 
@@ -68,6 +77,24 @@ def _read(path: Path) -> dict:
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _legacy_owned(repo: Path, module: str) -> tuple[str, ...]:
+    """Paths of `module`'s gated areas that legacy still renders.
+
+    The template already skips them in the destination, but Copier also renders the new
+    template into an empty scratch directory without the legacy answers; excluding them on
+    the command line keeps that render from turning legacy files into conflicts.
+    """
+    path = repo / LEGACY_ANSWERS
+    if not path.is_file():
+        return ()
+    handed = _read(path).get("handed_off")
+    handed = handed if isinstance(handed, list) else []
+    return tuple(
+        f"/{rel}" for name, area in AREAS.items()
+        if area.module == module and name in HANDOFF_GATED and name not in handed for rel in area.legacy_paths
+    )
 
 
 def _rejects(repo: Path) -> list[str]:
@@ -116,8 +143,11 @@ def run_update(
             return updates, [Finding("CIK-UPDATE-001", module, f"untrusted template source: {src}", path.name)]
         data = {"toolkit_version": to}
         try:
-            command = copier_update_command(path.name, to, trust=module == LEGACY, data=data)
-            result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT)
+            command = copier_update_command(path.name, to, trust=module == LEGACY, data=data, exclude=_legacy_owned(repo, module))
+            # Resolved: Copier renders the old and new copies in $TMPDIR and, without --trust, rejects reading the
+            # legacy answers through a symlinked temporary directory (macOS /var) as a path outside the destination.
+            env = {**os.environ, "TMPDIR": str(Path(tempfile.gettempdir()).resolve())}
+            result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT, env=env)
         except ValueError as error:
             return updates, [Finding("CIK-UPDATE-001", module, str(error), path.name)]
         except subprocess.TimeoutExpired:

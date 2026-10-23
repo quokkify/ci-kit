@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from unittest import mock
 
-from ci_kit.drift import drift_findings, render_module
+from ci_kit.drift import STARTER_PATHS, drift_findings, render_module
 from ci_kit.plan import build_plan, discover
 from module_test_support import overlap_template_repo, rendered_from, rendered_repo, shared_template_repo
 
@@ -36,6 +36,19 @@ class DriftTests(unittest.TestCase):
 
     def test_clean_repo_has_no_drift(self):
         self.assertEqual(self.drift(), [])
+
+    def test_starter_paths_match_copier_skip_if_exists(self):
+        import yaml
+
+        config = yaml.safe_load((Path(__file__).resolve().parents[1] / "copier.yml").read_text())
+        self.assertEqual(STARTER_PATHS, {path.lstrip("/") for path in config["_skip_if_exists"]})
+
+    def test_edited_starter_files_are_not_drift(self):
+        (self.repo / "README.md").write_text("# Project\n")
+        (self.repo / ".github/pull_request_template.md").write_text("## Why\n")
+        self.assertEqual(self.drift(), [])
+        (self.repo / "docs/ci-kit.md").write_text("edited\n")
+        self.assertEqual(codes(self.drift()), ["CIK-CORE-010"])
 
     def test_edited_declaration_is_cik_core_010_with_diff(self):
         path = self.repo / ".ci/modules/java.yml"
@@ -113,7 +126,9 @@ class DriftTests(unittest.TestCase):
         findings = drift_findings(self.repo, self.answers, "--help")
         self.assertEqual(set(codes(findings)), {"CIK-CORE-010"})
 
-    def test_render_command_has_no_trust_and_separates_args(self):
+    def test_render_command_is_untrusted_and_separates_args(self):
+        # Copier lets core read the seeded legacy answers inside the resolved destination without --trust;
+        # drift runs on fork pull requests, so the render never trusts the template or runs its tasks.
         real = subprocess.run
         seen = []
 
@@ -124,6 +139,7 @@ class DriftTests(unittest.TestCase):
         with mock.patch("ci_kit.drift.subprocess.run", spy), tempfile.TemporaryDirectory() as tmp:
             render_module(self.answers["java"], Path(tmp) / "r", self.src)
         self.assertNotIn("--trust", seen[0])
+        self.assertIn("--skip-tasks", seen[0])
         self.assertEqual(seen[0][-3], "--")
 
     def test_changed_path_before_ref_is_still_drift(self):

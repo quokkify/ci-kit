@@ -22,6 +22,17 @@ LEGACY_006 = "CIK-LEGACY-006"
 ALLOWED_LIST = re.compile(r"allowed_handed_off\s*=\s*\[([^\]]*)\]")  # captures the quoted items of the allowed-area list
 QUOTED_ITEM = re.compile(r"'([^']+)'")  # one single-quoted area name
 HANDED_OFF_ANSWER = re.compile(r"^handed_off:\n(?:\s+- .*\n)*", re.MULTILINE)  # the key and its block-list items
+SPEC_AREAS = {
+    "validate": ("core", (".github/workflows/validate.yml",)),
+    "base": ("core", (".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md")),
+    "security": ("security", (".github/workflows/codeql.yml", ".github/workflows/gitleaks.yml")),
+    "release": ("release", (
+        ".github/workflows/release.yml", ".github/release-please/config.json",
+        ".github/release-please/manifest.json", ".github/scripts/enrich_release_notes.py",
+    )),
+    "allure": ("allure", (".github/workflows/allure-report.yml", ".github/allure/allurerc.mjs", ".github/allure/safe_extract.py")),
+    "renovate": ("renovate", (".github/renovate.json",)),
+}
 
 
 def areas_in_validator(validator: str) -> list[str]:
@@ -40,6 +51,12 @@ class HandoffRegistryTests(unittest.TestCase):
         self.assertEqual(AREAS["validate"], Area(module="core", legacy_paths=(".github/workflows/validate.yml",)))
         self.assertEqual(area_for_module("core"), "validate")
         self.assertIsNone(area_for_module("java"))
+
+    def test_registry_matches_spec(self) -> None:
+        self.assertEqual(list(AREAS), list(SPEC_AREAS))
+        for name, (module, paths) in SPEC_AREAS.items():
+            with self.subTest(area=name):
+                self.assertEqual(AREAS[name], Area(module=module, legacy_paths=paths))
 
     def test_registry_matches_copier_yml(self) -> None:
         self.assertEqual(set(AREAS), set(areas_in_validator(self.cfg["handed_off"]["validator"])))
@@ -73,6 +90,22 @@ class HandoffRegistryTests(unittest.TestCase):
         self.assertEqual(yaml.safe_load(tree[".copier-answers.yml"])["handed_off"], ["validate"])
         self.assertNotIn(".github/workflows/validate.yml", tree)
         self.assertIn(".github/workflows/gitleaks.yml", tree)
+
+    def test_handed_off_accepts_every_area(self) -> None:
+        for area in SPEC_AREAS:
+            with self.subTest(area=area):
+                handed = sorted({"validate", area})
+                result, dest = self.copy("--data", f"handed_off=[{', '.join(handed)}]")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(yaml.safe_load((dest / ".copier-answers.yml").read_text())["handed_off"], handed)
+
+    def test_release_area_excluded_when_handed_off(self) -> None:
+        paths = set(AREAS["release"].legacy_paths)
+        kept = render_tree(self.repo, data={**PIN, "release_please": "true"})
+        self.assertLessEqual(paths, set(kept))
+        dropped = render_tree(self.repo, data={**PIN, "release_please": "true", "handed_off": "[validate, release]"})
+        self.assertEqual(paths & set(dropped), set())
+        self.assertIn(".github/workflows/gitleaks.yml", dropped)
 
     def test_copy_without_validate_refuses(self) -> None:
         result, dest = self.copy("--data", "handed_off=[]")

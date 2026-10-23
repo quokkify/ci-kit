@@ -5,13 +5,17 @@ from pathlib import Path
 
 import yaml
 
-from .handoff import AREAS
+from .handoff import AREAS, HANDOFF_GATED
 from .plan import Finding
 
 ANSWERS = ".copier-answers.yml"
 REQUIRED_ANSWERS = ("_src_path", "_commit", "toolkit_version")
 HEX = "0123456789abcdef"
 LAST_LEGACY_VALIDATE = "v3.8.0"
+# Legacy feature flags per area: with all of them false legacy renders none of the area's files.
+AREA_FLAGS = {
+    "security": ("codeql", "gitleaks"), "release": ("release_please",), "allure": ("allure_report",), "renovate": ("renovate",),
+}
 
 
 def load_answers(repo: Path) -> tuple[dict | None, str | None]:
@@ -27,7 +31,10 @@ def load_answers(repo: Path) -> tuple[dict | None, str | None]:
     return data, None
 
 
-def handoff_findings(repo: Path, legacy_answers: dict | None, modules: set[str]) -> list[Finding]:
+def handoff_findings(
+    repo: Path, legacy_answers: dict | None, modules: set[str], rendered: set[str] | None = None,
+) -> list[Finding]:
+    # `ci-kit plan --no-drift` (CodeQL) passes rendered=None, so core/base double ownership is invisible there by design; Validate runs the full plan.
     if legacy_answers is None:
         return []
     handed = legacy_answers.get("handed_off", [])
@@ -35,16 +42,29 @@ def handoff_findings(repo: Path, legacy_answers: dict | None, modules: set[str])
     if not isinstance(handed, list) or any(not isinstance(a, str) or a not in AREAS for a in handed):
         return [Finding("CIK-HANDOFF-003", "legacy", f"handed_off must be a list of known areas ({', '.join(known)}); got {handed!r}", ANSWERS)]
     findings: list[Finding] = []
+    contested: dict[str, list[str]] = {}
     for name in sorted(AREAS):
         area = AREAS[name]
-        if name in handed and area.module not in modules:
-            findings.append(Finding("CIK-HANDOFF-001", area.module, f"area {name} is handed off but module {area.module} is not installed", ANSWERS))
-        elif name not in handed and area.module in modules:
-            findings.append(Finding(
-                "CIK-HANDOFF-002", area.module,
-                f"module {area.module} is installed but area {name} is not handed off; see docs/errors/CIK-LEGACY-006.md",
-                ANSWERS,
-            ))
+        if name in handed:
+            # A disabled feature has no files to own, so no module is needed for it.
+            flags = AREA_FLAGS.get(name, ())
+            disabled = bool(flags) and all(legacy_answers.get(flag) is False for flag in flags)
+            if area.module not in modules and not disabled:
+                findings.append(Finding("CIK-HANDOFF-001", area.module, f"area {name} is handed off but module {area.module} is not installed", ANSWERS))
+            continue
+        if area.module not in modules:
+            continue
+        # A gated area conflicts only when the module actually rendered one of its files.
+        renders = rendered is not None and any(path in rendered for path in area.legacy_paths)
+        if name not in HANDOFF_GATED or renders:
+            contested.setdefault(area.module, []).append(name)
+    for module in sorted(contested):
+        areas = ", ".join(contested[module])
+        findings.append(Finding(
+            "CIK-HANDOFF-002", module,
+            f"module {module} is installed but legacy still renders its area ({areas}); see docs/errors/CIK-LEGACY-006.md",
+            ANSWERS,
+        ))
     return findings
 
 

@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import re
 import subprocess
 import tempfile
 import textwrap
+import sys
 import tomllib
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "template/.github/workflows/copier-update.yml.jinja"
+CORE_WORKFLOW = ROOT / "modules/core/template/.github/workflows/copier-update.yml.jinja"
 
 
-def production_script() -> str:
-    content = WORKFLOW.read_text(encoding="utf-8")
+def production_script(workflow: Path = WORKFLOW) -> str:
+    content = workflow.read_text(encoding="utf-8")
     run_block = content.split("        run: |\n", 1)[1]
     script = textwrap.dedent(run_block)
     return script.replace("{% raw %}", "").replace("{% endraw %}", "")
@@ -230,6 +233,166 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Refused template ref", result.stderr)
                 self.assertFalse((temporary / "copier.log").exists())
+
+
+STABLE = {"tagName": "v2.21.5", "publishedAt": "2026-09-01T00:00:00Z", "isDraft": False, "isPrerelease": False}
+
+
+class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
+    """The core module's workflow: the legacy step runs only while .copier-answers.yml exists."""
+
+    def setUp(self) -> None:
+        self.script = production_script(CORE_WORKFLOW)
+
+    def fake_tools(self, temporary: Path) -> Path:
+        bin_dir = super().fake_tools(temporary)
+        (bin_dir / "ci-kit").write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "printf '%s\\n' \"$*\" >> \"$CI_KIT_LOG\"\n"
+            "printf 'module update\\n' > .ci-kit-updated\n"
+            "git add --all && git -c user.name=t -c user.email=t@example.com commit -q -m 'chore(ci-kit): update core'\n",
+            encoding="utf-8",
+        )
+        (bin_dir / "python").write_text(
+            "#!/usr/bin/env bash\n"
+            "if [[ \"$1 $2 $3\" == '-m pip install' ]]; then printf '%s\\n' \"$4\" >> \"$PIP_LOG\"; exit 0; fi\n"
+            f"exec {shutil.which('python3') or sys.executable} \"$@\"\n",
+            encoding="utf-8",
+        )
+        for tool in (bin_dir / "ci-kit", bin_dir / "python"):
+            tool.chmod(0o755)
+        return bin_dir
+
+    def execute(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5", copier_noop: bool = False):
+        os.environ["CI_KIT_LOG"] = str(temporary / "ci-kit.log")
+        os.environ["PIP_LOG"] = str(temporary / "pip.log")
+        try:
+            return super().execute(checkout, temporary, release, template_ref, copier_noop)
+        finally:
+            del os.environ["CI_KIT_LOG"], os.environ["PIP_LOG"]
+
+    def module_checkout(self, temporary: Path) -> tuple[Path, Path]:
+        checkout, bare = self.make_checkout(temporary)
+        run_git("rm", "-q", ".copier-answers.yml", cwd=checkout)
+        (checkout / ".copier-answers.core.yml").write_text("module: core\n", encoding="utf-8")
+        run_git("add", ".", cwd=checkout)
+        run_git("commit", "-m", "modules only", cwd=checkout)
+        run_git("push", "origin", "HEAD:refs/heads/main", cwd=checkout)
+        return checkout, bare
+
+    def test_copier_update_without_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.module_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((temporary / "copier.log").exists())
+            self.assertEqual((temporary / "ci-kit.log").read_text(encoding="utf-8"), "update --repo . --to v2.21.5\n")
+            self.assertEqual((temporary / "pip.log").read_text(encoding="utf-8"), "git+https://github.com/quokkify/ci-kit@v2.21.5\n")
+            branch = "automation/copier-template-update"
+            self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
+            self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "3")
+
+    def test_copier_update_with_legacy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((temporary / "copier.log").read_text(encoding="utf-8"), "copier-called\n")
+            self.assertEqual((temporary / "ci-kit.log").read_text(encoding="utf-8"), "update --repo . --to v2.21.5 --skip-legacy\n")
+            tree = run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", "automation/copier-template-update", cwd=temporary).splitlines()
+            self.assertIn(".copier-created", tree)
+            self.assertIn(".ci-kit-updated", tree)
+            self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", "automation/copier-template-update", cwd=temporary), "2")
+
+    def test_release_module_requires_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, _ = self.module_checkout(temporary)
+            (checkout / ".copier-answers.release.yml").write_text("module: release\n", encoding="utf-8")
+            run_git("add", ".", cwd=checkout)
+            run_git("commit", "-m", "release module", cwd=checkout)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("missing while the release module is installed", result.stderr)
+
+    def test_generated_workflow_checks_helper_drift_even_for_same_ref(self) -> None:
+        check = self.script.index("Verify the executable release helper")
+        update = self.script.index('ci-kit update "${update_args[@]}"')
+        no_op = self.script.index("git diff --cached --quiet\nthen") if "git diff --cached --quiet\nthen" in self.script else self.script.rindex("git diff --cached --quiet")
+        self.assertLess(update, check)
+        self.assertLess(check, no_op)
+        self.assertIn('cmp -s "$template_helper" "$helper"', self.script)
+        self.assertIn("FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja", self.script)
+
+    def test_same_ref_stale_helper_fails_before_noop_but_healthy_helper_is_noop(self) -> None:
+        canonical = "canonical helper from template\\n"
+        for helper_content, expected_status in (("stale helper\\n", 1), (canonical, 0)):
+            with self.subTest(helper_content=helper_content), tempfile.TemporaryDirectory() as raw:
+                temporary = Path(raw)
+                checkout, template_bare = self.module_checkout(temporary)
+                template_work = temporary / "template"
+                run_git("clone", str(template_bare), str(template_work), cwd=temporary)
+                run_git("config", "user.name", "fixture", cwd=template_work)
+                run_git("config", "user.email", "fixture@example.com", cwd=template_work)
+                template_helper = template_work / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja"
+                template_helper.parent.mkdir(parents=True)
+                template_helper.write_text(canonical, encoding="utf-8")
+                run_git("add", ".", cwd=template_work)
+                run_git("commit", "-m", "template helper", cwd=template_work)
+                run_git("tag", "v2.21.5", cwd=template_work)
+                run_git("push", "origin", "refs/tags/v2.21.5:refs/tags/v2.21.5", cwd=template_work)
+                run_git("config", "url." + str(template_bare) + ".insteadOf", "https://github.com/quokkify/ci-kit.git", cwd=checkout)
+                (checkout / ".copier-answers.release.yml").write_text("module: release\n", encoding="utf-8")
+                helper = checkout / ".github/scripts/enrich_release_notes.py"
+                helper.parent.mkdir(parents=True)
+                helper.write_text(helper_content, encoding="utf-8")
+                run_git("add", ".", cwd=checkout)
+                run_git("commit", "-m", "release helper", cwd=checkout)
+                run_git("push", "origin", "HEAD:refs/heads/main", cwd=checkout)
+                result = self.execute(checkout, temporary, STABLE)
+                self.assertEqual(result.returncode, expected_status, result.stderr)
+                if expected_status:
+                    self.assertIn("differs from ci-kit", result.stderr)
+
+    def test_module_update_step_is_guarded_and_ordered(self) -> None:
+        script = self.script
+        guard = script.index("if [[ -f .copier-answers.yml ]]; then")
+        legacy = script.index('"${command[@]}" .')
+        skip = script.index("update_args+=(--skip-legacy)")
+        install = script.index('python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"')
+        update = script.index('ci-kit update "${update_args[@]}"')
+        reset = script.index('git reset --soft "$base"')
+        self.assertLess(guard, legacy)
+        self.assertLess(legacy, skip)
+        self.assertLess(skip, install)
+        self.assertLess(install, update)
+        self.assertLess(update, reset)
+        self.assertIn('update_args=(--repo . --to "$ref")', script)
+
+    def test_module_update_uses_temp_commit_identity_and_no_swallowed_failure(self) -> None:
+        self.assertIn('base="$(git rev-parse HEAD)"', self.script)
+        self.assertIn("-c user.name=", self.script)
+        section = self.script[self.script.index('base="$(git rev-parse HEAD)"'):self.script.index('git reset --soft "$base"')]
+        self.assertNotIn("|| true", section)
+
+    def test_module_update_has_no_expression_interpolation_in_run(self) -> None:
+        content = CORE_WORKFLOW.read_text(encoding="utf-8")
+        run_block = content.split("        run: |\n", 1)[1]
+        stripped = run_block.replace("{% raw %}${#rejected[@]}{% endraw %}", "")
+        self.assertNotIn("${{", stripped)
+        self.assertNotIn("{{", stripped)
+
+    # The legacy workflow skips the module step for a pure legacy checkout; core never does, so the inherited test does not apply.
+    test_pure_legacy_checkout_skips_module_update = None
+
+    def test_module_update_step_is_unconditional(self) -> None:
+        # core renders this workflow, so .copier-answers.core.yml always exists and the
+        # module step is unconditional; a legacy checkout only adds --skip-legacy.
+        self.assertNotIn("compgen", self.script)
+        self.assertIn("\nci-kit update", self.script)
 
 
 if __name__ == "__main__":

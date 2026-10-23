@@ -8,6 +8,7 @@ CODES: dict[str, str] = {
     "CIK-CORE-005": "Component id is declared more than once, or a component name is used more than once in a module",
     "CIK-CORE-010": "Module declaration drifted from its rendered template",
     "CIK-CORE-011": "Module-owned file drifted from its rendered template",
+    "CIK-CORE-012": "toolkit_version or _commit differs between answers files",
     "CIK-CORE-020": "Gate found a failing or missing module job",
     "CIK-HANDOFF-001": "Area is handed off but its owner module is not installed",
     "CIK-HANDOFF-002": "Module is installed but its area is not handed off",
@@ -18,5 +19,10 @@ CODES: dict[str, str] = {
     "CIK-LEGACY-004": "Enabled legacy feature lacks its generated files",
     "CIK-LEGACY-005": "Legacy-owned JSON or YAML file does not parse",
     "CIK-LEGACY-006": "Legacy template no longer renders validate; validate is not handed off to core",
+    "CIK-MIGRATE-001": "migrate-legacy needs a clean working tree",
+    "CIK-MIGRATE-002": "Legacy or core answers are not on the target ref or not in hybrid(validate)",
+    "CIK-MIGRATE-003": "Legacy-area file differs from the legacy render",
+    "CIK-MIGRATE-004": "Area is already handed off or its module is already installed",
+    "CIK-MIGRATE-005": "Migration result is not equivalent to legacy; rolled back",
     "CIK-UPDATE-001": "Module update failed or left conflicts",
 }

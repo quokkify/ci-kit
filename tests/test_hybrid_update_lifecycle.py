@@ -29,12 +29,12 @@ QUESTIONS = {"java": "java_components", "python": "python_components", "node": "
 MODULE_ORDER = ("java", "python", "node")
 
 
-def _copy_module(template: Path, repo: Path, module: str, data: dict[str, object]) -> None:
+def _copy_module(template: Path, repo: Path, module: str, data: dict[str, object], ref: str = REF) -> None:
     values = {key: json.dumps(value, separators=(",", ":")) for key, value in data.items()}
     command = [
-        shutil.which("copier"), "copy", "--trust", "--defaults", "--quiet", "--vcs-ref", REF,
+        shutil.which("copier"), "copy", "--trust", "--defaults", "--quiet", "--vcs-ref", ref,
         "-a", f".copier-answers.{module}.yml", "-d", f"module={module}",
-        *(("-d", f"toolkit_version={REF}") if module == "core" else ()),
+        *(("-d", f"toolkit_version={ref}") if module == "core" else ()),
         *[arg for key, value in values.items() for arg in ("-d", f"{key}={value}")],
         str(template), str(repo),
     ]
@@ -61,18 +61,18 @@ def _entries(components: list[dict], language: str, test_command: str | None, al
     return entries
 
 
-def hybrid_validate_repo(template: Path, scenario: str, test_command: str | None = None) -> Path:
+def hybrid_validate_repo(template: Path, scenario: str, test_command: str | None = None, ref: str = REF) -> Path:
     """A repository where legacy hands `validate` off to `core`, built without any migration code."""
     data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
-    repo = legacy_scenario_repo(template, scenario, REF, overrides={"handed_off": ["validate"]})
-    _copy_module(template, repo, "core", {})
+    repo = legacy_scenario_repo(template, scenario, ref, overrides={"handed_off": ["validate"]})
+    _copy_module(template, repo, "core", {}, ref)
     components = data.get("components") or []
     for language in MODULE_ORDER:
         entries = _entries(components, language, test_command, bool(data.get("allure_report")))
         if entries:
-            _copy_module(template, repo, language, {QUESTIONS[language]: entries})
+            _copy_module(template, repo, language, {QUESTIONS[language]: entries}, ref)
     if data.get("docker"):
-        _copy_module(template, repo, "docker", {"docker_images": [{"id": "docker"}]})
+        _copy_module(template, repo, "docker", {"docker_images": [{"id": "docker"}]}, ref)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "hybrid validate fixture")
     legacy = yaml.safe_load((repo / ".copier-answers.yml").read_text())
@@ -215,6 +215,52 @@ class FleetHybridUpdateTests(HybridUpdateLifecycleTests):
         ]
         self.assertEqual(legacy_refs, [])
         self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+
+
+class FleetModuleOnlyUpdateTests(HybridUpdateLifecycleTests):
+    @unittest.skipUnless(shutil.which("copier"), "Copier is required for the module-only update integration")
+    def test_fleet_update_without_legacy_answers(self):
+        spec = importlib.util.spec_from_file_location("update_copier_fleet", ROOT / "scripts/update_copier_fleet.py")
+        fleet = importlib.util.module_from_spec(spec)
+        sys.modules.setdefault(spec.name, fleet)
+        spec.loader.exec_module(fleet)
+        template = self.template
+        repo = Path(tempfile.mkdtemp(prefix="ci-kit-module-only-"))
+        self.addCleanup(shutil.rmtree, repo, ignore_errors=True)
+        git(repo, "init", "-q", "-b", "main")
+        git(repo, "config", "user.name", "test")
+        git(repo, "config", "user.email", "test@example.com")
+        entries = [{"id": "app", "name": "App", "path": "."}]
+        _copy_module(template, repo, "core", {})
+        _copy_module(template, repo, "security", {"codeql": True, "gitleaks": True})
+        _copy_module(template, repo, "release", {})
+        _copy_module(template, repo, "python", {QUESTIONS["python"]: entries})
+        canonical = "https://github.com/quokkify/ci-kit.git"
+        names = sorted(path.name for path in repo.glob(".copier-answers*.yml"))
+        self.assertEqual(names, [f".copier-answers.{m}.yml" for m in ("core", "python", "release", "security")])
+        for name in names:
+            path = repo / name
+            path.write_text(re.sub(r"^_src_path:.*$", f"_src_path: {canonical}", path.read_text(), flags=re.MULTILINE))
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "module-only fixture")
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+        with tempfile.TemporaryDirectory() as temporary:
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(Path(temporary).resolve()),
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"url.file://{template}/.insteadOf",
+                "GIT_CONFIG_VALUE_0": canonical,
+            })
+            rows = fleet.apply_module_updates(repo, NEXT_REF, env=env)
+        self.assertEqual(sorted(row["module"] for row in rows), ["core", "python", "release", "security"])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        self.assertFalse((repo / ".copier-answers.yml").exists())
+        for name in names:
+            self.assertEqual(yaml.safe_load((repo / name).read_text())["_commit"], NEXT_REF, name)
+        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+        inventory = fleet.modules_inventory(NEXT_REF, ("core", "python", "release", "security"), repo)
+        self.assertEqual((inventory.codeql, inventory.release_please, inventory.docker), ("enabled", "enabled", "disabled"))
 
 
 if __name__ == "__main__":

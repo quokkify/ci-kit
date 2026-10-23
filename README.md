@@ -43,7 +43,7 @@ copier copy https://github.com/quokkify/ci-kit.git my-project \
   -a .copier-answers.core.yml -d module=core
 ```
 
-Run the same commands with `.` instead of `my-project` from the root of an existing repository. The first command applies the legacy template (shared files and optional features); it hands the `validate` area to the `core` module, so the second command adds `core`, which owns `validate.yml`. Add a language module per stack the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). Together they write:
+Run the same commands with `.` instead of `my-project` from the root of an existing repository. A new repository is `core` plus any of the `security`, `release`, `allure` and `renovate` modules plus one language module per stack, each added the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). The first command applies the legacy template, which is transitional until v4.0.0; it hands `validate` to `core`, and `ci-kit migrate-legacy` hands the remaining areas to modules. Together they write:
 
 ```text
 my-project/
@@ -51,23 +51,25 @@ my-project/
 ├── .copier-answers.core.yml     # core module answers
 ├── .ci/modules/core.yml         # core module declaration
 ├── README.md                    # written once, then yours
-├── docs/ci-kit.md      # onboarding checklist, refreshed on update
+├── docs/ci-kit.md      # installed modules, doctor check, update steps
 └── .github/
     ├── pull_request_template.md
-    ├── renovate.json            # if renovate
-    ├── allure/                  # if allure_report
-    ├── release-please/          # if release_please
-    ├── scripts/                 # if release_please
+    ├── renovate.json            # if the renovate module is installed
+    ├── allure/                  # if the allure module is installed
+    ├── release-please/          # if the release module is installed
+    ├── scripts/                 # if the release module is installed
     └── workflows/
         ├── validate.yml         # core module
         ├── copier-update.yml
-        ├── codeql.yml           # if codeql
-        ├── gitleaks.yml         # if gitleaks
-        ├── allure-report.yml    # if allure_report
-        └── release.yml          # if release_please
+        ├── codeql.yml           # security module with codeql
+        ├── gitleaks.yml         # security module with gitleaks
+        ├── allure-report.yml    # if the allure module is installed
+        └── release.yml          # if the release module is installed
 ```
 
-Open `docs/ci-kit.md` in the generated project and work through its checklist. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
+Until v4.0.0, files of an area legacy still owns follow its flags (`codeql`, `gitleaks`, `release_please`, `allure_report`, `renovate`) until `ci-kit migrate-legacy` hands the area to its module.
+
+Open `docs/ci-kit.md` in the generated project and read the installed modules, the `ci-kit doctor` check and the update steps. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
 
 Java/q4j test automation is a separate template: see [quokkify/java-test-automation-template](https://github.com/quokkify/java-test-automation-template).
 
