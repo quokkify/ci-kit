@@ -6,7 +6,6 @@ This repository is managed by the [`quokkify/ci-kit`](https://github.com/quokkif
 {# Rows are padded to the widest cell so the table matches Prettier's Markdown output. #}
 {%- set rows = [["Path", "Purpose", "Owner"], ["`.copier-answers.yml`", "Copier answers; required for `copier update`", "toolkit"]] %}
 {%- set rows = rows + [["`.github/workflows/copier-update.yml`", "Template update automation", "toolkit"],
-                       ["`.github/workflows/labels.yml`", "Organization label sync", "toolkit"],
                        ["`.github/pull_request_template.md`", "Pull request template", "project"],
                        ["`README.md`", "Starter README", "project"],
                        ["`docs/ci-kit.md`", "This guide", "toolkit"]] %}

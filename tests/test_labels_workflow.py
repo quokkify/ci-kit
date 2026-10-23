@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import functools
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
 import yaml
-from jinja2 import Environment, StrictUndefined
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from module_test_support import legacy_scenario_repo, rendered_repo, shared_template_repo
 
 ROOT = Path(__file__).resolve().parents[1]
 REUSABLE = ROOT / ".github/workflows/labels-sync.yml"
-CALLER = ROOT / "template/.github/workflows/labels.yml.jinja"
+CALLER_PATH = ".github/workflows/labels.yml"
 MANIFEST_URL = "https://raw.githubusercontent.com/quokkify/.github/main/labels.yml"
 
 
@@ -23,10 +27,23 @@ def load(text: str) -> dict:
     return workflow
 
 
+@functools.lru_cache(maxsize=None)
 def render_caller(toolkit_version: str = "v9.8.7") -> str:
-    return Environment(undefined=StrictUndefined, keep_trailing_newline=True).from_string(
-        CALLER.read_text(encoding="utf-8")
-    ).render(toolkit_version=toolkit_version)
+    dest = rendered_repo_with_version("labels", toolkit_version=toolkit_version)
+    return (dest / CALLER_PATH).read_text(encoding="utf-8")
+
+
+def rendered_repo_with_version(*modules: str, toolkit_version: str) -> Path:
+    from module_test_support import mkdtemp, run_copier
+
+    dest = mkdtemp("rendered-")
+    template = shared_template_repo()
+    for module in modules:
+        args = ["-a", f".copier-answers.{module}.yml", "-d", f"module={module}"]
+        if module == "labels":
+            args += ["-d", f"toolkit_version={toolkit_version}"]
+        run_copier(template, dest, *args)
+    return dest
 
 
 class ReusableLabelSyncTests(unittest.TestCase):
@@ -100,6 +117,21 @@ class ReusableLabelSyncTests(unittest.TestCase):
                 completed, output, _ = self.select(Path(temporary), url)
             self.assertEqual(completed.returncode, 2)
             self.assertEqual(output, "")
+
+
+class LabelsModuleRenderTests(unittest.TestCase):
+    def test_labels_module_renders_exactly_three_files(self) -> None:
+        dest = rendered_repo("labels")
+        files = {
+            path.relative_to(dest).as_posix()
+            for path in dest.rglob("*")
+            if path.is_file() and ".git" not in path.relative_to(dest).parts
+        }
+        self.assertEqual(files, {".copier-answers.labels.yml", ".ci/modules/labels.yml", ".github/workflows/labels.yml"})
+
+    def test_legacy_scenarios_no_longer_render_the_labels_workflow(self) -> None:
+        dest = legacy_scenario_repo(shared_template_repo(), "python")
+        self.assertFalse((dest / CALLER_PATH).exists())
 
 
 class LabelsCallerTemplateTests(unittest.TestCase):

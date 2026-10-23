@@ -11,6 +11,7 @@ ci-kit consumers move from the single legacy Copier template to modules (`core` 
 | `python` | `.ci/modules/python.yml` | `python_components` |
 | `node` | `.ci/modules/node.yml` | `node_components` |
 | `docker` | `.ci/modules/docker.yml` | `docker_images` |
+| `labels` | `.ci/modules/labels.yml` | `toolkit_version` |
 
 A language declaration is `schema_version: 1` plus `components`, one mapping per component. Required fields: `id` (stable job identifier), `name` (display name), `path` (component directory, no `..` segment or glob characters), and the language version (`java_version` for `java`). Every other field is optional and mirrors an input of the module's reusable workflow in snake_case (for example `run_lint`, `test_command`, `timeout_minutes`); every `*_version` is a string such as `"3.12"`, and unknown keys are rejected. `docker` components need only `id`; `name`, `context`, `dockerfile` and `target` are optional.
 

@@ -62,7 +62,7 @@ my-project/
     └── workflows/
         ├── validate.yml         # core module
         ├── copier-update.yml
-        ├── labels.yml
+        ├── labels.yml           # labels module
         ├── codeql.yml           # if codeql
         ├── gitleaks.yml         # if gitleaks
         ├── allure-report.yml    # if allure_report
