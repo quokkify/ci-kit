@@ -220,6 +220,16 @@ class HealthTests(TestCase):
         self.assertEqual(result["default_ci"]["checks"][0]["status"], "passed")
         self.assertEqual(result["default_ci"]["status"], "unknown")
 
+    def test_classic_protection_404_is_no_classic_checks(self):
+        # The fleet request adapter returns None for a confirmed 404: no classic protection, not unknown evidence.
+        api = API()
+        api.classic = None
+        self.assertEqual(api.collect()["required_checks"]["status"], "active")
+        api = API()
+        api.classic = None
+        api.rule_checks = []
+        self.assertEqual(api.collect()["required_checks"]["status"], "unprotected")
+
     def test_evaluate_disabled_and_empty_rules_are_not_active(self):
         api = API()
         # GitHub's effective branch endpoint excludes evaluate/disabled rules.

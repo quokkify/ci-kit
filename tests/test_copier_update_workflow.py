@@ -385,7 +385,10 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
         self.assertNotIn("${{", stripped)
         self.assertNotIn("{{", stripped)
 
-    def test_pure_legacy_checkout_skips_module_update(self) -> None:
+    # The legacy workflow skips the module step for a pure legacy checkout; core never does, so the inherited test does not apply.
+    test_pure_legacy_checkout_skips_module_update = None
+
+    def test_module_update_step_is_unconditional(self) -> None:
         # core renders this workflow, so .copier-answers.core.yml always exists and the
         # module step is unconditional; a legacy checkout only adds --skip-legacy.
         self.assertNotIn("compgen", self.script)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -333,6 +334,66 @@ class MigrateLegacyTests(unittest.TestCase):
         code = main(["migrate-legacy", "--repo", str(repo), "--to", REF, "--template-src", self.src, "--json", str(out)])
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(out.read_text())["findings"][0]["code"], "CIK-MIGRATE-001")
+
+
+RELEASED = "v3.9.0"
+
+
+def released_template_repo() -> Path | None:
+    """A clone of ci-kit where the real v3.9.0 tag precedes the working tree as v3.10.0 and a trivial v3.10.1."""
+    repo = mkdtemp("ci-kit-released-") / "ci-kit"
+    git(ROOT.parent, "clone", "-q", "--no-checkout", str(ROOT), str(repo))
+    if subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{RELEASED}^{{commit}}"], cwd=repo, capture_output=True).returncode:
+        return None
+    git(repo, "checkout", "-q", "-B", "release", RELEASED)
+    git(repo, "rm", "-rq", ".")
+    shutil.copytree(ROOT, repo, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", ".omc", ".superpowers", ".venv"))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "snapshot")
+    git(repo, "tag", "-f", "v3.10.0")
+    (repo / "RELEASE-NOTE.txt").write_text("v3.10.1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "trivial")
+    git(repo, "tag", "-f", "v3.10.1")
+    return repo
+
+
+class ReleasedUpgradeTests(unittest.TestCase):
+    """Regression guard: a hybrid repository built from the real v3.9.0 release updates, migrates and updates again."""
+
+    def test_v3_9_0_update_migrate_update(self):
+        template = released_template_repo()
+        if template is None:
+            self.skipTest(f"the ci-kit clone has no {RELEASED} tag (shallow or tagless checkout)")
+        src = str(template)
+        repo = hybrid_validate_repo(template, "python", ref=RELEASED)
+        (repo / "README.md").write_text("# Customized README\n")
+        commit_all(repo, "docs: customize README")
+        base = {path: (repo / path).read_text() for path in ("docs/ci-kit.md", ".github/workflows/copier-update.yml")}
+
+        updates, findings = run_update(repo, "v3.10.0", src_override=src)
+        self.assertEqual(findings, [])
+        self.assertEqual([u.module for u in updates], ["legacy", "core", "python"])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        for path, text in base.items():
+            self.assertEqual((repo / path).read_text(), text.replace(RELEASED, "v3.10.0"), path)
+        self.assertEqual((repo / "README.md").read_text(), "# Customized README\n")
+        self.assertEqual(build_plan(repo, src_override=src).findings, [])
+
+        result = migrate_legacy(repo, "v3.10.0", src_override=src)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.checks_before, result.checks_after)
+        self.assertEqual(yaml.safe_load((repo / ".copier-answers.yml").read_text())["handed_off"], list(AREAS))
+        self.assertEqual((repo / "README.md").read_text(), "# Customized README\n")
+        self.assertEqual(git(repo, "status", "--porcelain"), "")
+        self.assertEqual(build_plan(repo, src_override=src).findings, [])
+
+        updates, findings = run_update(repo, "v3.10.1", src_override=src)
+        self.assertEqual(findings, [])
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+        for answers in repo.glob(".copier-answers*.yml"):
+            self.assertEqual(yaml.safe_load(answers.read_text())["_commit"], "v3.10.1", answers.name)
+        self.assertEqual(build_plan(repo, src_override=src).findings, [])
 
 
 if __name__ == "__main__":

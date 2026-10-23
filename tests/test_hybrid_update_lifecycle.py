@@ -29,12 +29,12 @@ QUESTIONS = {"java": "java_components", "python": "python_components", "node": "
 MODULE_ORDER = ("java", "python", "node")
 
 
-def _copy_module(template: Path, repo: Path, module: str, data: dict[str, object]) -> None:
+def _copy_module(template: Path, repo: Path, module: str, data: dict[str, object], ref: str = REF) -> None:
     values = {key: json.dumps(value, separators=(",", ":")) for key, value in data.items()}
     command = [
-        shutil.which("copier"), "copy", "--trust", "--defaults", "--quiet", "--vcs-ref", REF,
+        shutil.which("copier"), "copy", "--trust", "--defaults", "--quiet", "--vcs-ref", ref,
         "-a", f".copier-answers.{module}.yml", "-d", f"module={module}",
-        *(("-d", f"toolkit_version={REF}") if module == "core" else ()),
+        *(("-d", f"toolkit_version={ref}") if module == "core" else ()),
         *[arg for key, value in values.items() for arg in ("-d", f"{key}={value}")],
         str(template), str(repo),
     ]
@@ -61,18 +61,18 @@ def _entries(components: list[dict], language: str, test_command: str | None, al
     return entries
 
 
-def hybrid_validate_repo(template: Path, scenario: str, test_command: str | None = None) -> Path:
+def hybrid_validate_repo(template: Path, scenario: str, test_command: str | None = None, ref: str = REF) -> Path:
     """A repository where legacy hands `validate` off to `core`, built without any migration code."""
     data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
-    repo = legacy_scenario_repo(template, scenario, REF, overrides={"handed_off": ["validate"]})
-    _copy_module(template, repo, "core", {})
+    repo = legacy_scenario_repo(template, scenario, ref, overrides={"handed_off": ["validate"]})
+    _copy_module(template, repo, "core", {}, ref)
     components = data.get("components") or []
     for language in MODULE_ORDER:
         entries = _entries(components, language, test_command, bool(data.get("allure_report")))
         if entries:
-            _copy_module(template, repo, language, {QUESTIONS[language]: entries})
+            _copy_module(template, repo, language, {QUESTIONS[language]: entries}, ref)
     if data.get("docker"):
-        _copy_module(template, repo, "docker", {"docker_images": [{"id": "docker"}]})
+        _copy_module(template, repo, "docker", {"docker_images": [{"id": "docker"}]}, ref)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "hybrid validate fixture")
     legacy = yaml.safe_load((repo / ".copier-answers.yml").read_text())
