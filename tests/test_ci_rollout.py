@@ -190,6 +190,24 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaises(gate.GateError):
                 gate.pilot_ready(REPO, SHA, ("Tests",))
 
+    def test_interim_neutral_codeql_check_does_not_stop_a_migrated_pilot(self):
+        # Regression guard: code scanning publishes a neutral CodeQL check run before every analysis uploads.
+        answers = b"handed_off: [validate, security]\ncodeql: true\ngitleaks: true\n"
+        for pr in (7, None):
+            with self.subTest(pr=pr):
+                self.assertNotIn("CodeQL", self.run_pilot("quokkify/gh-pages-subdir-action", answers, pr=pr))
+        contexts = ("Tests",)
+        runs = [check("Tests"), check("CodeQL", app="github-advanced-security", outcome="neutral")]
+        workflow_runs = [{"id": 1, "head_sha": SHA, "status": "completed", "conclusion": "success"}]
+        with patch.object(gate, "pages", side_effect=[runs, [], workflow_runs]):
+            self.assertTrue(gate.pilot_ready(REPO, SHA, contexts))
+
+    def test_failing_codeql_workflow_stops_pilot(self):
+        workflow_runs = [{"id": 1, "head_sha": SHA, "status": "completed", "conclusion": "failure"}]
+        with patch.object(gate, "pages", side_effect=[[check("Tests")], [], workflow_runs]):
+            with self.assertRaisesRegex(gate.GateError, "codeql.yml failed"):
+                gate.pilot_ready(REPO, SHA, ("Tests",))
+
     def test_no_change_verifies_version_and_freshness(self):
         with patch.object(gate, "current_snapshot", side_effect=[(SHA, "", ""), (OTHER, "", "")]), \
              patch.object(gate, "api", side_effect=pilot_api()), patch.object(gate, "wait_until"):
@@ -266,8 +284,8 @@ class PilotGateTests(unittest.TestCase):
         answers = (b"handed_off: [validate, security]\ncodeql: true\ngitleaks: true\ngitleaks_job_name: "
                    + CUSTOM_GITLEAKS.encode() + b"\ngitleaks_aggregate: true\n")
         self.assertEqual(self.run_pilot("quokkify/q4j", answers),
-                         (CUSTOM_GITLEAKS, "Tests pipeline complete", "ci / gate", "CodeQL", "Gitleaks"))
-        # CodeQL code scanning reports on pull request heads only.
+                         (CUSTOM_GITLEAKS, "Tests pipeline complete", "ci / gate", "Gitleaks"))
+        # CodeQL is verified by the codeql.yml workflow run, never as a required check context.
         self.assertEqual(self.run_pilot("quokkify/q4j", answers, pr=None), (CUSTOM_GITLEAKS, "ci / gate", "Gitleaks"))
 
     def test_pilot_without_legacy_uses_core_answers(self):
@@ -276,7 +294,7 @@ class PilotGateTests(unittest.TestCase):
              patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
              patch.object(gate, "pilot_ready", return_value=True) as ready:
             gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
-            self.assertEqual(ready.call_args.args[2], ("gitleaks", "ci / gate", "CodeQL"))
+            self.assertEqual(ready.call_args.args[2], ("gitleaks", "ci / gate"))
         with patch.object(gate, "current_snapshot", return_value=(SHA, "", "")), \
              patch.object(gate, "api", side_effect=module_only_api()), \
              patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
