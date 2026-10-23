@@ -52,7 +52,7 @@ def _template_commits(repo: Path) -> dict[str, str]:
 
 
 def _plan(args: argparse.Namespace) -> int:
-    plan = build_plan(Path(args.repo), src_override=args.template_src)
+    plan = build_plan(Path(args.repo), drift=not args.no_drift, src_override=args.template_src)
     outputs = {"modules": _compact(plan.modules)}
     outputs.update({module: _compact(plan.matrices.get(module, [])) for module in WORKFLOWS})
     outputs["codeql"] = _compact(["actions", *(language for module, language in CODEQL_LANGUAGES.items() if module in plan.modules)])
@@ -179,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--repo", required=True)
     plan.add_argument("--github-output")
     plan.add_argument("--template-src")
+    plan.add_argument("--no-drift", action="store_true")
     plan.set_defaults(func=_plan)
     doctor = sub.add_parser("doctor")
     doctor.add_argument("--repo", required=True)

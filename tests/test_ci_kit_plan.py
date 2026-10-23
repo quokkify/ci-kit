@@ -234,6 +234,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('codeql=["actions"]', out.splitlines())
 
+    def test_plan_no_drift_skips_drift_render(self):
+        repo = rendered_repo("core", "python")
+        with mock.patch("ci_kit.drift.drift_findings", side_effect=AssertionError("drift rendered")):
+            code, out, _ = self.run_cli("plan", "--repo", str(repo), "--no-drift")
+        self.assertEqual(code, 0)
+        self.assertIn('codeql=["actions","python"]', out.splitlines())
+
     def test_plan_writes_codes_and_commits_outputs(self):
         repo = rendered_repo("core", "java")
         with tempfile.TemporaryDirectory() as tmp:

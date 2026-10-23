@@ -24,12 +24,32 @@ jobs:
     outputs:
       languages: ${{ steps.languages.outputs.languages }}
     steps:
+      - name: Read languages override
+        id: override
+        env:
+          OVERRIDE: ${{ inputs.languages-override }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          try:
+              override = json.loads(os.environ["OVERRIDE"])
+          except json.JSONDecodeError as error:
+              raise SystemExit(f"languages-override is not valid JSON: {error}")
+          if not isinstance(override, list) or not all(isinstance(language, str) for language in override):
+              raise SystemExit("languages-override must be a JSON list of CodeQL language names")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"plan={'false' if override else 'true'}\n")
+          PY
       - name: Check out repository
+        if: steps.override.outputs.plan == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Check out toolkit
+        if: steps.override.outputs.plan == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ job.workflow_repository }}
@@ -37,26 +57,38 @@ jobs:
           path: .toolkit
           persist-credentials: false
       - name: Set up Python
+        if: steps.override.outputs.plan == 'true'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.15"
       - name: Install ci-kit
+        if: steps.override.outputs.plan == 'true'
         run: python -m pip install ./.toolkit
+      # Languages come from the module declarations alone. Drift and other
+      # findings belong to Validate; they must not stop security scanning.
       - name: Plan modules
         id: plan
-        if: inputs.languages-override == '[]'
-        run: ci-kit plan --repo . --github-output "$GITHUB_OUTPUT"
+        if: steps.override.outputs.plan == 'true'
+        run: |
+          if ! ci-kit plan --repo . --no-drift --github-output "$GITHUB_OUTPUT"; then
+            echo "::warning title=ci-kit plan::ci-kit plan reported findings; CodeQL still analyzes the planned languages. Validate reports the findings."
+          fi
       - name: Select languages
         id: languages
         env:
           OVERRIDE: ${{ inputs.languages-override }}
+          PLAN_NEEDED: ${{ steps.override.outputs.plan }}
           PLANNED: ${{ steps.plan.outputs.codeql }}
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
 
-          languages = json.loads(os.environ["OVERRIDE"]) or json.loads(os.environ["PLANNED"])
+          languages = json.loads(os.environ["OVERRIDE"])
+          if os.environ["PLAN_NEEDED"] == "true":
+              if not os.environ["PLANNED"]:
+                  raise SystemExit("ci-kit plan produced no codeql output")
+              languages = json.loads(os.environ["PLANNED"])
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"languages={json.dumps(languages, separators=(',', ':'))}\n")
           PY

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import contextlib
-import io
 import json
 import os
 import shutil
@@ -15,7 +13,6 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from ci_kit.cli import main
 from ci_kit.handoff import AREAS
 from ci_kit.legacy_answers import module_answers
 from module_test_support import ROOT, mkdtemp, modules_repo, render, render_tree, shared_template_repo
@@ -44,35 +41,68 @@ def security_tree(answers: dict) -> dict[str, bytes]:
     return render_tree(shared_template_repo(), data_file({**answers, "module": "security", "toolkit_version": PIN}))
 
 
-def planned_languages(components: list[dict]) -> list[str]:
+def plan_steps() -> dict[str, dict]:
+    steps = yaml.safe_load(REUSABLE.read_text())["jobs"]["plan"]["steps"]
+    return {step.get("id", step["name"]): step for step in steps}
+
+
+def ci_kit_shim() -> Path:
+    """Put a ci-kit executable backed by this checkout's sources on PATH."""
+    bin_dir = mkdtemp("codeql-bin-")
+    shim = bin_dir / "ci-kit"
+    shim.write_text(
+        f"#!/bin/sh\nexec {sys.executable} -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); "
+        f"from ci_kit.cli import main; sys.exit(main(sys.argv[1:]))' {ROOT / 'tools'} \"$@\"\n"
+    )
+    shim.chmod(0o755)
+    return bin_dir
+
+
+def run_step(step_id: str, env: dict[str, str], cwd: Path | None = None) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
+    step = plan_steps()[step_id]
+    target = mkdtemp("codeql-step-") / "out"
+    target.touch()
+    path = f"{ci_kit_shim()}{os.pathsep}{os.environ['PATH']}"
+    full_env = {**os.environ, **step.get("env", {}), **env, "PATH": path, "GITHUB_OUTPUT": str(target)}
+    result = subprocess.run(["bash", "-e", "-c", step["run"]], cwd=cwd, env=full_env, capture_output=True, text=True)
+    outputs = dict(line.split("=", 1) for line in target.read_text().splitlines())
+    return result, outputs
+
+
+def language_modules_repo(components: list[dict]) -> Path:
     declarations: dict[str, list[dict]] = {}
     for component in components:
         entry = {key: component[key] for key in ("id", "name", "path")}
         if component["type"] == "java":
             entry["java_version"] = "21"
         declarations.setdefault(component["type"], []).append(entry)
-    repo = modules_repo(declarations)
-    target = mkdtemp("codeql-plan-") / "out"
-    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        main(["plan", "--repo", str(repo), "--github-output", str(target)])
-    return json.loads(dict(line.split("=", 1) for line in target.read_text().splitlines())["codeql"])
+    return modules_repo(declarations)
+
+
+def planned_output(repo: Path) -> tuple[subprocess.CompletedProcess[str], str]:
+    result, outputs = run_step("plan", {}, cwd=repo)
+    return result, outputs.get("codeql", "")
 
 
 def select_languages(override: str, planned: str) -> list[str]:
-    plan_job = yaml.safe_load(REUSABLE.read_text())["jobs"]["plan"]
-    step = next(step for step in plan_job["steps"] if step.get("id") == "languages")
-    target = mkdtemp("codeql-select-") / "out"
-    target.touch()
-    env = {**os.environ, **step["env"], "OVERRIDE": override, "PLANNED": planned, "GITHUB_OUTPUT": str(target)}
-    subprocess.run(["bash", "-e", "-c", step["run"]], env=env, check=True, capture_output=True, text=True)
-    lines = dict(line.split("=", 1) for line in target.read_text().splitlines())
-    return json.loads(lines["languages"])
+    result, decision = run_step("override", {"OVERRIDE": override})
+    if result.returncode != 0:
+        raise AssertionError(result.stdout + result.stderr)
+    result, outputs = run_step("languages", {
+        "OVERRIDE": override, "PLAN_NEEDED": decision["plan"], "PLANNED": planned if decision["plan"] == "true" else "",
+    })
+    if result.returncode != 0:
+        raise AssertionError(result.stdout + result.stderr)
+    return json.loads(outputs["languages"])
 
 
 def effective_languages(security: dict[str, bytes], components: list[dict]) -> list[str]:
     caller = yaml.safe_load(security[CODEQL])
     override = caller["jobs"]["codeql"]["with"]["languages-override"]
-    return select_languages(override, json.dumps(planned_languages(components)))
+    result, planned = planned_output(language_modules_repo(components))
+    if result.returncode != 0:
+        raise AssertionError(result.stdout + result.stderr)
+    return select_languages(override, planned)
 
 
 def analyze_category(job: dict) -> str:
@@ -114,6 +144,40 @@ class CodeqlLanguageTests(unittest.TestCase):
         self.assertEqual(legacy_analyze(legacy)["strategy"]["matrix"]["language"], override)
         self.assertEqual(select_languages('["go"]', '["actions","python"]'), ["go"])
         self.assertEqual(select_languages("[]", '["actions","python"]'), ["actions", "python"])
+
+    def test_override_is_parsed_not_string_compared(self) -> None:
+        self.assertEqual(select_languages("[ ]", '["actions","python"]'), ["actions", "python"])
+        self.assertEqual(run_step("override", {"OVERRIDE": "[ ]"})[1], {"plan": "true"})
+        self.assertEqual(run_step("override", {"OVERRIDE": '[ "go" ]'})[1], {"plan": "false"})
+        for bad in ('"go"', "[1]", "not json"):
+            with self.subTest(override=bad):
+                self.assertNotEqual(run_step("override", {"OVERRIDE": bad})[0].returncode, 0)
+
+    def test_override_skips_plan_and_toolchain(self) -> None:
+        steps = plan_steps()
+        self.assertEqual(list(steps)[0], "override")
+        for step_id, step in steps.items():
+            if step_id not in ("override", "languages"):
+                with self.subTest(step=step_id):
+                    self.assertEqual(step.get("if"), "steps.override.outputs.plan == 'true'")
+
+    def test_plan_findings_keep_codeql_running(self) -> None:
+        # Regression guard: a plan finding used to fail the plan job and skip every analysis.
+        repo = modules_repo({
+            "python": [{"id": "app", "name": "App Python", "path": "."}],
+            "node": [{"id": "app", "name": "App Node", "path": "."}],
+        })
+        result, planned = planned_output(repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("CIK-CORE-005", result.stdout + result.stderr)
+        self.assertIn("::warning", result.stdout)
+        self.assertEqual(json.loads(planned), ["actions", "python", "javascript-typescript"])
+        self.assertEqual(select_languages("[]", planned), ["actions", "python", "javascript-typescript"])
+
+    def test_missing_plan_output_fails_selection(self) -> None:
+        result, outputs = run_step("languages", {"OVERRIDE": "[]", "PLAN_NEEDED": "true", "PLANNED": ""})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("languages", outputs)
 
     def test_reusable_analyze_matches_legacy(self) -> None:
         legacy_job = legacy_analyze(legacy_tree("python"))
