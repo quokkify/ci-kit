@@ -3,6 +3,13 @@ _subdirectory: "modules/{{ module }}/template"
 _answers_file: ".copier-answers.{{ module }}.yml"
 _templates_suffix: .jinja
 _exclude:
+  # ci-kit v4 has no legacy template. A bare `copier update` on a legacy
+  # .copier-answers.yml would otherwise render core over it and delete files
+  # legacy still owns; refuse before Copier writes anything.
+  - >-
+    {% if (_copier_conf.answers_file | string) == '.copier-answers.yml' %}
+    {{ _copier_conf['__legacy_answers_refused__'] | mandatory('CIK-CORE-030: legacy answers (.copier-answers.yml) cannot be updated by ci-kit v4; see docs/errors/CIK-CORE-030.md') }}
+    {% endif %}
   # The security module renders each workflow only when its flag is set.
   - "{% if module == 'security' and not codeql %}.github/workflows/codeql.yml{% endif %}"
   - "{% if module == 'security' and not gitleaks %}.github/workflows/gitleaks.yml{% endif %}"

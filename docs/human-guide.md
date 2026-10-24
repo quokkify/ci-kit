@@ -68,9 +68,8 @@ python -m pip install "git+https://github.com/quokkify/ci-kit@${TOOLKIT_REF}"
 ci-kit update --repo . --to "$TOOLKIT_REF"
 git reset --soft main
 
-git diff
-git diff --check
-git add -A
+git diff --cached
+git diff --cached --check
 git commit -m "chore: update ci-kit to ${TOOLKIT_REF}"
 git push -u origin HEAD
 gh pr create --fill
