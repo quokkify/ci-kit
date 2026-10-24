@@ -335,7 +335,7 @@ class CliTests(unittest.TestCase):
         (repo / ".copier-answers.yml").write_text("_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\n")
         before = {path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}
         with mock.patch("ci_kit.update.subprocess.run", side_effect=AssertionError("must not run copier or git")):
-            code, out, _ = self.run_cli("update", "--repo", str(repo), "--to", "v99.0.0")
+            code, out, _ = self.run_cli("update", "--repo", str(repo), "--to", "v99.0.0", env={"GITHUB_ACTIONS": ""})
         self.assertEqual(code, 1)
         self.assertEqual([line.split()[0] for line in out.splitlines()], ["CIK-CORE-030"])
         self.assertEqual({path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}, before)
