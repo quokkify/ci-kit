@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.1](https://github.com/quokkify/ci-kit/compare/v4.0.0...v4.0.1) (2026-10-24)
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** move project-owned toolkit references with the module update ([#508](https://github.com/quokkify/ci-kit/issues/508)) ([3dc9756](https://github.com/quokkify/ci-kit/commit/3dc97560a53231e38dcac1f6a6c6c1cc035e8143))
+
 ## [4.0.0](https://github.com/quokkify/ci-kit/compare/v3.11.2...v4.0.0) (2026-10-24)
 
 
