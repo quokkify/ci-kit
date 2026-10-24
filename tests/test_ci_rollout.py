@@ -31,15 +31,8 @@ def check(name, sha=SHA, outcome="success", status="completed", app="github-acti
             "conclusion": outcome, "app": {"slug": app}}
 
 
-LEGACY_VALIDATE = (b"jobs:\n  template-contract:\n    name: Shared template contract\n"
-                   b"  app:\n    name: App Python\n    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v1.2.3\n")
-
-
 def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
     def read(endpoint, *, missing_ok=False):
-        if endpoint.endswith(f".copier-answers.yml?ref={SHA}"):
-            assert missing_ok
-            return None
         if "/.copier-answers.security.yml?" in endpoint:
             content = security
         elif "/.copier-answers.core.yml?" in endpoint:
@@ -50,9 +43,12 @@ def module_only_api(security=b"codeql: true\ngitleaks: true\n"):
     return read
 
 
-def pilot_api(answers=b"", validate=LEGACY_VALIDATE):
+def pilot_api(answers=b""):
+    """Serve the same answers for the core and security answers files."""
     def read(endpoint, *, missing_ok=False):
-        content = validate if "/validate.yml?" in endpoint else b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
+        if not any(f"/{name}?" in endpoint for name in (".copier-answers.core.yml", ".copier-answers.security.yml")):
+            raise AssertionError(endpoint)
+        content = b"_commit: v1.2.3\n_src_path: gh:quokkify/ci-kit\n" + answers
         return {"content": base64.b64encode(content).decode()}
     return read
 
@@ -190,9 +186,9 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaises(gate.GateError):
                 gate.pilot_ready(REPO, SHA, ("Tests",))
 
-    def test_interim_neutral_codeql_check_does_not_stop_a_migrated_pilot(self):
+    def test_interim_neutral_codeql_check_does_not_stop_a_pilot(self):
         # Regression guard: code scanning publishes a neutral CodeQL check run before every analysis uploads.
-        answers = b"handed_off: [validate, security]\ncodeql: true\ngitleaks: true\n"
+        answers = b"codeql: true\ngitleaks: true\n"
         for pr in (7, None):
             with self.subTest(pr=pr):
                 self.assertNotIn("CodeQL", self.run_pilot("quokkify/gh-pages-subdir-action", answers, pr=pr))
@@ -226,7 +222,7 @@ class PilotGateTests(unittest.TestCase):
                 gate.verify_pilot("quokkify/q4j", pr, "v1.2.3", 0)
                 contexts = ready.call_args.args[2]
                 self.assertEqual("Tests pipeline complete" in contexts, expected)
-                self.assertIn("Shared template contract", contexts)
+                self.assertIn("ci / gate", contexts)
 
     def test_pilot_contexts_join_own_and_template_checks(self):
         self.assertEqual(gate.pilot_contexts("quokkify/skills", 7, ("ci / gate",)), ("gitleaks", "ci / gate"))
@@ -235,34 +231,21 @@ class PilotGateTests(unittest.TestCase):
         self.assertEqual(gate.pilot_contexts("quokkify/q4j", None, ("ci / gate",)),
                          ("Scan current tree (legacy history pending baseline)", "ci / gate"))
 
-    def test_handed_off_validate_expects_checks_after_without_reading_validate(self):
-        with patch.object(gate, "api", side_effect=AssertionError("validate.yml must not be read")):
-            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate",)), ("ci / gate",))
-
-    def test_legacy_template_contexts_come_from_validate_jobs(self):
-        # A pilot with components needs no per-context mapping: the contexts are read from its validate.yml.
-        for handed_off in ((), ("other",)):
-            with self.subTest(handed_off=handed_off), patch.object(gate, "api", side_effect=pilot_api()) as read:
-                self.assertEqual(gate.template_contexts(REPO, SHA, handed_off), ("Shared template contract", "App Python / ci"))
-                self.assertIn(f"/contents/.github/workflows/validate.yml?ref={SHA}", read.call_args.args[0])
-
     def test_template_contexts_for_module_repo(self):
         for security, expected in ((b"codeql: true\ngitleaks: true\n", {"ci / gate", "CodeQL", "gitleaks"}),
                                    (b"codeql: false\ngitleaks: true\n", {"ci / gate", "gitleaks"}),
                                    (b"codeql: true\ngitleaks: false\n", {"ci / gate", "CodeQL"})):
             with self.subTest(security=security), patch.object(gate, "api", side_effect=module_only_api(security)):
-                self.assertEqual(set(gate.template_contexts(REPO, SHA, (), modules_only=True)), expected)
+                self.assertEqual(set(gate.template_contexts(REPO, SHA)), expected)
 
     def test_template_contexts_follow_gitleaks_options(self):
         options = (b"codeql: true\ngitleaks: true\ngitleaks_job_name: " + CUSTOM_GITLEAKS.encode()
                    + b"\ngitleaks_aggregate: true\ncodeql_aggregate: true\n")
         expected = ("ci / gate", "CodeQL", CUSTOM_GITLEAKS, "Gitleaks")
         with patch.object(gate, "api", side_effect=module_only_api(options)):
-            self.assertEqual(gate.template_contexts(REPO, SHA, (), modules_only=True), expected)
-            # Once security is handed off, the security module answers own the contexts.
-            self.assertEqual(gate.template_contexts(REPO, SHA, ("validate", "security")), expected)
+            self.assertEqual(gate.template_contexts(REPO, SHA), expected)
         with patch.object(gate, "api", side_effect=module_only_api()):
-            self.assertEqual(gate.template_contexts(REPO, SHA, (), modules_only=True), ("ci / gate", "CodeQL", "gitleaks"))
+            self.assertEqual(gate.template_contexts(REPO, SHA), ("ci / gate", "CodeQL", "gitleaks"))
 
     def run_pilot(self, repository, answers, pr=7):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
@@ -272,23 +255,16 @@ class PilotGateTests(unittest.TestCase):
             gate.verify_pilot(repository, pr, "v1.2.3", 0)
             return ready.call_args.args[2]
 
-    def test_legacy_pilot_keeps_its_own_gitleaks_check(self):
-        # Regression guard: q4j's legacy answers say gitleaks without its custom scan job name; a derived
-        # gitleaks context would never appear and stall the release rollout.
-        answers = b"handed_off: [validate]\ncodeql: true\ngitleaks: true\n"
-        self.assertEqual(self.run_pilot("quokkify/q4j", answers), (CUSTOM_GITLEAKS, "Tests pipeline complete", "ci / gate"))
-        self.assertEqual(self.run_pilot("quokkify/q4j", answers, pr=None), (CUSTOM_GITLEAKS, "ci / gate"))
-
-    def test_migrated_pilot_expects_security_module_contexts(self):
+    def test_pilot_expects_security_module_contexts(self):
         # pilot_api serves the same answers for .copier-answers.security.yml.
-        answers = (b"handed_off: [validate, security]\ncodeql: true\ngitleaks: true\ngitleaks_job_name: "
+        answers = (b"codeql: true\ngitleaks: true\ngitleaks_job_name: "
                    + CUSTOM_GITLEAKS.encode() + b"\ngitleaks_aggregate: true\n")
         self.assertEqual(self.run_pilot("quokkify/q4j", answers),
                          (CUSTOM_GITLEAKS, "Tests pipeline complete", "ci / gate", "Gitleaks"))
         # CodeQL is verified by the codeql.yml workflow run, never as a required check context.
         self.assertEqual(self.run_pilot("quokkify/q4j", answers, pr=None), (CUSTOM_GITLEAKS, "ci / gate", "Gitleaks"))
 
-    def test_pilot_without_legacy_uses_core_answers(self):
+    def test_pilot_reads_core_answers(self):
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
              patch.object(gate, "api", side_effect=module_only_api()), \
              patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
@@ -306,6 +282,23 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
                 gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
 
+    def test_pilot_after_dropping_empty_legacy_answers_passes_on_the_target(self):
+        # The v4 fleet run drops a fully handed-off .copier-answers.yml and updates the modules on the
+        # same branch, so the PR head has no legacy answers and core answers on the target.
+        def head(endpoint, *, missing_ok=False):
+            content = {
+                ".copier-answers.core.yml?": b"_commit: v4.0.0\n_src_path: gh:quokkify/ci-kit\n",
+                ".copier-answers.security.yml?": b"_commit: v4.0.0\ncodeql: true\ngitleaks: true\n",
+            }[next(name for name in (".copier-answers.core.yml?", ".copier-answers.security.yml?") if name in endpoint)]
+            return {"content": base64.b64encode(content).decode()}
+
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=head), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            self.assertEqual(gate.verify_pilot("quokkify/skills", 7, "v4.0.0", 0), SHA)
+            self.assertIn("ci / gate", ready.call_args.args[2])
+
     def test_api_returns_none_only_for_a_confirmed_404(self):
         def failing(stderr):
             return subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
@@ -318,7 +311,7 @@ class PilotGateTests(unittest.TestCase):
                 with self.assertRaises(gate.GateError):
                     gate.api("repos/a/b/contents/x", missing_ok=True)
 
-    def test_transient_error_on_legacy_or_security_read_fails_closed(self):
+    def test_transient_error_on_core_or_security_read_fails_closed(self):
         def broken(path):
             def read(endpoint, *, missing_ok=False):
                 if path in endpoint:
@@ -326,41 +319,15 @@ class PilotGateTests(unittest.TestCase):
                 return module_only_api()(endpoint, missing_ok=missing_ok)
             return read
         with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
-             patch.object(gate, "api", side_effect=broken(".copier-answers.yml?")):
+             patch.object(gate, "api", side_effect=broken(".copier-answers.core.yml?")):
             with self.assertRaises(gate.GateError):
                 gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0)
         with patch.object(gate, "api", side_effect=broken(".copier-answers.security.yml?")):
             with self.assertRaises(gate.GateError):
-                gate.template_contexts(REPO, SHA, (), modules_only=True)
+                gate.template_contexts(REPO, SHA)
         with patch.object(gate, "api", side_effect=module_only_api(b"- not\n- a mapping\n")):
             with self.assertRaisesRegex(gate.GateError, "security answers"):
-                gate.template_contexts(REPO, SHA, (), modules_only=True)
-
-    def test_explicit_contexts_skip_template_derivation(self):
-        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
-             patch.object(gate, "api", side_effect=pilot_api(validate=b"not: [valid")), \
-             patch.object(gate, "template_contexts", side_effect=AssertionError("must not derive")), \
-             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
-             patch.object(gate, "pilot_ready", return_value=True) as ready:
-            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0, contexts=("ci / gate",))
-            self.assertEqual(ready.call_args.args[2], ("ci / gate",))
-
-    def test_unusable_legacy_validate_stops_the_gate(self):
-        for validate in (b"jobs:\n  a:\n    name: Alpha\n", b"on: push\n", b"jobs: [\n", b"\xff"):
-            with self.subTest(validate=validate), patch.object(gate, "api", side_effect=pilot_api(validate=validate)):
-                with self.assertRaisesRegex(gate.GateError, "legacy check contexts"):
-                    gate.template_contexts(REPO, SHA, ())
-
-    def test_verify_pilot_expects_gate_after_handoff(self):
-        for answers, expected in ((b"handed_off: [validate]\n", "ci / gate"), (b"handed_off: oops\n", "Shared template contract"),
-                                  (b"", "Shared template contract")):
-            with self.subTest(answers=answers), patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
-                 patch.object(gate, "api", side_effect=pilot_api(answers)), \
-                 patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
-                 patch.object(gate, "pilot_ready", return_value=True) as ready:
-                gate.verify_pilot("quokkify/gh-pages-subdir-action", 7, "v1.2.3", 0)
-                self.assertIn(expected, ready.call_args.args[2])
-                self.assertEqual("Shared template contract" in ready.call_args.args[2], expected != "ci / gate")
+                gate.template_contexts(REPO, SHA)
 
     def test_private_repository_stops(self):
         with patch.object(gate, "api", return_value={"private": True, "visibility": "private"}):
@@ -634,87 +601,6 @@ class RolloutTests(unittest.TestCase):
             self.assertTrue(summary.startswith("## Copier fleet: ❌ action required — rollout stopped\n"))
             self.assertIn("**Rollout stopped:** failed.", summary)
             self.assertIn("fanout not started", summary)
-
-
-class MigrateLegacyRolloutTests(unittest.TestCase):
-    ARGUMENTS = ["--write", "--public-only", "--migrate-legacy"]
-
-    def run_rollout(self, statuses, migration):
-        events = []
-
-        def update(arguments, report):
-            repository = arguments[arguments.index("--repo") + 1] if "--repo" in arguments else "remaining"
-            events.append(("update", repository, arguments))
-            status = statuses.get(repository, "pull-request")
-            detail = f"https://github.com/{repository}/pull/5" if status == "pull-request" else ""
-            return {"repositories": [{"repository": repository, "status": status, "detail": detail}]}
-
-        calls = []
-
-        def verify(repository, pr, target, timeout, expected_snapshot=None, **kwargs):
-            calls.append((repository, pr, kwargs))
-            return SHA
-
-        with tempfile.TemporaryDirectory() as temporary, \
-             patch.object(rollout.fleet, "resolve_template_ref", return_value="v1.2.3"), \
-             patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
-             patch.object(rollout, "wait_until"), \
-             patch.object(rollout, "run_update", side_effect=update), \
-             patch.object(rollout, "pilot_migration", side_effect=migration), \
-             patch.object(rollout, "verify_pilot", side_effect=verify), \
-             patch.object(rollout, "current_snapshot", return_value=(SHA, "", "")):
-            try:
-                rollout.rollout([*self.ARGUMENTS, "--json-report", str(Path(temporary) / "report.json")])
-            finally:
-                self.events, self.calls = events, calls
-
-    def test_rollout_migrate_legacy_pilots(self):
-        self.assertEqual(rollout.MIGRATE_LEGACY_PILOTS,
-                         ("quokkify/gh-pages-subdir-action", "quokkify/skills", "quokkify/q4j"))
-        self.run_rollout({}, lambda repository, pr: ((f"{repository}: ci / gate", "CodeQL"), SHA))
-        self.assertEqual([event[1] for event in self.events[:-1]], list(rollout.MIGRATE_LEGACY_PILOTS))
-        self.assertEqual(self.events[-1][1], "remaining")
-        self.assertEqual({repository for repository, _, _ in self.calls}, set(rollout.MIGRATE_LEGACY_PILOTS))
-        for repository, pr, kwargs in self.calls:
-            self.assertEqual(pr, 5)
-            self.assertEqual(kwargs["contexts"], (f"{repository}: ci / gate", "CodeQL"))
-            self.assertEqual(kwargs["branch"], "ci-kit/migrate-legacy")
-        for event in self.events:
-            self.assertIn("--migrate-legacy", event[2])
-
-    def test_non_pull_request_pilot_status_stops_with_repository_and_status(self):
-        target = rollout.MIGRATE_LEGACY_PILOTS[1]
-        for status in ("not-applicable", "needs-update-first", "migrate-rejected", "would-migrate"):
-            with self.subTest(status=status):
-                with self.assertRaisesRegex(gate.GateError, f"{target}.*{status}"):
-                    self.run_rollout({target: status}, lambda repository, pr: (("ci / gate",), SHA))
-                self.assertFalse(any(event[1] == "remaining" for event in self.events))
-
-    def test_moved_head_or_unusable_marker_stops_before_fanout(self):
-        def unusable(repository, pr):
-            raise gate.GateError(f"migrate marker unusable: {repository}")
-
-        with self.assertRaises(gate.GateError):
-            self.run_rollout({}, unusable)
-        self.assertEqual(self.calls, [])
-        with self.assertRaisesRegex(gate.GateError, "head moved"):
-            self.run_rollout({}, lambda repository, pr: (("ci / gate",), "b" * 40))
-        self.assertEqual(self.calls, [])
-
-    def test_pilot_migration_parses_checks_after_and_head(self):
-        body = "text\n<!-- ci-kit-migrate -->\n```json\n" + json.dumps({"checks_after": ["ci / gate", "CodeQL"], "commits": [SHA]}) + "\n```"
-        completed = type("Done", (), {"stdout": json.dumps({"body": body, "headRefOid": SHA})})()
-        with patch.object(rollout.subprocess, "run", return_value=completed):
-            self.assertEqual(rollout.pilot_migration(REPO, 5), (("ci / gate", "CodeQL"), SHA))
-        for payload in ({"body": "no marker", "headRefOid": SHA},
-                        {"body": body.replace("checks_after", "other"), "headRefOid": SHA},
-                        {"body": body, "headRefOid": "x"},
-                        {"body": body, "headRefOid": "b" * 40},
-                        {"body": body.replace(f'"commits": ["{SHA}"]', '"commits": []'), "headRefOid": SHA}):
-            completed = type("Done", (), {"stdout": json.dumps(payload)})()
-            with self.subTest(payload=payload), patch.object(rollout.subprocess, "run", return_value=completed):
-                with self.assertRaises(gate.GateError):
-                    rollout.pilot_migration(REPO, 5)
 
 
 if __name__ == "__main__":

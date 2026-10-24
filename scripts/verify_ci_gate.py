@@ -182,27 +182,11 @@ def module_answers(repository: str, sha: str, module: str) -> dict:
     return answers
 
 
-def template_contexts(repository: str, sha: str, handed_off: tuple[str, ...], *, modules_only: bool = False) -> tuple[str, ...]:
-    """The template's checks at sha: checks_after for a module-only repository or once validate is handed off, else the legacy validate.yml jobs.
+def template_contexts(repository: str, sha: str) -> tuple[str, ...]:
+    """The template's checks at sha: core's checks_after plus the codeql/gitleaks contexts of the security answers."""
+    from ci_kit.migration_marker import CHECKS_AFTER, security_contexts
 
-    The codeql/gitleaks contexts come from the security module answers. Before security is handed off, legacy answers
-    can predate a pilot's renamed scan job, so the pilot's own checks (PILOT_CHECKS) cover security instead.
-    """
-    import base64
-    import yaml
-    from ci_kit.migration_marker import CHECKS_AFTER, check_contexts, security_contexts
-
-    security = security_contexts(module_answers(repository, sha, "security")) if modules_only or "security" in handed_off else []
-    if modules_only or "validate" in handed_off:
-        return (*CHECKS_AFTER["core"], *security)
-    contents = api(f"repos/{repository}/contents/.github/workflows/validate.yml?ref={sha}")
-    try:
-        contexts = check_contexts(yaml.safe_load(base64.b64decode(contents["content"]).decode()))
-    except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
-        raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: {exc}") from exc
-    if not contexts:
-        raise GateError(f"Cannot derive legacy check contexts: {repository}@{sha}: validate.yml has no jobs")
-    return (*contexts, *security)
+    return (*CHECKS_AFTER["core"], *security_contexts(module_answers(repository, sha, "security")))
 
 
 def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -> tuple[str, ...]:
@@ -216,7 +200,7 @@ def pilot_contexts(repository: str, pr: int | None, template: tuple[str, ...]) -
     return contexts
 
 
-def current_snapshot(repository: str, pr: int | None, branch: str = PILOT_BRANCH) -> tuple[str, str, str]:
+def current_snapshot(repository: str, pr: int | None) -> tuple[str, str, str]:
     metadata = api(f"repos/{repository}")
     if not isinstance(metadata, dict) or metadata.get("visibility") != "public" or metadata.get("private") is not False:
         raise GateError(f"Pilot must be public: {repository}")
@@ -229,7 +213,7 @@ def current_snapshot(repository: str, pr: int | None, branch: str = PILOT_BRANCH
         if (not isinstance(pull, dict) or pull.get("state") != "open"
                 or pull.get("base", {}).get("ref") != metadata["default_branch"]
                 or pull.get("head", {}).get("repo", {}).get("full_name") != repository
-                or pull.get("head", {}).get("ref") != branch):
+                or pull.get("head", {}).get("ref") != PILOT_BRANCH):
             raise GateError(f"Unexpected pilot PR identity: {repository}#{pr}")
         sha = pull.get("head", {}).get("sha")
         base_sha = pull.get("base", {}).get("sha")
@@ -249,8 +233,8 @@ def current_revision(repository: str, pr: int | None) -> str:
 
 
 def pilot_ready(repository: str, sha: str, contexts: tuple[str, ...], pr: int | None = None,
-                snapshot: tuple[str, str, str] | None = None, branch: str = PILOT_BRANCH) -> bool:
-    if pr is not None and current_snapshot(repository, pr, branch) != snapshot:
+                snapshot: tuple[str, str, str] | None = None) -> bool:
+    if pr is not None and current_snapshot(repository, pr) != snapshot:
         raise GateError(f"Pilot head/base/merge changed during CI wait: {repository}; update or rerun the PR")
     runs = pages(f"repos/{repository}/commits/{sha}/check-runs?filter=latest", "check_runs")
     statuses = pages(f"repos/{repository}/commits/{sha}/statuses")
@@ -268,7 +252,7 @@ def pilot_ready(repository: str, sha: str, contexts: tuple[str, ...], pr: int | 
                 and (snapshot is None or not association_matches(run, pr, snapshot))):
             raise GateError(f"Pilot check {run.get('name')} lacks current head/base association; update or rerun the PR")
         evidence[run["name"]] = (run.get("status") == "completed", run.get("conclusion"))
-    # Legacy CodeQL status is published separately from matrix analysis checks.
+    # Commit statuses are published separately from check runs.
     # GitHub statuses are newest first; preserve the newest status per context.
     latest_statuses = {}
     for status in sorted(statuses, key=lambda s: s["id"], reverse=True):
@@ -298,21 +282,17 @@ def pilot_ready(repository: str, sha: str, contexts: tuple[str, ...], pr: int | 
 
 
 def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
-                 expected_snapshot: tuple[str, str, str] | None = None, *,
-                 contexts: tuple[str, ...] | None = None, branch: str = PILOT_BRANCH) -> str:
+                 expected_snapshot: tuple[str, str, str] | None = None) -> str:
     import base64
     import yaml
     from update_copier_fleet import normalize_template_source
 
-    snapshot = current_snapshot(repository, pr, branch)
+    snapshot = current_snapshot(repository, pr)
     if expected_snapshot is not None and snapshot != expected_snapshot:
         raise GateError(f"Pilot changed before fanout: {repository}; update or rerun the PR")
     sha = snapshot[0]
-    contents = api(f"repos/{repository}/contents/.copier-answers.yml?ref={sha}", missing_ok=True)
-    modules_only = contents is None
-    if modules_only:
-        # A repository fully handed off to modules has no legacy answers file (confirmed 404).
-        contents = api(f"repos/{repository}/contents/.copier-answers.core.yml?ref={sha}")
+    # Fail closed: a missing core answers file is a read error, not an empty answer.
+    contents = api(f"repos/{repository}/contents/.copier-answers.core.yml?ref={sha}")
     try:
         answers = yaml.safe_load(base64.b64decode(contents["content"]).decode())
     except (KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
@@ -322,14 +302,9 @@ def verify_pilot(repository: str, pr: int | None, target: str, timeout: int,
     source = answers.get("_src_path")
     if not isinstance(source, str) or normalize_template_source(source) != "quokkify/ci-kit":
         raise GateError(f"Pilot {repository}@{sha} uses a different template source")
-    if contexts is None:
-        handed_off = answers.get("handed_off")
-        if not isinstance(handed_off, list) or not all(isinstance(area, str) for area in handed_off):
-            handed_off = []
-        contexts = pilot_contexts(repository, pr, template_contexts(repository, sha, tuple(handed_off), modules_only=modules_only))
-    ready_kwargs = {} if branch == PILOT_BRANCH else {"branch": branch}
-    wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot, **ready_kwargs), timeout)
-    if current_snapshot(repository, pr, branch) != snapshot:
+    contexts = pilot_contexts(repository, pr, template_contexts(repository, sha))
+    wait_until(lambda: pilot_ready(repository, sha, contexts, pr=pr, snapshot=snapshot), timeout)
+    if current_snapshot(repository, pr) != snapshot:
         raise GateError(f"Pilot head/base/merge changed while checking: {repository}; update or rerun the PR")
     return sha
 

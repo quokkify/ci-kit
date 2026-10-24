@@ -2,7 +2,7 @@
 
 This is the short, practical guide. You do not need to understand the toolkit internals first.
 
-> **Important:** ci-kit is a Copier template, not a GitHub “template repository.” Copier creates the small project-owned files, remembers the answers in `.copier-answers.yml`, and can update those files later.
+> **Important:** ci-kit is a Copier template, not a GitHub “template repository.” Copier creates the small project-owned files, remembers the answers of each module in `.copier-answers.<module>.yml`, and can update those files later.
 
 ## Before you start
 
@@ -21,42 +21,24 @@ export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq
 echo "$TOOLKIT_REF"
 ```
 
-Always use a released tag such as `v3.11.2`. Do not generate production files from `main` or `HEAD`.
+Always use a released tag such as `v3.9.0`. Do not generate production files from `main` or `HEAD`.
 
 ## 1. Create a new project from the template
 
-Run:
+A new repository is the `core` module, any of the `security`, `release`, `allure` and `renovate` modules you need, and one language module per stack (see [modules](modules.md)). Run Copier once per module; `module` defaults to `core`:
 
 ```bash
-copier copy \
-  https://github.com/quokkify/ci-kit.git \
-  my-project \
-  --vcs-ref "$TOOLKIT_REF" \
-  --data "toolkit_version=$TOOLKIT_REF" \
-  --trust
+for module in core python security release renovate; do
+  copier copy \
+    https://github.com/quokkify/ci-kit.git \
+    my-project \
+    --vcs-ref "$TOOLKIT_REF" \
+    --data "toolkit_version=$TOOLKIT_REF" \
+    -d "module=$module"
+done
 ```
 
-Copier asks a few questions:
-
-- project name;
-- Python, Node.js, or Java components and their directories;
-- whether Docker is used;
-- whether to enable CodeQL, Gitleaks, and Allure reports;
-- whether Release Please is needed;
-- whether Renovate is needed.
-
-A new repository is the `core` module, any of the `security`, `release`, `allure` and `renovate` modules you need, and one language module per stack (see [modules](modules.md)). The legacy template above is transitional until v4.0.0: it hands `validate` to `core` and no longer writes `.github/workflows/validate.yml`. Add `core`, and repeat the command with `-a .copier-answers.<module>.yml -d module=<module>` for each other module:
-
-```bash
-copier copy \
-  https://github.com/quokkify/ci-kit.git \
-  my-project \
-  --vcs-ref "$TOOLKIT_REF" \
-  --data "toolkit_version=$TOOLKIT_REF" \
-  --trust \
-  -a .copier-answers.core.yml \
-  -d module=core
-```
+Copier asks the questions of each module, such as the project name (`core`), the component directories (language modules), CodeQL and Gitleaks (`security`), the Release Please mode (`release`), or the Renovate presets (`renovate`).
 
 Then create the GitHub repository:
 
@@ -68,13 +50,13 @@ git commit -m "chore: initialize project"
 gh repo create quokkify/my-project --private --source=. --push
 ```
 
-Commit `.copier-answers.yml` and the module answers files (`.copier-answers.<module>.yml`). They are not secrets. They are the receipts Copier needs for future updates.
+Commit the module answers files (`.copier-answers.<module>.yml`). They are not secrets. They are the receipts Copier needs for future updates.
 
 Before merging generated CI, open the module declarations in `.ci/modules/` and confirm that component directories match the real project. Then follow the installation check and update steps in the generated `docs/ci-kit.md`.
 
 ## 2. Update a project created by Copier
 
-The project must contain `.copier-answers.yml` and have a clean Git working tree.
+The project must contain its `.copier-answers.<module>.yml` files and have a clean Git working tree. `ci-kit update` updates every installed module, one commit per module; the generated `Update project template` workflow runs the same command.
 
 ```bash
 cd my-project
@@ -82,14 +64,12 @@ git switch main
 git pull --ff-only
 git switch -c "chore/update-ci-kit-${TOOLKIT_REF}"
 
-copier update \
-  --vcs-ref "$TOOLKIT_REF" \
-  --data "toolkit_version=$TOOLKIT_REF" \
-  --trust
+python -m pip install "git+https://github.com/quokkify/ci-kit@${TOOLKIT_REF}"
+ci-kit update --repo . --to "$TOOLKIT_REF"
+git reset --soft main
 
-git diff
-git diff --check
-git add -A
+git diff --cached
+git diff --cached --check
 git commit -m "chore: update ci-kit to ${TOOLKIT_REF}"
 git push -u origin HEAD
 gh pr create --fill
@@ -98,21 +78,23 @@ gh pr create --fill
 Review the PR before merging it. In particular, check:
 
 - `.github/workflows/validate.yml`;
-- `.github/workflows/release.yml`, if enabled;
+- `.github/workflows/release.yml`, if the `release` module is installed;
 - `.github/renovate.json`;
-- `.copier-answers.yml`;
+- the `.copier-answers.<module>.yml` files;
 - any Copier conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
 
 Copier updates generated files. Renovate has a different job: it updates released workflow/action references. Keep both enabled; they are complementary.
 
+A repository that still has a legacy `.copier-answers.yml` is refused with [CIK-CORE-030](errors/CIK-CORE-030.md) unless every area is handed off; see [leaving the legacy template](modules.md#leaving-the-legacy-template).
+
 ## 3. Add a new template capability
 
-There is intentionally one configurable project template rather than many copied templates. Add a new option to it when projects share the same basic structure.
+Each module is a Copier template under `modules/<module>/template`; all modules share the questions in the root `copier.yml`.
 
 1. Create a branch in `ci-kit`.
-2. Add the new question or option to [`copier.yml`](../copier.yml).
-3. Add or change a `.jinja` file under [`template/`](../template/).
-4. Add or update a representative answer file under [`tests/scenarios/`](../tests/scenarios/). If it is a new scenario, register it in `scripts/validate.py` so static validation renders it.
+2. Add the new question or option to [`copier.yml`](../copier.yml), gated by `when: "{{ module == '<module>' }}"`.
+3. Add or change a `.jinja` file under `modules/<module>/template/`.
+4. Add or update a representative scenario under [`tests/scenarios/modules/`](../tests/scenarios/modules/): a mapping from module name to its answers. `scripts/validate.py` renders every scenario.
 5. Generate a disposable preview.
 6. Run validation and open a PR.
 7. After merge, wait for a released tag and use that tag in real projects.
@@ -122,12 +104,9 @@ Example preview:
 ```bash
 PREVIEW_DIR="$(mktemp -d)"
 trap 'rm -rf "$PREVIEW_DIR"' EXIT
-copier copy \
-  . \
-  "$PREVIEW_DIR" \
-  --vcs-ref HEAD \
-  --trust \
-  --data-file tests/scenarios/python.yml
+for module in core python; do
+  copier copy . "$PREVIEW_DIR" --vcs-ref HEAD --defaults -d "module=$module"
+done
 
 python scripts/validate.py --static
 git diff --check
@@ -135,77 +114,20 @@ git diff --check
 
 `HEAD` is acceptable only for this local preview. Consumers must use a release tag.
 
-Create a separate template repository only when the new project type has a genuinely different lifecycle and almost no shared generated files. Otherwise, another option in this template is easier to test and update.
+Create a separate template repository only when the new project type has a genuinely different lifecycle and almost no shared generated files. Otherwise, another option or module in this template is easier to test and update.
 
 ## 4. Roll out the template across existing organization repositories
 
-The safe organization-wide rollout is **one command that processes the selected repositories and opens reviewable PRs**. It never pushes directly to `main` and never merges automatically. Repositories with no changes or an already-open rollout PR are skipped, and the helper stops on the first error.
+Existing managed repositories are updated by the fleet automation: `scripts/update_copier_fleet.py` runs `ci-kit update` for every public consumer and opens one reviewable pull request per repository, and `scripts/rollout_copier_fleet.py` gates a full rollout on its pilot repositories. See [usage](usage.md#applying-updates). Neither pushes to `main` or merges automatically unless `--auto-merge` is requested.
 
-### Step 1: prepare one answers file per target repository
-
-Create a private local directory outside any repository:
-
-```bash
-mkdir -p "$HOME/ci-kit-rollout"
-```
-
-Create, for example, `$HOME/ci-kit-rollout/example-service.yml`:
-
-```yaml
-project_name: example-service
-components:
-  - type: python
-    path: .
-    id: app-python
-    name: Application Python
-docker: false
-release_please: true
-renovate: true
-renovate_config_repository: quokkify/renovate-presets
-renovate_presets:
-  - default
-  - python
-  - github-actions
-```
-
-The filename is the repository name: `example-service.yml` targets `quokkify/example-service`.
-
-Add only repositories you really want to change. Different repositories can have different answers. Never put secrets in these files: Copier records the answers in the target repository.
-
-### Step 2: run the rollout helper
-
-Clone `ci-kit` first (skip the first command if it is already cloned), then test with one answers file:
-
-```bash
-gh repo clone quokkify/ci-kit
-cd ci-kit
-git switch main
-git pull --ff-only
-export TOOLKIT_REF="v3.11.2" # use the exact tag you reviewed above
-scripts/rollout_ci_kit.sh "$HOME/ci-kit-rollout"
-```
-
-After the first PR looks correct, add the remaining answer files and run the same command again. Already-open rollout PRs for the current toolkit release are detected and skipped.
-
-1. clones the repository into a temporary directory;
-2. updates it if `.copier-answers.yml` already exists;
-3. adopts the template if this is the first Copier rollout;
-4. preserves the repository's existing `README.md`;
-5. stops if an existing answers file belongs to another Copier template;
-6. stops before pushing if Copier leaves conflict markers;
-7. opens a separate reviewable PR;
-8. never merges the PR.
-
-The first rollout uses `--overwrite` because existing CI or Renovate files may need replacement. That is why every repository with generated changes gets its own PR. Read the diff and let its normal CI/security checks run before merge.
-
-To update the same fleet later, keep the answers directory and run the script again after a new toolkit release. Repositories already containing `.copier-answers.yml` will use `copier update` instead of first-time adoption. Keep `TOOLKIT_REF` fixed to the same reviewed tag for the whole rollout; choose a new tag only when starting a new rollout.
+A repository that has no ci-kit answers yet is adopted by hand with section 1.
 
 ## Which command do I need?
 
 - **Brand-new repository:** `copier copy` from section 1.
-- **One managed repository:** `copier update` from section 2.
+- **One managed repository:** `ci-kit update` from section 2.
 - **New shared generated behavior:** change the template and release it using section 3.
-- **Many existing repositories:** prepare one answers file per repository and run section 4.
+- **Many existing repositories:** the fleet update in section 4.
 
 For an optional read-only adoption and exact-revision CI snapshot, use
 `--include-health`; see [fleet health](fleet-health.md). JSON schema version 4

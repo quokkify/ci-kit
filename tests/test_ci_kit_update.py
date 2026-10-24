@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
@@ -19,9 +16,9 @@ from ci_kit.cli import main
 from ci_kit.modules import MODULES, ModuleInfo
 from ci_kit.plan import build_plan
 from ci_kit.update import ModuleUpdate, copier_update_command, run_update, update_order
-from module_test_support import (
-    BASE_PATHS, ROOT, base_handoff_template_repo, git, lifecycle_template_repo, mkdtemp, rendered_from,
-)
+from module_test_support import git, lifecycle_template_repo, mkdtemp, rendered_from
+
+BASE_PATHS = (".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md")
 
 _TEMPLATE: Path | None = None
 
@@ -45,32 +42,16 @@ def modules_repo(*modules: str) -> Path:
     return repo
 
 
-def legacy_repo() -> Path:
-    data = yaml.safe_load((ROOT / "tests/scenarios/java.yml").read_text())
-    data["toolkit_version"] = "v99.0.0"
-    data_file = mkdtemp("scenario-") / "data.yml"
-    data_file.write_text(yaml.safe_dump(data))
-    dest = mkdtemp("legacy-")
-    subprocess.run(
-        [shutil.which("copier"), "copy", "--trust", "--defaults", "--vcs-ref", "v99.0.0",
-         "--data-file", str(data_file), str(template()), str(dest)],
-        check=True, capture_output=True, text=True,
-    )
-    git(dest, "init", "-q")
-    commit_all(dest)
-    return dest
-
-
 def subjects(repo: Path) -> list[str]:
     return git(repo, "log", "--format=%s").splitlines()
 
 
 class OrderTests(unittest.TestCase):
     def test_update_order(self):
-        modules = {"zeta", "docker", "node", "python", "java", "renovate", "allure", "release", "security", "core", "legacy"}
+        modules = {"zeta", "docker", "node", "python", "java", "renovate", "allure", "release", "security", "core"}
         self.assertEqual(
             update_order(modules),
-            ["legacy", "core", "security", "release", "allure", "renovate", "java", "python", "node", "docker", "zeta"],
+            ["core", "security", "release", "allure", "renovate", "java", "python", "node", "docker", "zeta"],
         )
         self.assertEqual(update_order({"java", "core"}), ["core", "java"])
 
@@ -83,19 +64,17 @@ class OrderTests(unittest.TestCase):
 
 class CommandTests(unittest.TestCase):
     def test_command_shape(self):
-        cmd = copier_update_command(".copier-answers.core.yml", "v1", trust=False, data={"toolkit_version": "v1"})
+        cmd = copier_update_command(".copier-answers.core.yml", "v1", data={"toolkit_version": "v1"})
         self.assertIn("update", cmd)
         self.assertNotIn("--trust", cmd)
         self.assertEqual(cmd[cmd.index("--vcs-ref") + 1], "v1")
         self.assertEqual(cmd[cmd.index("-d") + 1], "toolkit_version=v1")
         self.assertEqual(cmd[-2:], ["--", "."])
-        legacy = copier_update_command(".copier-answers.yml", "v1", trust=True, data={"toolkit_version": "v1"})
-        self.assertIn("--trust", legacy)
-        self.assertEqual(legacy[legacy.index("-d") + 1], "toolkit_version=v1")
+        self.assertNotIn("-x", cmd)
 
     def test_option_like_ref_refused(self):
         with self.assertRaises(ValueError):
-            copier_update_command("a.yml", "--evil", trust=False, data={})
+            copier_update_command("a.yml", "--evil", data={})
 
 
 class UpdateTests(unittest.TestCase):
@@ -167,23 +146,6 @@ class UpdateTests(unittest.TestCase):
         self.assertIn(f"untrusted template source: {self.src}", findings[0].message)
         self.assertEqual(updates, [])
 
-    def test_skip_legacy_leaves_legacy_answers_untouched(self):
-        repo = legacy_repo()
-        legacy = (repo / ".copier-answers.yml").read_bytes()
-        tree = {p: p.read_bytes() for p in repo.rglob("*") if p.is_file() and ".git" not in p.relative_to(repo).parts}
-        updates, _ = run_update(repo, "v99.1.0", skip_legacy=True, src_override=self.src)
-        self.assertEqual(updates, [])
-        self.assertEqual((repo / ".copier-answers.yml").read_bytes(), legacy)
-        self.assertEqual({p: p.read_bytes() for p in repo.rglob("*") if p.is_file() and ".git" not in p.relative_to(repo).parts}, tree)
-
-    def test_legacy_updates_first(self):
-        repo = legacy_repo()
-        updates, _ = run_update(repo, "v99.1.0", modules=["legacy"], src_override=self.src)
-        self.assertEqual([u.module for u in updates], ["legacy"])
-        self.assertEqual(subjects(repo)[0], "chore(ci-kit): update legacy to v99.1.0")
-        self.assertEqual(yaml.safe_load((repo / ".copier-answers.yml").read_text())["toolkit_version"], "v99.1.0")
-        self.assertNotIn("CIK-LEGACY-002", [f.code for f in build_plan(repo, src_override=self.src).findings])
-
     def test_commit_identity_fallback(self):
         repo = modules_repo("core")
         for key in ("user.name", "user.email"):
@@ -219,6 +181,21 @@ class UpdateTests(unittest.TestCase):
         self.assertIn("`v99.1.0`", (repo / "docs/ci-kit.md").read_text())
         self.assertIn("ci-kit doctor", (repo / "docs/ci-kit.md").read_text())
 
+    def test_empty_legacy_answers_do_not_hold_modules_back(self):
+        # Regression guard: v4 ignores legacy answers that hand every area off; the fleet drops them.
+        repo = modules_repo("core", "java")
+        legacy = (
+            "_commit: v99.0.0\n_src_path: https://github.com/quokkify/ci-kit.git\nmodule: legacy\n"
+            "toolkit_version: v99.0.0\nhanded_off: [validate, base, security, release, allure, renovate]\n"
+        )
+        (repo / ".copier-answers.yml").write_text(legacy)
+        commit_all(repo, "empty legacy answers")
+        updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
+        self.assertEqual(findings, [])
+        self.assertEqual([u.module for u in updates], ["core", "java"])
+        self.assertEqual((repo / ".copier-answers.yml").read_text(), legacy)
+        self.assertEqual(list(repo.rglob("*.rej")), [])
+
     def test_starter_files_not_overwritten(self):
         repo = modules_repo("core")
         edited = {"README.md": "# Project README\n", ".github/pull_request_template.md": "## What changed\n"}
@@ -230,68 +207,6 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual([u.module for u in updates], ["core"])
         for path, text in edited.items():
             self.assertEqual((repo / path).read_text(), text)
-        self.assertEqual(build_plan(repo, src_override=self.src).findings, [])
-
-
-class BaseHandoffUpdateTests(unittest.TestCase):
-    """core takes the base area over only once legacy hands it off (real Copier updates)."""
-
-    @classmethod
-    def setUpClass(cls):
-        from test_hybrid_update_lifecycle import hybrid_validate_repo
-
-        cls.template = base_handoff_template_repo()
-        cls.src = str(cls.template)
-        cls.hybrid = staticmethod(hybrid_validate_repo)
-
-    def unmigrated(self) -> Path:
-        repo = self.hybrid(self.template, "python")
-        (repo / "README.md").write_text("# Project README\n")
-        commit_all(repo, "own README")
-        return repo
-
-    def test_unmigrated_hybrid_core_update_leaves_legacy_base_files(self):
-        repo = self.unmigrated()
-        before = {path: (repo / path).read_bytes() for path in BASE_PATHS}
-        updates, findings = run_update(repo, "v99.1.0", modules=["core"], src_override=self.src)
-        # Only the partial update itself is reported: legacy and python stay on v99.0.0.
-        self.assertEqual({f.code for f in findings}, {"CIK-CORE-012"})
-        self.assertEqual([u.module for u in updates], ["core"])
-        self.assertEqual(list(repo.rglob("*.rej")), [])
-        self.assertEqual({path: (repo / path).read_bytes() for path in BASE_PATHS}, before)
-        self.assertNotIn("docs/ci-kit.md", git(repo, "show", "--name-only", "--format=", "HEAD").splitlines())
-
-    def test_unmigrated_hybrid_full_update_is_clean(self):
-        repo = self.unmigrated()
-        updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
-        self.assertEqual(findings, [])
-        self.assertEqual([u.module for u in updates], ["legacy", "core", "python"])
-        self.assertEqual(list(repo.rglob("*.rej")), [])
-        self.assertEqual((repo / "README.md").read_text(), "# Project README\n")
-        self.assertIn("## What this project received", (repo / "docs/ci-kit.md").read_text())
-        self.assertIn("--skip-legacy", (repo / ".github/workflows/copier-update.yml").read_text())
-
-    def test_core_update_from_release_without_base_renders_base_after_handoff(self):
-        """Only core moving from a release without base files (v99.0.0 here) to one with them.
-
-        A core release that already renders base files needs migrate-legacy instead
-        (tests/test_migrate_legacy.py); a bare legacy handoff plus update loses them there.
-        """
-        repo = self.unmigrated()
-        subprocess.run(
-            [shutil.which("copier"), "update", "--trust", "--defaults", "--skip-tasks", "--vcs-ref", "v99.1.0",
-             "-d", "toolkit_version=v99.1.0", "-d", "handed_off=[validate, base]", "."],
-            cwd=repo, check=True, capture_output=True, text=True,
-        )
-        commit_all(repo, "hand base off")
-        updates, findings = run_update(repo, "v99.1.0", src_override=self.src)
-        self.assertEqual(findings, [])
-        self.assertEqual([(u.module, u.commit is None) for u in updates], [("legacy", True), ("core", False), ("python", False)])
-        self.assertEqual(list(repo.rglob("*.rej")), [])
-        for path in BASE_PATHS:
-            self.assertTrue((repo / path).is_file(), path)
-        self.assertIn("ci-kit doctor", (repo / "docs/ci-kit.md").read_text())
-        self.assertIn("ci-kit update", (repo / ".github/workflows/copier-update.yml").read_text())
         self.assertEqual(build_plan(repo, src_override=self.src).findings, [])
 
 

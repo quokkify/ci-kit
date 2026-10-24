@@ -13,8 +13,8 @@ policy. The default invocation makes no additional health API calls. Health
 is reporting evidence, not rollout approval. JSON schema version 5 preserves
 all previous inventory and summary keys, adds `repositories[].health` when
 requested, and adds `repositories[].template.modules` (module names from the
-repository's `.copier-answers.<module>.yml` files) and `.state` (`legacy`,
-`hybrid(<handed-off areas>)` or `modules`). Version 6 adds a top-level `run`
+repository's `.copier-answers.<module>.yml` files) and `.state` (`modules`, or
+`legacy` for a repository refused with `CIK-CORE-030`). Version 6 adds a top-level `run`
 object: `mode` (`write` or `dry-run`), `template_ref` (resolved),
 `requested_template_ref` (the `--template-ref` input), `trigger`
 (`GITHUB_EVENT_NAME`), `run_url` (built from `GITHUB_SERVER_URL`,

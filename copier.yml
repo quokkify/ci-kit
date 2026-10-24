@@ -1,68 +1,26 @@
 _min_copier_version: "9.19.1"
-_subdirectory: "{% if module == 'legacy' %}template{% else %}modules/{{ module }}/template{% endif %}"
-_answers_file: .copier-answers.yml
+_subdirectory: "modules/{{ module }}/template"
+_answers_file: ".copier-answers.{{ module }}.yml"
 _templates_suffix: .jinja
-# The answers file already in the destination: empty on a fresh copy, the
-# stored answers on update. Lets the handed_off default tell a missing key in
-# stored answers apart from a fresh copy.
-_external_data:
-  stored_answers: "{{ _copier_conf.answers_file }}"
-  # The legacy answers next to a module's answers. core renders the base area
-  # only when legacy is absent or has handed base off.
-  legacy_answers: .copier-answers.yml
 _exclude:
-  # Rendered before file generation: Copier's --defaults does not validate
-  # retained question defaults and can discard invalid boolean answers. Skip
-  # the inherited guard in Copier's old-template scratch render; the current
-  # template evaluates its own exclusions with no inherited guard marker.
+  # ci-kit v4 has no legacy template. A bare `copier update` on a legacy
+  # .copier-answers.yml would otherwise render core over it and delete files
+  # legacy still owns; refuse before Copier writes anything.
   - >-
-    {% set selected_release = _copier_answers.get('_commit', '') %}
-    {% if '__allure_pin_mismatch__' not in (_copier_conf.exclude | join(' ')) and allure_report and (selected_release | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) and toolkit_version != selected_release %}
-    {{ _copier_conf['__allure_pin_mismatch__'] | mandatory('Allure reusable workflows require the selected toolkit release. Retry with --data toolkit_version=' ~ selected_release) }}
+    {% if (_copier_conf.answers_file | string) == '.copier-answers.yml' %}
+    {{ _copier_conf['__legacy_answers_refused__'] | mandatory('CIK-CORE-030: legacy answers (.copier-answers.yml) cannot be updated by ci-kit v4; see docs/errors/CIK-CORE-030.md') }}
     {% endif %}
-  # Legacy no longer renders validate.yml; the core module owns it. Rendering
-  # legacy without the handoff would silently drop the repository's Validate
-  # workflow, so refuse instead. This guard fires first when updating from a
-  # template that still rendered validate.yml; the handed_off validator fires
-  # on copies and on later updates.
-  - >-
-    {% if module == 'legacy' and 'validate' not in (handed_off | default([])) %}
-    {{ _copier_conf['__legacy_validate_removed__'] | mandatory('CIK-LEGACY-006: the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md') }}
-    {% endif %}
-  # Legacy also stops rendering the files of every area handed off to a
-  # module (tools/ci_kit/handoff.py AREAS). Module templates render some of
-  # the same paths, so these guards apply to the legacy template only.
-  - "{% if module == 'legacy' and 'base' in (handed_off | default([])) %}.github/workflows/copier-update.yml{% endif %}"
-  - "{% if module == 'legacy' and 'base' in (handed_off | default([])) %}docs/ci-kit.md{% endif %}"
-  - "{% if module == 'legacy' and 'base' in (handed_off | default([])) %}/README.md{% endif %}"
-  - "{% if module == 'legacy' and 'base' in (handed_off | default([])) %}.github/pull_request_template.md{% endif %}"
-  - "{% if module == 'legacy' and (not renovate or 'renovate' in (handed_off | default([]))) %}.github/renovate.json{% endif %}"
-  - "{% if module == 'legacy' and (not release_please or 'release' in (handed_off | default([]))) %}.github/workflows/release.yml{% endif %}"
-  - "{% if module == 'legacy' and (not release_please or 'release' in (handed_off | default([]))) %}.github/release-please/config.json{% endif %}"
-  - "{% if module == 'legacy' and (not release_please or 'release' in (handed_off | default([]))) %}.github/release-please/manifest.json{% endif %}"
-  - "{% if module == 'legacy' and (not release_please or 'release' in (handed_off | default([]))) %}.github/scripts/enrich_release_notes.py{% endif %}"
-  - "{% if module == 'legacy' and (not codeql or 'security' in (handed_off | default([]))) %}.github/workflows/codeql.yml{% endif %}"
-  - "{% if module == 'legacy' and (not gitleaks or 'security' in (handed_off | default([]))) %}.github/workflows/gitleaks.yml{% endif %}"
-  - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/allurerc.mjs{% endif %}"
-  - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/allure/safe_extract.py{% endif %}"
-  - "{% if module == 'legacy' and (not allure_report or 'allure' in (handed_off | default([]))) %}.github/workflows/allure-report.yml{% endif %}"
-  # core takes the base area over from legacy only after the handoff; while
-  # legacy still renders these files, core must not overwrite them.
-  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}.github/workflows/copier-update.yml{% endif %}"
-  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}docs/ci-kit.md{% endif %}"
-  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}/README.md{% endif %}"
-  - "{% if module == 'core' and _external_data.legacy_answers and not (_external_data.legacy_answers is mapping and 'base' in (_external_data.legacy_answers.get('handed_off') or [])) %}.github/pull_request_template.md{% endif %}"
   # The security module renders each workflow only when its flag is set.
   - "{% if module == 'security' and not codeql %}.github/workflows/codeql.yml{% endif %}"
   - "{% if module == 'security' and not gitleaks %}.github/workflows/gitleaks.yml{% endif %}"
 
 # Written once when the project is generated, then owned by the project.
-# The template ships a starter README and a minimal Renovate config; real
+# The modules ship a starter README and a minimal Renovate config; real
 # projects rewrite the README and extend the Renovate config with their own
 # managers and rules, so a later `copier update` must not overwrite either.
 # Toolkit-owned Renovate policy reaches these projects through the shared
 # preset in `extends`, not by rewriting the file. The release module renders
-# the same release-please starter files at the same paths.
+# the release-please starter files.
 _skip_if_exists:
   - /README.md
   - .github/renovate.json
@@ -72,48 +30,24 @@ _skip_if_exists:
 
 module:
   type: str
-  help: Template module to apply. legacy keeps the single combined template.
-  choices: [legacy, core, java, python, node, docker, security, release, allure, renovate]
-  default: legacy
+  help: Template module to apply.
+  choices: [core, java, python, node, docker, security, release, allure, renovate]
+  default: core
 
 project_name:
-  when: "{{ module in ['legacy', 'core', 'allure'] }}"
+  when: "{{ module in ['core', 'allure'] }}"
   type: str
   help: Human-readable project name.
   default: my-project
 
 toolkit_version:
-  when: "{{ module in ['legacy', 'core', 'security', 'release', 'allure'] }}"
+  when: "{{ module in ['core', 'security', 'release', 'allure'] }}"
   type: str
   help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's
   # automatic latest-tag selection. Existing answers still take precedence.
   default: "{{ _copier_answers.get('_commit', '') if (_copier_answers.get('_commit', '') | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) else 'v3.11.2' }}"
   validator: "{% if not (toolkit_version | regex_search('^v[0-9]+\\.[0-9]+\\.[0-9]+$')) %}Use an exact tag such as v3.11.2{% endif %}"
-
-components:
-  when: "{{ module == 'legacy' }}"
-  type: yaml
-  help: "Required component mappings such as [{type: python, path: backend, id: backend-python, name: Backend Python, allure_results_path: allure-results}]. id is the stable GitHub Actions job identifier and name is its display name. The Allure path is optional, component-relative, and defaults to allure-results. Supported types: python, node, java."
-  # On update, retain the prior value long enough for its required identity
-  # validation to fail closed; never replace a legacy topology with defaults.
-  default: >-
-    {% if _commit is defined and components is defined %}{{ components }}{% else %}[{type: python, path: ., id: app-python, name: Application Python}]{% endif %}
-  validator: >-
-    {% for component in components %}
-    {% if component is not mapping %}Every component must be a mapping with type, path, id, and name.{% else %}
-    {% if component.type not in ['python', 'node', 'java'] %}Unsupported component type: {{ component.type }}.{% endif %}
-    {% if component.path is not string or not component.path | trim %}Every component requires a non-empty string path.{% endif %}
-    {% if component.id is not string or not (component.id | regex_search('^[A-Za-z_][A-Za-z0-9_-]*$')) %}Every component requires an id matching ^[A-Za-z_][A-Za-z0-9_-]*$.{% endif %}
-    {% if component.name is not string or not (component.name | trim) %}Every component requires a non-empty string name.{% endif %}
-    {% if component.id in ['template-contract', 'docker', 'release', 'update', 'scan', 'analyze', 'resolve', 'generate', 'comment', 'pages', 'changes', 'integration'] %}Component id {{ component.id }} conflicts with a generated job id.{% endif %}
-    {% set component_state = namespace(ids=[]) %}
-    {% for candidate in components[:loop.index] %}{% if candidate is mapping and candidate.id is string %}{% set component_state.ids = component_state.ids + [candidate.id] %}{% endif %}{% endfor %}
-    {% if component_state.ids | select('equalto', component.id) | list | length > 1 %}Component ids must be unique: {{ component.id }}.{% endif %}
-    {% set allure_path = component.get('allure_results_path', 'allure-results') %}
-    {% if allure_path is not string or not (allure_path | trim) %}allure_results_path must be a non-empty string.{% elif not (allure_path | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$')) or '.' in allure_path.split('/') or '..' in allure_path.split('/') %}allure_results_path must be a safe component-relative path without traversal or globs.{% endif %}
-    {% endif %}
-    {% endfor %}
 
 java_components:
   when: "{{ module == 'java' }}"
@@ -222,20 +156,16 @@ docker_images:
     {% endfor %}
     {% endif %}
 
-docker:
-  when: "{{ module == 'legacy' }}"
-  type: bool
-  default: false
 codeql:
-  when: "{{ module in ['legacy', 'security'] }}"
+  when: "{{ module == 'security' }}"
   type: bool
   help: Generate the CodeQL workflow. Code scanning needs GitHub Advanced Security, which private repositories do not receive by default.
   default: true
 codeql_languages:
   type: yaml
-  help: "Optional explicit CodeQL language list. Empty derives the list from components (legacy) or the installed language modules (security); that is wrong for a repository whose source they do not describe. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
+  help: "Optional explicit CodeQL language list. Empty derives the list from the installed language modules; that is wrong for a repository whose source they do not describe. Supported: actions, c-cpp, csharp, go, java-kotlin, javascript-typescript, python, ruby, rust, swift."
   default: []
-  when: "{{ module in ['legacy', 'security'] and codeql }}"
+  when: "{{ module == 'security' and codeql }}"
   validator: >-
     {% set allowed_codeql_languages = ['actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'] %}
     {% if codeql_languages is string or codeql_languages is mapping or codeql_languages is not sequence %}
@@ -250,31 +180,10 @@ codeql_aggregate:
   type: bool
   help: Add a complete job named CodeQL that passes only when every CodeQL analysis passes, for rulesets that require that context.
   default: false
-  when: "{{ module in ['legacy', 'security'] and codeql }}"
-
-handed_off:
-  type: yaml
-  # Fresh copies hand validate off. Stored answers without the key predate the
-  # handoff and still rely on legacy validate.yml: default to [] there so the
-  # validator refuses the update instead of silently dropping the workflow.
-  default: >-
-    {% if module == 'legacy' and _external_data.stored_answers is mapping and _external_data.stored_answers.get('_commit') %}[]{% else %}[validate]{% endif %}
-  when: "{{ module == 'legacy' }}"
-  help: Areas now owned by ci-kit modules; legacy stops rendering their files.
-  validator: >-
-    {% set allowed_handed_off = ['validate', 'base', 'security', 'release', 'allure', 'renovate'] %}
-    {% if handed_off is string or handed_off is mapping or handed_off is not sequence %}
-    handed_off must be a YAML list of area names.
-    {% else %}
-    {% set handed_off_state = namespace(seen=[]) %}
-    {% for area in handed_off %}
-    {% if area is not string %}Every handed_off entry must be a string.{% elif area not in allowed_handed_off %}Unknown handed_off area: {{ area }}.{% elif area in handed_off_state.seen %}Duplicate handed_off area: {{ area }}.{% else %}{% set handed_off_state.seen = handed_off_state.seen + [area] %}{% endif %}
-    {% endfor %}
-    {% if 'validate' not in handed_off %}CIK-LEGACY-006: validate must stay handed off; the legacy template no longer renders validate.yml. Hand validate off to the core module first; see docs/errors/CIK-LEGACY-006.md{% endif %}
-    {% endif %}
+  when: "{{ module == 'security' and codeql }}"
 
 gitleaks:
-  when: "{{ module in ['legacy', 'security'] }}"
+  when: "{{ module == 'security' }}"
   type: bool
   help: Generate the checksum-verified Gitleaks workflow and stable gitleaks check context.
   default: true
@@ -282,7 +191,7 @@ gitleaks_job_name:
   type: str
   help: Display name of the Gitleaks scan job, which is its required status check context.
   default: gitleaks
-  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
+  when: "{{ module == 'security' and gitleaks }}"
   # Rendered unquoted: refuse names YAML 1.1 reads as null, bool, number or date (no letters, or a reserved word,
   # hex, octal, binary or exponent form).
   validator: >-
@@ -298,64 +207,60 @@ gitleaks_scan:
   choices:
     - history
     - tree
-  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
+  when: "{{ module == 'security' and gitleaks }}"
 gitleaks_aggregate:
   type: bool
   help: Add a complete job named Gitleaks that passes only when the scan passes, for rulesets that require that context.
   default: false
-  when: "{{ module in ['legacy', 'security'] and gitleaks }}"
+  when: "{{ module == 'security' and gitleaks }}"
 
-allure_report:
-  when: "{{ module == 'legacy' }}"
-  type: bool
-  help: Generate and comment an Allure 3 report from generated component jobs or an external workflow artifact contract.
-  default: false
 allure_source:
   type: str
-  help: "Where Allure results come from: auto follows components; component uses the generated component jobs in Validate; external uses a project-owned workflow, so generated component jobs upload no Allure results."
-  choices: "{{ ['component', 'external'] if module == 'allure' else ['auto', 'component', 'external'] }}"
-  default: "{{ 'external' if module == 'allure' else 'auto' }}"
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
-  validator: "{% if module == 'legacy' and allure_source == 'component' and not components %}allure_source=component requires at least one component.{% endif %}"
+  help: "Where Allure results come from: component uses the generated component jobs in Validate; external uses a project-owned workflow, so generated component jobs upload no Allure results."
+  choices:
+    - component
+    - external
+  default: external
+  when: "{{ module == 'allure' }}"
 allure_mode:
   type: str
-  default: "{{ allure_source if allure_source in ['component', 'external'] else ('component' if components else 'external') }}"
+  default: "{{ allure_source }}"
   when: false
 allure_external_workflow_name:
   type: str
   help: Exact workflow name that uploads Allure artifacts when allure_source is external.
   default: Validate
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: "{% if not (allure_external_workflow_name | regex_search('^[A-Za-z0-9][A-Za-z0-9 ._()/:-]{0,99}$')) %}Use a non-empty workflow name containing only letters, digits, spaces, and ._()/:- characters.{% endif %}"
 allure_external_workflow_path:
   type: str
-  help: Repository-relative source workflow path when components is empty.
+  help: Repository-relative path of the source workflow when allure_source is external.
   default: .github/workflows/validate.yml
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: "{% if not (allure_external_workflow_path | regex_search('^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$')) %}Use a workflow path such as .github/workflows/test.yml.{% endif %}"
 allure_external_artifact_prefix:
   type: str
   help: Prefix selecting dedicated Allure artifacts from the external source workflow.
   default: allure-results-
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: "{% if not (allure_external_artifact_prefix | regex_search('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')) %}Use a 1-64 character artifact prefix containing only letters, digits, dots, underscores, and hyphens.{% endif %}"
 allure_external_artifact_min_count:
   type: int
   help: Minimum number of matching, non-expired Allure artifacts required.
   default: 1
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: "{% if allure_external_artifact_min_count < 1 or allure_external_artifact_min_count > 50 %}Choose a minimum artifact count from 1 through 50.{% endif %}"
 allure_external_artifact_max_count:
   type: int
   help: Maximum number of matching Allure artifacts accepted by the bounded extractor.
   default: 50
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: "{% if allure_external_artifact_max_count < allure_external_artifact_min_count or allure_external_artifact_max_count > 50 %}Choose a maximum from the configured minimum through 50.{% endif %}"
 allure_categories_file:
   type: str
   help: Optional safe repository-relative Allure categories JSON file.
   default: ""
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: >-
     {% if allure_categories_file and (not (allure_categories_file | regex_search('^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.json$')) or '.' in allure_categories_file.split('/') or '..' in allure_categories_file.split('/')) %}
     Use a safe repository-relative JSON path without traversal or globs.
@@ -364,18 +269,18 @@ allure_publish_pages:
   type: bool
   help: Publish each pull request report below allure/pr-N on the gh-pages branch.
   default: false
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
 allure_pages_url:
   type: str
   help: Full HTTPS base URL served by GitHub Pages, without a trailing slash (for example https://owner.github.io/repository).
   default: https://owner.github.io/repository
-  when: "{{ (module == 'allure' and allure_publish_pages) or (module == 'legacy' and allure_report and allure_publish_pages) }}"
+  when: "{{ module == 'allure' and allure_publish_pages }}"
   validator: "{% if not (allure_pages_url | regex_search('^https://[A-Za-z0-9.-]+(?::[0-9]+)?(?:/[A-Za-z0-9._~-]+)*$')) %}Use a full HTTPS Pages base URL without query, fragment, or trailing slash.{% endif %}"
 allure_group_by:
   type: yaml
   help: Labels the Allure awesome report groups test results by, in order.
   default: [epic, feature, story]
-  when: "{{ module == 'allure' or (module == 'legacy' and allure_report) }}"
+  when: "{{ module == 'allure' }}"
   validator: >-
     {% if allure_group_by is string or allure_group_by is mapping or allure_group_by is not sequence %}
     allure_group_by must be a YAML list of label names.
@@ -386,10 +291,6 @@ allure_group_by:
     {% if label is not string or not (label | trim) %}Every allure_group_by entry must be a non-empty string.{% endif %}
     {% endfor %}
     {% endif %}
-release_please:
-  when: "{{ module == 'legacy' }}"
-  type: bool
-  default: false
 release_mode:
   type: str
   help: "Release Please mode: single for one version, manifest for independently versioned components."
@@ -397,14 +298,10 @@ release_mode:
   choices:
     - single
     - manifest
-  when: "{{ module == 'release' or (module == 'legacy' and release_please) }}"
-renovate:
-  when: "{{ module == 'legacy' }}"
-  type: bool
-  default: true
+  when: "{{ module == 'release' }}"
 
 renovate_config_repository:
-  when: "{{ module in ['legacy', 'renovate'] }}"
+  when: "{{ module == 'renovate' }}"
   type: str
   help: GitHub owner/repository slug hosting the shared Renovate preset.
   default: quokkify/renovate-presets
@@ -414,17 +311,10 @@ renovate_config_repository:
     {% endif %}
 
 renovate_presets:
-  when: "{{ module in ['legacy', 'renovate'] }}"
+  when: "{{ module == 'renovate' }}"
   type: yaml
   help: "Renovate preset names to extend. Supported names: default, python, javascript, java, docker, github-actions."
-  default: >-
-    {%- set presets = ['default', 'github-actions'] -%}
-    {%- set component_types = components | map(attribute='type') | list -%}
-    {%- if 'python' in component_types -%}{%- set _ = presets.append('python') -%}{%- endif -%}
-    {%- if 'node' in component_types -%}{%- set _ = presets.append('javascript') -%}{%- endif -%}
-    {%- if 'java' in component_types -%}{%- set _ = presets.append('java') -%}{%- endif -%}
-    {%- if docker -%}{%- set _ = presets.append('docker') -%}{%- endif -%}
-    {{ presets }}
+  default: [default, github-actions, python]
   validator: >-
     {% set allowed_renovate_presets = ['default', 'python', 'javascript', 'java', 'docker', 'github-actions'] %}
     {% if renovate_presets is string or renovate_presets is mapping or renovate_presets is not sequence %}

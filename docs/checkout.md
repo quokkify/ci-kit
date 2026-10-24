@@ -19,7 +19,7 @@ line in custom workflows such as `.github/workflows/docs.yml`:
 ```
 
 Replace `vX.Y.Z` with the exact released tag recorded as `toolkit_version` in
-`.copier-answers.yml`. Releases published before this action was added do not
+`.copier-answers.core.yml`. Releases published before this action was added do not
 contain it. Preserve any existing `with`, `id`, `if`, and step-level settings.
 `steps.source.outputs.commit` and `steps.source.outputs.ref` remain available.
 

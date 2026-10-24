@@ -1,0 +1,17 @@
+core:
+  project_name: fixture-features
+  toolkit_version: v1.0.0
+python:
+  python_components:
+    - id: app-python
+      name: Application Python
+      path: .
+security:
+  toolkit_version: v1.0.0
+release:
+  toolkit_version: v1.0.0
+allure:
+  project_name: fixture-features
+  toolkit_version: v1.0.0
+  allure_source: component
+renovate: {}

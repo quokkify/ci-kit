@@ -13,7 +13,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / ".github/release-please/config.json"
-TEMPLATE_CONFIG_PATH = ROOT / "template/.github/release-please/config.json.jinja"
+TEMPLATE_CONFIG_PATH = ROOT / "modules/release/template/.github/release-please/config.json.jinja"
 RENOVATE_PATH = ROOT / "renovate/default.json"
 
 
@@ -200,24 +200,27 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                     encoding="utf-8",
                 )
             destination = Path(temporary) / "fixture"
-            result = subprocess.run(
-                [
-                    copier,
-                    "copy",
-                    "--trust",
-                    "--defaults",
-                    "--data",
-                    "project_name=release-notes-fixture",
-                    "--data",
-                    "release_please=true",
-                    str(source),
-                    str(destination),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            for module, data in (("core", "project_name=release-notes-fixture"), ("release", "release_mode=single")):
+                result = subprocess.run(
+                    [
+                        copier,
+                        "copy",
+                        "--trust",
+                        "--defaults",
+                        "-a",
+                        f".copier-answers.{module}.yml",
+                        "--data",
+                        f"module={module}",
+                        "--data",
+                        data,
+                        str(source),
+                        str(destination),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             rendered = self.load_config(
                 destination / ".github/release-please/config.json"
             )["packages"]["."]

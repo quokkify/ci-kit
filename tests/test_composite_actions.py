@@ -1132,6 +1132,26 @@ class AllureReportActionTests(unittest.TestCase):
         self.assertFalse([item for item in without_manager if item.get("depNameTemplate") == "allure"])
 
 
+ALLURE_PAGES_ANSWERS = {
+    "module": "allure", "project_name": "fixture-allure-pages", "toolkit_version": "v1.0.0",
+    "allure_source": "component", "allure_publish_pages": True,
+    "allure_pages_url": "https://quokkify.github.io/fixture-allure-pages",
+}
+ALLURE_EXTERNAL_ANSWERS = {
+    "module": "allure", "project_name": "fixture-allure-external", "toolkit_version": "v1.0.0",
+    "allure_source": "external", "allure_external_workflow_name": "Run tests",
+    "allure_external_workflow_path": ".github/workflows/test.yml", "allure_external_artifact_prefix": "external-allure-",
+    "allure_external_artifact_min_count": 2, "allure_external_artifact_max_count": 7,
+    "allure_categories_file": ".github/allure/categories.json", "allure_publish_pages": False,
+}
+
+
+def copier_data_file(directory: Path, name: str, answers: dict) -> Path:
+    path = directory / f"{name}.yml"
+    path.write_text(yaml.safe_dump(answers))
+    return path
+
+
 class AllureTrustedCommentPropagationTests(unittest.TestCase):
     def test_generated_workflow_forwards_compact_comment_artifact_unchanged(self) -> None:
         copier = shutil.which("copier")
@@ -1142,8 +1162,8 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
             destination = Path(temporary) / "fixture"
             subprocess.run(
-                [copier, "copy", "--trust", "--defaults", "--data-file",
-                 str(ROOT / "tests/scenarios/allure-pages.yml"), str(source), str(destination)],
+                [copier, "copy", "--defaults", "--data-file",
+                 str(copier_data_file(Path(temporary), "allure-pages", ALLURE_PAGES_ANSWERS)), str(source), str(destination)],
                 check=True, capture_output=True, text=True,
             )
             workflow = (destination / ".github/workflows/allure-report.yml").read_text()
@@ -1199,10 +1219,9 @@ class AllureTrustedCommentPropagationTests(unittest.TestCase):
                 [
                     copier,
                     "copy",
-                    "--trust",
                     "--defaults",
                     "--data-file",
-                    str(ROOT / "tests/scenarios/allure-pages.yml"),
+                    str(copier_data_file(Path(temporary), "allure-pages", ALLURE_PAGES_ANSWERS)),
                     str(source),
                     str(destination),
                 ],
@@ -1632,25 +1651,26 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
         if copier is None:
             self.skipTest("copier is required for Copier mode-switch coverage")
         with tempfile.TemporaryDirectory(prefix="allure-mode-switch-") as temporary:
-            root = Path(temporary)
+            # Resolved: copier update rejects a destination reached through a symlinked temp dir (macOS /var).
+            root = Path(temporary).resolve()
             source = root / "template-source"
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns(".git", "__pycache__"))
             subprocess.run(["git", "init", "-q"], cwd=source, check=True)
             subprocess.run(["git", "add", "."], cwd=source, check=True)
             subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "template"], cwd=source, check=True)
             destination = root / "consumer"
-            subprocess.run([copier, "copy", "--trust", "--defaults", "--data-file", str(ROOT / "tests/scenarios/allure-external.yml"), str(source), str(destination)], check=True, capture_output=True, text=True)
+            core_data = copier_data_file(root, "core", {"module": "core", "project_name": "fixture-allure-external", "toolkit_version": "v1.0.0"})
+            for data_file in (core_data, copier_data_file(root, "allure-external", ALLURE_EXTERNAL_ANSWERS)):
+                subprocess.run([copier, "copy", "--defaults", "--data-file", str(data_file), str(source), str(destination)], check=True, capture_output=True, text=True)
             subprocess.run(["git", "init", "-q"], cwd=destination, check=True)
             subprocess.run(["git", "add", "."], cwd=destination, check=True)
             subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "initial"], cwd=destination, check=True)
-            java_data = root / "java.yml"
-            java_data.write_text("components:\n  - type: java\n    path: .\n    id: app-java\n    name: Application Java\n")
-            empty_data = root / "empty.yml"
-            empty_data.write_text("components: []\n")
+            java_data = copier_data_file(root, "component", {"allure_source": "component"})
+            empty_data = copier_data_file(root, "external", {"allure_source": "external"})
             java_workflow = ""
             external_workflow = ""
             for data_file in (java_data, empty_data):
-                result = subprocess.run([copier, "update", "--trust", "--defaults", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
+                result = subprocess.run([copier, "update", "--defaults", "-a", ".copier-answers.allure.yml", "--data-file", str(data_file), str(destination)], check=False, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self._assert_no_copier_conflicts(destination)
                 if data_file == java_data:
@@ -1821,16 +1841,14 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(inactive_component_trigger["outputs"].get("ready"), "false")
             self.assertEqual(inactive_component_trigger["failures"], [])
 
-            default_data = root / "default.yml"
-            default_data.write_text(
-                (ROOT / "tests/scenarios/allure-external.yml")
-                .read_text()
-                .replace("allure_external_workflow_name: Run tests", "allure_external_workflow_name: Validate")
-                .replace("allure_external_workflow_path: .github/workflows/test.yml", "allure_external_workflow_path: .github/workflows/validate.yml")
-            )
+            default_data = copier_data_file(root, "default", {
+                **ALLURE_EXTERNAL_ANSWERS,
+                "allure_external_workflow_name": "Validate",
+                "allure_external_workflow_path": ".github/workflows/validate.yml",
+            })
             default_destination = root / "default-consumer"
             subprocess.run(
-                [copier, "copy", "--trust", "--defaults", "--data-file", str(default_data), str(source), str(default_destination)],
+                [copier, "copy", "--defaults", "--data-file", str(default_data), str(source), str(default_destination)],
                 check=True,
                 capture_output=True,
                 text=True,

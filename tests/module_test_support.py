@@ -13,7 +13,6 @@ GIT_ENV = {
     "GIT_COMMITTER_NAME": "t",
     "GIT_COMMITTER_EMAIL": "t@example.com",
 }
-VOLATILE_ANSWER_KEYS = ("_commit", "_src_path")
 _TEMP_DIRS: list[Path] = []
 
 
@@ -84,36 +83,6 @@ def render_tree(repo: Path, scenario: Path | None = None, data: dict | None = No
         shutil.rmtree(dest, ignore_errors=True)
 
 
-def normalize_answers(tree: dict[str, bytes], expect_module: str | None = None) -> dict[str, bytes]:
-    out = dict(tree)
-    raw = out.get(".copier-answers.yml")
-    if raw is not None:
-        kept = []
-        found_module = False
-        in_handed_off = False
-        for line in raw.decode().splitlines(keepends=True):
-            if in_handed_off and line.startswith("  - "):
-                continue
-            in_handed_off = False
-            if line.startswith(("_commit:", "_src_path:")):
-                continue
-            if line.rstrip("\n") in ("handed_off: []", "handed_off: [validate]"):
-                continue
-            if line.rstrip("\n") == "handed_off:":
-                in_handed_off = True
-                continue
-            if line.startswith("module:"):
-                found_module = True
-                if expect_module is not None and line.strip() != f"module: {expect_module}":
-                    raise AssertionError(f"unexpected answers line: {line!r}")
-                continue
-            kept.append(line)
-        if expect_module is not None and not found_module:
-            raise AssertionError("module answer missing from answers file")
-        out[".copier-answers.yml"] = "".join(kept).encode()
-    return out
-
-
 _TEMPLATE_REPO: Path | None = None
 
 
@@ -161,25 +130,6 @@ def lifecycle_template_repo() -> Path:
     return repo
 
 
-BASE_PATHS = (".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md")
-
-
-def base_handoff_template_repo() -> Path:
-    """v99.0.0: core without the base area (as released before v3.10); v99.1.0: core with it."""
-    repo = make_template_repo(mkdtemp("ci-kit-base-"))
-    core = repo / "modules/core/template"
-    saved = {path: (core / f"{path}.jinja").read_bytes() for path in BASE_PATHS}
-    for path in BASE_PATHS:
-        (core / f"{path}.jinja").unlink()
-    _commit_all(repo, "core: no base area")
-    git(repo, "tag", "-f", "v99.0.0")
-    for path, content in saved.items():
-        (core / f"{path}.jinja").write_bytes(content)
-    _commit_all(repo, "core: base area")
-    git(repo, "tag", "v99.1.0")
-    return repo
-
-
 def overlap_template_repo() -> Path:
     repo = make_template_repo(mkdtemp("ci-kit-overlap-"))
     core = repo / "modules/core/template/.ci/modules/core.yml.jinja"
@@ -199,50 +149,4 @@ def rendered_from(template: Path, *modules: str, ref: str = "HEAD") -> Path:
             ],
             check=True, capture_output=True, text=True,
         )
-    return dest
-
-
-def component_less_scenarios() -> list[str]:
-    import yaml
-
-    names = []
-    for path in sorted((ROOT / "tests/scenarios").glob("*.yml")):
-        data = yaml.safe_load(path.read_text())
-        if isinstance(data, dict) and not data.get("components"):
-            names.append(path.stem)
-    return names
-
-
-def component_scenarios() -> list[str]:
-    import yaml
-
-    names = []
-    for path in sorted((ROOT / "tests/scenarios").glob("*.yml")):
-        data = yaml.safe_load(path.read_text())
-        if isinstance(data, dict) and (data.get("components") or data.get("docker")):
-            names.append(path.stem)
-    return names
-
-
-def legacy_scenario_repo(template: Path, scenario: str, ref: str = "v99.0.0", overrides: dict | None = None) -> Path:
-    import yaml
-
-    data = yaml.safe_load((ROOT / "tests/scenarios" / f"{scenario}.yml").read_text())
-    data["toolkit_version"] = ref
-    data.update(overrides or {})
-    data_file = mkdtemp("scenario-") / "data.yml"
-    data_file.write_text(yaml.safe_dump(data))
-    dest = mkdtemp("legacy-")
-    subprocess.run(
-        [shutil.which("copier"), "copy", "--trust", "--defaults", "--vcs-ref", ref,
-         "--data-file", str(data_file), str(template), str(dest)],
-        check=True, capture_output=True, text=True,
-    )
-    for key in ("allure_external_workflow_path", "allure_categories_file"):
-        rel = data.get(key)
-        if rel and not (dest / rel).exists():
-            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-            (dest / rel).write_text("[]\n" if rel.endswith(".json") else "name: Run tests\non: push\njobs: {}\n")
-    git(dest, "init", "-q")
-    _commit_all(dest, "initial")
     return dest

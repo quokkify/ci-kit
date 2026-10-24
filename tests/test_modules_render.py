@@ -16,11 +16,18 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from module_test_support import ROOT, make_template_repo
-from ci_kit.handoff import AREAS
+from module_test_support import ROOT, make_template_repo, mkdtemp, render_tree, shared_template_repo
 from ci_kit.plan import build_plan
 from ci_kit.inputs import load_inputs, module_fields
 
+MODULE_FILES = {
+    "release": (
+        ".github/workflows/release.yml", ".github/release-please/config.json",
+        ".github/release-please/manifest.json", ".github/scripts/enrich_release_notes.py",
+    ),
+    "allure": (".github/workflows/allure-report.yml", ".github/allure/allurerc.mjs", ".github/allure/safe_extract.py"),
+    "renovate": (".github/renovate.json",),
+}
 DEFAULT_COMPONENT = {"id": "app-java", "name": "Application Java", "path": ".", "java_version": "21"}
 
 
@@ -106,7 +113,7 @@ class ModuleRenderTests(unittest.TestCase):
     def test_release_module_renders_area_files(self) -> None:
         self.assertEqual(self.rendered_files("release"), {
             ".copier-answers.release.yml", ".ci/modules/release.yml",
-            *AREAS["release"].legacy_paths,
+            *MODULE_FILES["release"],
         })
         dest = self.render("release", "release_mode=manifest", "toolkit_version=v99.0.0")
         answers = yaml.safe_load((dest / ".copier-answers.release.yml").read_text())
@@ -124,7 +131,7 @@ class ModuleRenderTests(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertEqual(self.rendered_files(module), {
                     f".copier-answers.{module}.yml", f".ci/modules/{module}.yml",
-                    *AREAS[module].legacy_paths,
+                    *MODULE_FILES[module],
                 })
 
     def test_allure_module_rejects_auto_source(self) -> None:
@@ -285,6 +292,101 @@ class ModuleRenderTests(unittest.TestCase):
                 match = re.search(r"\{% set allowed_keys = (\[.*?\]) %\}", config[question]["validator"])
                 self.assertIsNotNone(match)
                 self.assertEqual(set(ast.literal_eval(match.group(1))), properties)
+
+
+PIN = "v99.0.0"
+OPTIONS = {
+    "gitleaks_job_name": "Scan current tree (legacy history pending baseline)",
+    "gitleaks_scan": "tree",
+    "gitleaks_aggregate": True,
+    "codeql_aggregate": True,
+}
+
+
+def render_failure(data: dict) -> str:
+    data_file = mkdtemp("options-") / "data.yml"
+    data_file.write_text(yaml.safe_dump({"toolkit_version": PIN, **data}))
+    try:
+        render_tree(shared_template_repo(), data_file)
+    except subprocess.CalledProcessError as error:
+        return error.stdout + error.stderr
+    raise AssertionError(f"copier accepted {data}")
+
+
+class ModuleOptionsTests(unittest.TestCase):
+    def test_gitleaks_options_render(self) -> None:
+        template = shared_template_repo()
+        default = yaml.safe_load(render_tree(template, None, {"module": "security", "toolkit_version": PIN})[".github/workflows/gitleaks.yml"])
+        self.assertEqual(list(default["jobs"]), ["scan"])
+        self.assertEqual(default["jobs"]["scan"]["name"], "gitleaks")
+        data_file = mkdtemp("options-") / "data.yml"
+        data_file.write_text(yaml.safe_dump({**OPTIONS, "module": "security", "toolkit_version": PIN}))
+        jobs = yaml.safe_load(render_tree(template, data_file)[".github/workflows/gitleaks.yml"])["jobs"]
+        self.assertEqual(jobs["scan"]["name"], OPTIONS["gitleaks_job_name"])
+        scan = jobs["scan"]["steps"][-1]["run"]
+        self.assertNotIn('gitleaks" git ', scan)
+        self.assertEqual(
+            scan.strip(),
+            '"$RUNNER_TEMP/bin/gitleaks" dir --redact --no-banner --config "$RUNNER_TEMP/gitleaks.toml" '
+            '--gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore" .',
+        )
+        self.assertEqual(jobs["complete"], {
+            "name": "Gitleaks", "if": "always()", "needs": "scan", "runs-on": "ubuntu-latest", "timeout-minutes": 5,
+            "steps": [{
+                "name": "Require the secret scan to pass", "env": {"SCAN_RESULT": "${{ needs.scan.result }}"},
+                "run": 'test "$SCAN_RESULT" = success',
+            }],
+        })
+
+    def test_codeql_aggregate_renders(self) -> None:
+        template = shared_template_repo()
+        jobs = yaml.safe_load(render_tree(template, None, {
+            "module": "security", "toolkit_version": PIN, "codeql_aggregate": True,
+        })[".github/workflows/codeql.yml"])["jobs"]
+        self.assertEqual(jobs["complete"], {
+            "name": "CodeQL", "if": "always()", "needs": "codeql", "runs-on": "ubuntu-latest", "timeout-minutes": 5,
+            "steps": [{
+                "name": "Require every CodeQL analysis to pass",
+                "env": {"ANALYZE_RESULT": "${{ needs.codeql.result }}"},
+                "run": 'test "$ANALYZE_RESULT" = success',
+            }],
+        })
+        default = render_tree(template, None, {"module": "security", "toolkit_version": PIN})
+        self.assertEqual(list(yaml.safe_load(default[".github/workflows/codeql.yml"])["jobs"]), ["codeql"])
+
+    def test_allure_group_by_renders(self) -> None:
+        rendered = render_tree(shared_template_repo(), None, {
+            "module": "allure", "toolkit_version": PIN, "allure_group_by": '["feature", "story"]',
+        })[".github/allure/allurerc.mjs"].decode()
+        self.assertIn('groupBy: ["feature", "story"],', rendered)
+
+    def test_option_validators(self) -> None:
+        security = {"module": "security"}
+        allure = {"module": "allure"}
+        cases = (
+            ({**security, "gitleaks_job_name": ""}, "gitleaks_job_name"),
+            ({**security, "gitleaks_job_name": "a: b"}, "gitleaks_job_name"),
+            ({**security, "gitleaks_scan": "full"}, "full"),
+            ({**allure, "allure_group_by": "feature"}, "allure_group_by"),
+            ({**allure, "allure_group_by": ["feature", ""]}, "allure_group_by"),
+            ({**allure, "allure_group_by": ["feature", 3]}, "allure_group_by"),
+            ({**allure, "allure_group_by": []}, "allure_group_by"),
+            *(({**security, "gitleaks_job_name": name}, "gitleaks_job_name")
+              for name in ("true", "No", "OFF", "null", "y", "123", "1.5", "1e3", "0x1F", "0o17", "2024-01-01")),
+        )
+        for data, message in cases:
+            with self.subTest(data=data):
+                self.assertIn(message, render_failure(data))
+
+    def test_copier_update_drops_or_refuses_legacy_answers_instead_of_updating_them(self) -> None:
+        core = render_tree(shared_template_repo(), None, {"module": "core", "toolkit_version": PIN})
+        workflow = core[".github/workflows/copier-update.yml"].decode()
+        guard = workflow.index("if [[ -f .copier-answers.yml ]]; then")
+        self.assertLess(guard, workflow.index("git rm -q .copier-answers.yml"))
+        self.assertLess(workflow.index("git rm -q .copier-answers.yml"), workflow.index('ci-kit update --repo . --to "$ref"\n'))
+        self.assertNotIn("copier update", workflow)
+        self.assertNotIn("update_args", workflow)
+        self.assertIn("FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja", workflow)
 
 
 if __name__ == "__main__":

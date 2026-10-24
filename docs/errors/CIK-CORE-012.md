@@ -4,7 +4,7 @@ toolkit_version or _commit differs between answers files.
 
 ## Cause
 
-Every answers file (`.copier-answers.yml` and `.copier-answers.<module>.yml`) must name the same ci-kit release in `toolkit_version` and `_commit`. A partial update, such as `ci-kit update --module` or a manual `copier update` of one module, left the files on different releases.
+Every module answers file (`.copier-answers.<module>.yml`) must name the same ci-kit release in `toolkit_version` and `_commit`. A partial update, such as `ci-kit update --module` or a manual `copier update` of one module, left the files on different releases.
 
 ## Fix
 

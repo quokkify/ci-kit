@@ -10,12 +10,9 @@ from pathlib import Path
 import yaml
 
 from .drift import RENDER_TIMEOUT, TRUSTED_SRC_RE, _copier
-from .handoff import AREAS, HANDOFF_GATED
 from .modules import MODULES
-from .plan import Finding, build_plan, discover
+from .plan import Finding, build_plan, discover, legacy_answers_findings
 
-LEGACY = "legacy"
-LEGACY_ANSWERS = ".copier-answers.yml"
 FALLBACK_IDENTITY = ["-c", "user.name=ci-kit", "-c", "user.email=ci-kit@users.noreply.github.com"]
 
 
@@ -33,25 +30,19 @@ MODULE_ORDER = ("security", "release", "allure", "renovate", "labels", "java", "
 
 def update_order(modules: Iterable[str]) -> list[str]:
     names = set(modules)
-    fixed = [LEGACY, "core", *(name for name in MODULE_ORDER if name in MODULES)]
+    fixed = ["core", *(name for name in MODULE_ORDER if name in MODULES)]
     return [name for name in fixed if name in names] + sorted(names - set(fixed))
 
 
-def copier_update_command(
-    answers_file: str, ref: str, *, trust: bool, data: dict[str, str], exclude: tuple[str, ...] = (),
-) -> list[str]:
+def copier_update_command(answers_file: str, ref: str, *, data: dict[str, str]) -> list[str]:
     if ref.startswith("-"):
         raise ValueError(f"option-like ref: {ref}")
     command = [
         *_copier(), "update", "--defaults", "--conflict=rej", "--skip-tasks",
         "-a", answers_file, "--vcs-ref", ref,
     ]
-    if trust:
-        command.append("--trust")
     for key, value in data.items():
         command += ["-d", f"{key}={value}"]
-    for pattern in exclude:
-        command += ["-x", pattern]
     return [*command, "--", "."]
 
 
@@ -63,38 +54,12 @@ def _git(repo: Path, *args: str, check: bool = True) -> str:
     return result.stdout.strip()
 
 
-def _answers_files(repo: Path) -> dict[str, Path]:
-    answers = dict(discover(repo)[0])
-    legacy = repo / LEGACY_ANSWERS
-    if legacy.is_file():
-        answers[LEGACY] = legacy
-    return answers
-
-
 def _read(path: Path) -> dict:
     try:
         data = yaml.safe_load(path.read_text())
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return {}
     return data if isinstance(data, dict) else {}
-
-
-def _legacy_owned(repo: Path, module: str) -> tuple[str, ...]:
-    """Paths of `module`'s gated areas that legacy still renders.
-
-    The template already skips them in the destination, but Copier also renders the new
-    template into an empty scratch directory without the legacy answers; excluding them on
-    the command line keeps that render from turning legacy files into conflicts.
-    """
-    path = repo / LEGACY_ANSWERS
-    if not path.is_file():
-        return ()
-    handed = _read(path).get("handed_off")
-    handed = handed if isinstance(handed, list) else []
-    return tuple(
-        f"/{rel}" for name, area in AREAS.items()
-        if area.module == module and name in HANDOFF_GATED and name not in handed for rel in area.legacy_paths
-    )
 
 
 def _rejects(repo: Path) -> list[str]:
@@ -119,13 +84,14 @@ def commit_all(repo: Path, message: str) -> str | None:
 
 
 def run_update(
-    repo: Path, to: str, *, modules: list[str] | None = None,
-    skip_legacy: bool = False, src_override: str | None = None,
+    repo: Path, to: str, *, modules: list[str] | None = None, src_override: str | None = None,
 ) -> tuple[list[ModuleUpdate], list[Finding]]:
     repo = Path(repo).resolve()
-    answers = _answers_files(repo)
-    if skip_legacy:
-        answers.pop(LEGACY, None)
+    # v4 does not update legacy answers that still render files; refuse before touching the tree.
+    refused = legacy_answers_findings(repo)
+    if refused:
+        return [], refused
+    answers = dict(discover(repo)[0])
     for name in modules or []:
         if name not in answers:
             return [], [Finding("CIK-UPDATE-001", name, f"no answers file for module {name}")]
@@ -143,9 +109,9 @@ def run_update(
             return updates, [Finding("CIK-UPDATE-001", module, f"untrusted template source: {src}", path.name)]
         data = {"toolkit_version": to}
         try:
-            command = copier_update_command(path.name, to, trust=module == LEGACY, data=data, exclude=_legacy_owned(repo, module))
-            # Resolved: Copier renders the old and new copies in $TMPDIR and, without --trust, rejects reading the
-            # legacy answers through a symlinked temporary directory (macOS /var) as a path outside the destination.
+            command = copier_update_command(path.name, to, data=data)
+            # Resolved: Copier renders the old and new copies in $TMPDIR and, without --trust, rejects reading files
+            # of the destination through a symlinked temporary directory (macOS /var) as a path outside it.
             env = {**os.environ, "TMPDIR": str(Path(tempfile.gettempdir()).resolve())}
             result = subprocess.run(command, cwd=repo, capture_output=True, text=True, timeout=RENDER_TIMEOUT, env=env)
         except ValueError as error:

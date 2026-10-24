@@ -13,6 +13,11 @@ from .inputs import WORKFLOWS, fill
 from .modules import MODULES
 
 ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
+# ci-kit v4 has no legacy template. Legacy answers are dropped once every area the legacy
+# template rendered is handed off, and refused (CIK-CORE-030) while any is left.
+LEGACY_ANSWERS = ".copier-answers.yml"
+LEGACY_AREAS = ("validate", "base", "security", "release", "allure", "renovate")
+LEGACY_ANSWERS_MESSAGE = "legacy answers still render files; migrate with ci-kit v3.11.x"
 
 
 @dataclass(frozen=True)
@@ -56,11 +61,8 @@ def _rel(repo: Path, path: Path) -> str:
 
 
 def _version_findings(repo: Path, answers: dict[str, Path]) -> list[Finding]:
-    # One toolkit release for every answers file (legacy included) until modules release independently.
+    # One toolkit release for every answers file until modules release independently.
     files = dict(answers)
-    legacy = repo / ".copier-answers.yml"
-    if legacy.is_file():
-        files["legacy"] = legacy
     values: dict[str, dict] = {}
     for module, path in files.items():
         try:
@@ -69,8 +71,8 @@ def _version_findings(repo: Path, answers: dict[str, Path]) -> list[Finding]:
             continue
         if isinstance(data, dict):
             values[module] = data
-    reference = next((module for module in ("core", "legacy") if module in values), None)
-    if reference is None:
+    reference = "core"
+    if reference not in values:
         return []
     findings: list[Finding] = []
     for key in ("toolkit_version", "_commit"):
@@ -86,6 +88,33 @@ def _version_findings(repo: Path, answers: dict[str, Path]) -> list[Finding]:
                     files[module].name,
                 ))
     return findings
+
+
+def legacy_areas_left(raw: str) -> list[str]:
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        data = None
+    handed = data.get("handed_off") if isinstance(data, dict) else None
+    handed = set(handed) if isinstance(handed, list) and all(isinstance(name, str) for name in handed) else set()
+    return [area for area in LEGACY_AREAS if area not in handed]
+
+
+def legacy_answers_findings(repo: Path) -> list[Finding]:
+    path = repo / LEGACY_ANSWERS
+    if not path.exists():
+        return []
+    try:
+        left = legacy_areas_left(path.read_text())
+    except (OSError, UnicodeDecodeError):
+        left = list(LEGACY_AREAS)
+    if not left:
+        return []
+    return [Finding(
+        "CIK-CORE-030", "legacy",
+        f"{LEGACY_ANSWERS_MESSAGE} (not handed off: {', '.join(left)})",
+        LEGACY_ANSWERS,
+    )]
 
 
 def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
@@ -155,30 +184,14 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             module_names.add(name)
 
     findings.extend(_version_findings(repo, answers))
+    findings.extend(legacy_answers_findings(repo))
 
     modules = sorted(loaded)
     module_owned: set[str] = set()
-    rendered: set[str] | None = None
     if drift and modules:
         from .drift import drift_findings
 
         findings.extend(drift_findings(repo, {module: answers[module] for module in modules}, src_override, module_owned))
-        rendered = set(module_owned)
     module_owned.update(f".ci/modules/{module}.yml" for module in modules)
-    legacy_path = repo / ".copier-answers.yml"
-    if legacy_path.exists():
-        from .handoff import AREAS
-        from .legacy import handoff_findings, legacy_findings, load_answers
-
-        legacy_answers, _ = load_answers(repo)
-        handed = (legacy_answers or {}).get("handed_off", [])
-        if isinstance(handed, list) and all(isinstance(name, str) and name in AREAS for name in handed):
-            owned_areas = [AREAS[name] for name in handed]
-        else:
-            owned_areas = [area for area in AREAS.values() if area.module in loaded]
-        for area in owned_areas:
-            module_owned.update(area.legacy_paths)
-        findings.extend(handoff_findings(repo, legacy_answers, set(answers), rendered))
-        findings.extend(legacy_findings(repo, module_owned))
     matrices = {module: [fill(module, component) for component in loaded[module].get("components", [])] for module in modules if module in WORKFLOWS}
     return Plan(modules=modules, matrices=matrices, findings=findings, module_owned=module_owned)

@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RENOVATE_PATH = ROOT / "renovate/default.json"
 CHECKED_IN_RENOVATE_PATH = ROOT / ".github/renovate.json"
-TEMPLATE_RENOVATE_PATH = ROOT / "template/.github/renovate.json.jinja"
+TEMPLATE_RENOVATE_PATH = ROOT / "modules/renovate/template/.github/renovate.json.jinja"
 
 
 class RenovateConfigTests(unittest.TestCase):
@@ -123,7 +123,7 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertIn('"versioningTemplate": "python"', template)
 
     def test_own_workflows_named_like_template_workflows_stay_updatable(self) -> None:
-        sources = [ROOT / "template/.github/workflows", *ROOT.glob("modules/*/template/.github/workflows")]
+        sources = list(ROOT.glob("modules/*/template/.github/workflows"))
         template_names = {path.name.removesuffix(".jinja") for source in sources for path in source.iterdir()}
         own = sorted(f".github/workflows/{path.name}" for path in (ROOT / ".github/workflows").iterdir() if path.name in template_names)
         config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))

@@ -179,13 +179,27 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(plan.findings[0].module, "java")
         self.assertIn("_commit", plan.findings[0].message)
 
-    def test_core_012_includes_legacy_answers(self):
+    def test_core_030_when_area_not_handed_off(self):
         repo = rendered_repo("core")
+        for handed_off, expected in (
+            ("[validate, base, security, release, allure]", ["renovate"]),
+            ("[]", ["validate", "base", "security", "release", "allure", "renovate"]),
+            ("validate", ["validate", "base", "security", "release", "allure", "renovate"]),
+        ):
+            with self.subTest(handed_off=handed_off):
+                (repo / ".copier-answers.yml").write_text(f"_src_path: gh:quokkify/ci-kit\nhanded_off: {handed_off}\n")
+                found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-030"]
+                self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")])
+                self.assertIn("legacy answers still render files", found[0].message)
+                self.assertIn(", ".join(expected), found[0].message)
+
+    def test_no_core_030_when_every_area_is_handed_off_or_no_legacy_answers(self):
+        repo = rendered_repo("core")
+        self.assertNotIn("CIK-CORE-030", codes(build_plan(repo, drift=False)))
         (repo / ".copier-answers.yml").write_text(
-            "_commit: v98.0.0\n_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\ntoolkit_version: v98.0.0\n"
+            "_src_path: gh:quokkify/ci-kit\nhanded_off: [validate, base, security, release, allure, renovate]\n"
         )
-        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-012"]
-        self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")] * 2)
+        self.assertNotIn("CIK-CORE-030", codes(build_plan(repo, drift=False)))
 
 
 class CliTests(unittest.TestCase):
@@ -315,6 +329,19 @@ class CliTests(unittest.TestCase):
         repo = rendered_repo("java")
         code, _, _ = self.run_cli("plan", "--repo", str(repo))
         self.assertEqual(code, 1)
+
+    def test_update_and_doctor_refuse_core_030_before_touching_the_tree(self):
+        repo = rendered_repo("core")
+        (repo / ".copier-answers.yml").write_text("_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\n")
+        before = {path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}
+        with mock.patch("ci_kit.update.subprocess.run", side_effect=AssertionError("must not run copier or git")):
+            code, out, _ = self.run_cli("update", "--repo", str(repo), "--to", "v99.0.0", env={"GITHUB_ACTIONS": ""})
+        self.assertEqual(code, 1)
+        self.assertEqual([line.split()[0] for line in out.splitlines()], ["CIK-CORE-030"])
+        self.assertEqual({path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}, before)
+        code, out, _ = self.run_cli("doctor", "--repo", str(repo), "--template-src", str(shared_template_repo()))
+        self.assertEqual(code, 1)
+        self.assertIn("CIK-CORE-030", out)
 
     def test_cli_has_no_migrate(self):
         err = io.StringIO()

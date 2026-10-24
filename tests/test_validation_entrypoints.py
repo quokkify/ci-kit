@@ -174,15 +174,14 @@ class RenderedWorkflowEvidenceTests(TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         shutil.copy2(ROOT / "copier.yml", self.root / "copier.yml")
-        shutil.copytree(ROOT / "template", self.root / "template")
-        (self.root / "tests/scenarios").mkdir(parents=True)
-        shutil.copy2(ROOT / "tests/scenarios/python.yml", self.root / "tests/scenarios/python.yml")
+        shutil.copytree(ROOT / "modules", self.root / "modules")
+        (self.root / "tests/scenarios/modules").mkdir(parents=True)
+        shutil.copy2(ROOT / "tests/scenarios/modules/core-python.yml", self.root / "tests/scenarios/modules/core-python.yml")
         (self.root / ".github/workflows").mkdir(parents=True)
 
     def test_current_worktree_rendered_without_overwriting_native_workflows(self) -> None:
-        # The Python scenario always renders the update workflow; optional
-        # workflows may be excluded, and directory iteration order differs across hosts.
-        template = self.root / "template/.github/workflows/copier-update.yml.jinja"
+        # core always renders the update workflow; directory iteration order differs across hosts.
+        template = self.root / "modules/core/template/.github/workflows/copier-update.yml.jinja"
         template.write_text("# current worktree sentinel\n" + template.read_text())
         native = self.root / ".github/workflows/codeql.yml"
         native.write_text("native workflow sentinel\n")
@@ -190,13 +189,13 @@ class RenderedWorkflowEvidenceTests(TestCase):
         self.assertTrue(paths)
         self.assertTrue(any(b"current worktree sentinel" in path.read_bytes() for path in paths))
         self.assertEqual(native.read_text(), "native workflow sentinel\n")
-        self.assertTrue(all(path.name.startswith("codeql-generated-python-") for path in paths))
+        self.assertTrue(all(path.name.startswith("codeql-generated-core-python-") for path in paths))
         with self.assertRaises(FileExistsError):
             self.renderer.render_workflows(self.root)
 
     def test_empty_scenario_set_fails(self) -> None:
-        (self.root / "tests/scenarios/python.yml").unlink()
-        with self.assertRaisesRegex(ValueError, "no template scenarios"):
+        (self.root / "tests/scenarios/modules/core-python.yml").unlink()
+        with self.assertRaisesRegex(ValueError, "no module scenarios"):
             self.renderer.render_workflows(self.root)
 
 
