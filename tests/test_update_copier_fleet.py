@@ -410,6 +410,139 @@ class TemplateUpdateTests(TestCase):
             fleet.resolve_template_commit("quokkify/ci-kit", "v2.19.2", env={})
 
 
+class ProjectOwnedToolkitRefTests(TestCase):
+    """The consumer contract accepts a tag, or a digest whose comment names that tag."""
+
+    NEW_COMMIT = "b" * 40
+    OLD_COMMIT = "fd12c1b07b08c7f873942abd5e8fedbfa26b4583"
+
+    def workflows(self, root: Path) -> Path:
+        directory = root / ".github" / "workflows"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
+
+    def test_rewrites_exact_tag_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "build.yaml"
+            workflow.write_text(
+                "    uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v3.11.2\n"
+                "      - uses: quokkify/ci-kit/actions/setup-java-gradle@v3.11.2\n"
+                "      - uses: other/repo/actions/x@v3.11.2\n",
+                encoding="utf-8",
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0")
+
+            self.assertEqual(changed, [".github/workflows/build.yaml"])
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                "    uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v4.0.0\n"
+                "      - uses: quokkify/ci-kit/actions/setup-java-gradle@v4.0.0\n"
+                "      - uses: other/repo/actions/x@v3.11.2\n",
+            )
+
+    def test_rewrites_a_digest_pin_with_its_release_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "publish-maven-central.yml"
+            workflow.write_text(
+                f"        uses: quokkify/ci-kit/actions/setup-java-gradle@{self.OLD_COMMIT} # v3.11.2\n",
+                encoding="utf-8",
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=lambda: self.NEW_COMMIT)
+
+            self.assertEqual(changed, [".github/workflows/publish-maven-central.yml"])
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                f"        uses: quokkify/ci-kit/actions/setup-java-gradle@{self.NEW_COMMIT} # v4.0.0\n",
+            )
+
+    def test_leaves_a_digest_pin_without_a_release_comment_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "ci.yml"
+            original = f"      uses: quokkify/ci-kit/actions/setup-node@{self.OLD_COMMIT}\n"
+            workflow.write_text(original, encoding="utf-8")
+            resolve = mock.Mock(return_value=self.NEW_COMMIT)
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=resolve)
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), original)
+            resolve.assert_not_called()
+
+    def test_moves_renamed_toolkit_repository_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "build.yml"
+            workflow.write_text(
+                "    uses: quokkify/project-toolkit/.github/workflows/java-ci.yml@v2.25.0\n"
+                f"      - uses: quokkify/project-toolkit/actions/setup-java-gradle@{'a' * 40} # v2.25.0\n"
+                "      - run: echo quokkify/project-toolkit/actions/not-a-reference\n"
+                "      - uses: someone/quokkify/project-toolkit/actions/x@v1.0.0\n",
+                encoding="utf-8",
+            )
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=lambda: self.NEW_COMMIT)
+
+            self.assertEqual(changed, [".github/workflows/build.yml"])
+            self.assertEqual(
+                workflow.read_text(encoding="utf-8"),
+                "    uses: quokkify/ci-kit/.github/workflows/java-ci.yml@v4.0.0\n"
+                f"      - uses: quokkify/ci-kit/actions/setup-java-gradle@{self.NEW_COMMIT} # v4.0.0\n"
+                "      - run: echo quokkify/project-toolkit/actions/not-a-reference\n"
+                "      - uses: someone/quokkify/project-toolkit/actions/x@v1.0.0\n",
+            )
+
+    def test_resolves_the_commit_at_most_once_and_only_for_digest_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            directory = self.workflows(repository)
+            for name in ("a.yml", "b.yml"):
+                (directory / name).write_text(
+                    f"      - uses: quokkify/ci-kit/actions/checkout@{self.OLD_COMMIT} # v3.11.2\n"
+                    f"      - uses: quokkify/ci-kit/actions/setup-python@{self.OLD_COMMIT} # v3.11.2\n",
+                    encoding="utf-8",
+                )
+            resolve = mock.Mock(return_value=self.NEW_COMMIT)
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=resolve)
+
+            self.assertEqual(changed, [".github/workflows/a.yml", ".github/workflows/b.yml"])
+            resolve.assert_called_once_with()
+
+            (directory / "a.yml").write_text("      - uses: quokkify/ci-kit/actions/checkout@v3.11.2\n", encoding="utf-8")
+            (directory / "b.yml").unlink()
+            tag_only = mock.Mock(return_value=self.NEW_COMMIT)
+            fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=tag_only)
+            tag_only.assert_not_called()
+
+    def test_leaves_a_module_rendered_workflow_on_the_target_unchanged(self) -> None:
+        # The module update renders every toolkit reference at toolkit_version, which is the target
+        # tag, so the bump has nothing left to move there.
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            workflow = self.workflows(repository) / "validate.yml"
+            rendered = (
+                "jobs:\n  validate:\n    uses: quokkify/ci-kit/.github/workflows/validate.yml@v4.0.0\n"
+                "      - uses: quokkify/ci-kit/actions/checkout@v4.0.0\n"
+            )
+            workflow.write_text(rendered, encoding="utf-8")
+            resolve = mock.Mock(return_value=self.NEW_COMMIT)
+
+            changed = fleet.bump_project_owned_toolkit_refs(repository, "v4.0.0", resolve_commit=resolve)
+
+            self.assertEqual(changed, [])
+            self.assertEqual(workflow.read_text(encoding="utf-8"), rendered)
+            resolve.assert_not_called()
+
+    def test_without_workflows_nothing_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertEqual(fleet.bump_project_owned_toolkit_refs(Path(temporary), "v4.0.0"), [])
+
+
 class TemplateInventoryTests(TestCase):
     def test_infers_java_component_from_reusable_workflow(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1067,6 +1200,93 @@ class LegacyAnswersExitTests(TestCase):
              mock.patch.object(fleet, "process_repository", return_value=result), \
              redirect_stdout(StringIO()):
             self.assertEqual(fleet.main(["--org", "quokkify", "--dry-run"]), 1)
+
+
+STALE_PUBLISH_WORKFLOW = "jobs:\n  publish:\n    steps:\n      - uses: quokkify/ci-kit/actions/setup-java-gradle@v3.11.2\n"
+CURRENT_PUBLISH_WORKFLOW = "jobs:\n  publish:\n    steps:\n      - uses: quokkify/ci-kit/actions/setup-java-gradle@v4.0.0\n"
+PUBLISH_PATH = ".github/workflows/publish.yml"
+
+
+class ProjectOwnedRefsModuleUpdateTests(TestCase):
+    """Regression guard: the v4.0.0 rollout stopped at its pilot because the module update left
+    project-owned toolkit references on the old release, and the consumer's contract requires
+    them to match toolkit_version within the same revision."""
+
+    git_fixture = LegacyAnswersExitTests.git_fixture
+    git_out = LegacyAnswersExitTests.git_out
+
+    def update_run(self, tree: dict[str, str], *, template_ref: str = "v4.0.0", dry_run: bool = False, module_update=None):
+        files = {"core": tree[".copier-answers.core.yml"]}
+        if ".copier-answers.yml" in tree:
+            files["legacy"] = tree[".copier-answers.yml"]
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        bare, base, clone = self.git_fixture(root, tree)
+        with mock.patch.object(fleet, "apply_module_updates", side_effect=module_update or LegacyAnswersExitTests.module_update(template_ref)), \
+             mock.patch.object(fleet, "resolve_template_commit", return_value="b" * 40) as resolve_mock, \
+             mock.patch.object(fleet, "authenticated_git", return_value=["git"]), \
+             mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
+            result, _ = process(files, dry_run=dry_run, template_ref=template_ref, workspace=root / "work", clone=clone)
+        return result, pr_mock, resolve_mock, bare, base
+
+    def test_project_owned_reference_moves_in_the_module_update_commit(self) -> None:
+        tree = {".copier-answers.core.yml": CORE_ANSWERS_TEXT, PUBLISH_PATH: STALE_PUBLISH_WORKFLOW}
+        result, pr_mock, resolve_mock, bare, base = self.update_run(tree)
+        self.assertEqual(result.status, "pull-request")
+        self.assertEqual(pr_mock.call_args.kwargs["changed"], [".copier-answers.core.yml", PUBLISH_PATH])
+        branch = fleet.DEFAULT_BRANCH
+        commits = self.git_out(bare, "rev-list", f"{base}..{branch}").split()
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(self.git_out(bare, "diff", "--name-only", base, commits[0]).split(), [".copier-answers.core.yml", PUBLISH_PATH])
+        self.assertIn("_commit: v4.0.0", self.git_out(bare, "show", f"{branch}:.copier-answers.core.yml"))
+        self.assertEqual(self.git_out(bare, "show", f"{branch}:{PUBLISH_PATH}"), CURRENT_PUBLISH_WORKFLOW)
+        resolve_mock.assert_not_called()
+
+    def test_after_a_legacy_drop_the_bump_lands_in_the_module_update_commit(self) -> None:
+        tree = {".copier-answers.yml": EMPTY_LEGACY_ANSWERS_TEXT, ".copier-answers.core.yml": CORE_ANSWERS_TEXT, PUBLISH_PATH: STALE_PUBLISH_WORKFLOW}
+        result, _, _, bare, base = self.update_run(tree)
+        self.assertEqual(result.status, "pull-request")
+        commits = self.git_out(bare, "rev-list", "--reverse", f"{base}..{fleet.DEFAULT_BRANCH}").split()
+        self.assertEqual(len(commits), 2)
+        self.assertEqual(self.git_out(bare, "diff", "--name-status", base, commits[0]), "D\t.copier-answers.yml\n")
+        self.assertEqual(self.git_out(bare, "log", "-1", "--format=%s", commits[1]).strip(), fleet.PR_TITLE)
+        self.assertEqual(self.git_out(bare, "diff", "--name-only", commits[0], commits[1]).split(), [".copier-answers.core.yml", PUBLISH_PATH])
+        self.assertEqual(self.git_out(bare, "show", f"{commits[1]}:{PUBLISH_PATH}"), CURRENT_PUBLISH_WORKFLOW)
+
+    def test_digest_pins_resolve_the_target_commit_once_from_the_template_repository(self) -> None:
+        stale = f"      - uses: quokkify/ci-kit/actions/setup-java-gradle@{'a' * 40} # v3.11.2\n"
+        tree = {".copier-answers.core.yml": CORE_ANSWERS_TEXT, PUBLISH_PATH: stale, ".github/workflows/build.yml": stale}
+        _, _, resolve_mock, bare, _ = self.update_run(tree)
+        resolve_mock.assert_called_once_with("quokkify/ci-kit", "v4.0.0", env={})
+        self.assertEqual(
+            self.git_out(bare, "show", f"{fleet.DEFAULT_BRANCH}:{PUBLISH_PATH}"),
+            f"      - uses: quokkify/ci-kit/actions/setup-java-gradle@{'b' * 40} # v4.0.0\n",
+        )
+
+    def test_current_modules_with_stale_project_owned_references_still_update(self) -> None:
+        # A consumer that merged a fleet PR without the bump is current on modules only.
+        current = "_commit: v4.0.0\n_src_path: gh:quokkify/ci-kit\n"
+        tree = {".copier-answers.core.yml": current, PUBLISH_PATH: STALE_PUBLISH_WORKFLOW}
+        result, pr_mock, _, bare, base = self.update_run(tree, module_update=lambda *_, **__: [])
+        self.assertEqual(result.status, "pull-request")
+        self.assertEqual(pr_mock.call_args.kwargs["changed"], [PUBLISH_PATH])
+        commits = self.git_out(bare, "rev-list", f"{base}..{fleet.DEFAULT_BRANCH}").split()
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(self.git_out(bare, "show", f"{commits[0]}:{PUBLISH_PATH}"), CURRENT_PUBLISH_WORKFLOW)
+
+    def test_current_modules_and_references_are_up_to_date(self) -> None:
+        current = "_commit: v4.0.0\n_src_path: gh:quokkify/ci-kit\n"
+        tree = {".copier-answers.core.yml": current, PUBLISH_PATH: CURRENT_PUBLISH_WORKFLOW}
+        result, pr_mock, _, _, _ = self.update_run(tree, module_update=lambda *_, **__: [])
+        self.assertEqual(result.status, "up-to-date")
+        pr_mock.assert_not_called()
+
+    def test_a_non_release_target_leaves_project_owned_references_alone(self) -> None:
+        tree = {".copier-answers.core.yml": CORE_ANSWERS_TEXT, PUBLISH_PATH: STALE_PUBLISH_WORKFLOW}
+        result, _, resolve_mock, _, _ = self.update_run(tree, template_ref="feature/preview", dry_run=True)
+        self.assertEqual((result.status, result.detail), ("would-update", ".copier-answers.core.yml"))
+        resolve_mock.assert_not_called()
 
 
 PULL_REQUEST_BODY = (

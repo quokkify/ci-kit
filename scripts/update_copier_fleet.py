@@ -1234,6 +1234,64 @@ def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[
     return rows
 
 
+TOOLKIT_REFERENCE_PREFIX = r"quokkify/ci-kit/(?:\.github/workflows|actions)/[^@\s]+@"
+TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+")
+TOOLKIT_DIGEST_REFERENCE = re.compile(
+    rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
+)
+RENAMED_TOOLKIT_REFERENCE = re.compile(
+    r"(?<![\w./-])(" + "|".join(re.escape(name) for name in RENAMED_TEMPLATE_REPOSITORIES) + r")/(?=(?:\.github/workflows|actions)/[^@\s]+@)"
+)
+
+
+def bump_project_owned_toolkit_refs(
+    repository_path: Path,
+    template_ref: str,
+    *,
+    resolve_commit: Callable[[], str] | None = None,
+) -> list[str]:
+    """Move toolkit references in project-owned workflows to the new template version.
+
+    The module update rewrites the workflows its modules render, but a project-owned workflow
+    such as build.yml also references this toolkit, and a consumer contract may require every
+    such reference to match the recorded toolkit_version. Leaving those behind fails the
+    consumer's own validation immediately after an otherwise correct update, so the bump has
+    to be part of the same commit.
+
+    Module-rendered workflows already reference the target tag after the module update, so the
+    rewrite leaves them unchanged.
+
+    Exact vMAJOR.MINOR.PATCH tags are rewritten to the new tag. A digest pin carrying a
+    release comment, which is what Renovate writes, is rewritten to the new tag's commit
+    together with its comment: the contract accepts a digest only while the comment still
+    names the recorded toolkit_version, so leaving the comment behind is the same failure
+    as leaving a stale tag behind, and neither this update nor the Renovate bump can pass
+    that check on its own. A digest pin without a release comment is left alone, since
+    nothing identifies which release it was meant to track. References that still use a
+    renamed toolkit repository name are moved to the current name first.
+
+    ``resolve_commit`` runs at most once, and only when a digest pin is present, so a
+    fleet of tag-only consumers costs no extra API call.
+    """
+    changed: list[str] = []
+    commit: str | None = None
+    workflows = repository_path / ".github" / "workflows"
+    for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
+        original = workflow.read_text(encoding="utf-8")
+        updated = RENAMED_TOOLKIT_REFERENCE.sub(lambda match: RENAMED_TEMPLATE_REPOSITORIES[match.group(1)] + "/", original)
+        updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", updated)
+        if resolve_commit is not None and TOOLKIT_DIGEST_REFERENCE.search(updated):
+            if commit is None:
+                commit = resolve_commit()
+            updated = TOOLKIT_DIGEST_REFERENCE.sub(
+                rf"\g<1>{commit}\g<2>{template_ref}", updated
+            )
+        if updated != original:
+            workflow.write_text(updated, encoding="utf-8")
+            changed.append(workflow.relative_to(repository_path).as_posix())
+    return changed
+
+
 def drop_legacy_answers(repository_path: Path) -> None:
     # The commit reuses the base commit's dates, so rerunning on the same base yields the same
     # commit and remote_has_same_change still recognizes an unchanged automation branch.
@@ -1685,6 +1743,15 @@ def process_repository(
                 raise FleetUpdateError("module update requires a resolved template ref")
             primary = "core" if "core" in modules else modules[0]
             rows = apply_module_updates(destination, template_ref, env=env)
+            if RELEASE_TAG_PATTERN.fullmatch(template_ref):
+                # Left uncommitted, the moved references join the module update in one commit
+                # (after the separate legacy drop commit, if any), as the consumer contract needs.
+                template_repository = normalized_expected or expected_template
+                bump_project_owned_toolkit_refs(
+                    destination,
+                    template_ref,
+                    resolve_commit=lambda: resolve_template_commit(template_repository, template_ref, env=env),
+                )
             paths = sorted(set(paths) | set(changed_paths(destination)))
             target = parse_answers(
                 (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
