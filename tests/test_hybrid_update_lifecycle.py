@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import yaml
@@ -19,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from ci_kit.plan import build_plan
 from ci_kit.update import run_update
 from module_test_support import (
-    ROOT, component_less_scenarios, component_scenarios, git, legacy_scenario_repo, lifecycle_template_repo,
+    ROOT, component_less_scenarios, component_scenarios, git, hide_legacy_exit_finding, legacy_scenario_repo,
+    lifecycle_template_repo,
 )
 
 REF = "v99.0.0"
@@ -93,6 +95,10 @@ def declared_components(repo: Path) -> list[dict]:
         if (repo / f".ci/modules/{module}.yml").is_file()
         for component in yaml.safe_load((repo / f".ci/modules/{module}.yml").read_text())["components"]
     ]
+
+
+def setUpModule() -> None:
+    hide_legacy_exit_finding()
 
 
 class HybridUpdateLifecycleTests(unittest.TestCase):
@@ -182,41 +188,35 @@ class ComponentUpdateTests(HybridUpdateLifecycleTests):
 
 class FleetHybridUpdateTests(HybridUpdateLifecycleTests):
     @unittest.skipUnless(shutil.which("copier"), "Copier is required for the hybrid update integration")
-    def test_hybrid_repository_updates_only_core_without_conflicts(self):
+    def test_hybrid_repository_with_partial_legacy_is_refused_unchanged(self):
         spec = importlib.util.spec_from_file_location("update_copier_fleet", ROOT / "scripts/update_copier_fleet.py")
         fleet = importlib.util.module_from_spec(spec)
         sys.modules.setdefault(spec.name, fleet)
         spec.loader.exec_module(fleet)
-        template = self.template
-        repo = hybrid_validate_repo(template, "wave1-release")
-        canonical = "https://github.com/quokkify/ci-kit.git"
+        repo = hybrid_validate_repo(self.template, "wave1-release")
         for name in (".copier-answers.yml", ".copier-answers.core.yml"):
             path = repo / name
-            path.write_text(re.sub(r"^_src_path:.*$", f"_src_path: {canonical}", path.read_text(), flags=re.MULTILINE))
+            path.write_text(re.sub(r"^_src_path:.*$", "_src_path: https://github.com/quokkify/ci-kit.git", path.read_text(), flags=re.MULTILINE))
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "canonical source")
-        self.assertIn(f"validate.yml@{REF}", (repo / ".github/workflows/validate.yml").read_text())
-        with tempfile.TemporaryDirectory() as temporary:
-            env = os.environ.copy()
-            env.update({
-                "HOME": str(Path(temporary).resolve()),
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": f"url.file://{template}/.insteadOf",
-                "GIT_CONFIG_VALUE_0": canonical,
-            })
-            fleet.update_template(repo, template_source=canonical, template_ref=NEXT_REF, env=env)
-            rows = fleet.apply_module_updates(repo, NEXT_REF, env=env)
-        self.assertEqual([(row["module"], row["to"]) for row in rows], [("core", NEXT_REF)])
-        self.assertEqual(list(repo.rglob("*.rej")), [])
-        self.assertIn(f"validate.yml@{NEXT_REF}", (repo / ".github/workflows/validate.yml").read_text())
-        for name in (".copier-answers.yml", ".copier-answers.core.yml"):
-            self.assertEqual(yaml.safe_load((repo / name).read_text())["_commit"], NEXT_REF)
-        legacy_refs = [
-            path.name for path in (repo / ".github/workflows").glob("*.yml")
-            if path.name != "validate.yml" and f"@{REF}" in path.read_text()
-        ]
-        self.assertEqual(legacy_refs, [])
-        self.assertEqual(build_plan(repo, src_override=str(template)).findings, [])
+        head = git(repo, "rev-parse", "HEAD")
+        files = {"legacy": (repo / ".copier-answers.yml").read_text(), "core": (repo / ".copier-answers.core.yml").read_text()}
+        with tempfile.TemporaryDirectory() as temporary, \
+             mock.patch.object(fleet, "fetch_answers_files", return_value=files), \
+             mock.patch.object(fleet, "clone_repository", side_effect=lambda _, target, **__: shutil.copytree(repo, target)), \
+             mock.patch.object(fleet, "update_template") as update_mock, \
+             mock.patch.object(fleet, "apply_module_updates") as modules_mock:
+            result = fleet.process_repository(
+                fleet.Repository("quokkify/example", "main"), expected_template="quokkify/ci-kit",
+                branch=fleet.DEFAULT_BRANCH, dry_run=False, template_ref=NEXT_REF, env=os.environ.copy(),
+                workspace=Path(temporary),
+            )
+            clone = Path(temporary) / "quokkify--example"
+            self.assertEqual((git(clone, "status", "--porcelain"), git(clone, "rev-parse", "HEAD")), ("", head))
+        self.assertEqual(result.status, "legacy-refused")
+        self.assertIn("CIK-CORE-030", result.detail)
+        update_mock.assert_not_called()
+        modules_mock.assert_not_called()
 
 
 class FleetModuleOnlyUpdateTests(HybridUpdateLifecycleTests):

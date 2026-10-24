@@ -13,6 +13,10 @@ from .inputs import WORKFLOWS, fill
 from .modules import MODULES
 
 ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
+LEGACY_ANSWERS = ".copier-answers.yml"
+# Every area the legacy template rendered; once all are handed off it renders nothing.
+LEGACY_AREAS = ("validate", "base", "security", "release", "allure", "renovate")
+LEGACY_ANSWERS_MESSAGE = "legacy answers still render files; migrate with ci-kit v3.11.x"
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,33 @@ def _version_findings(repo: Path, answers: dict[str, Path]) -> list[Finding]:
     return findings
 
 
+def legacy_areas_left(raw: str) -> list[str]:
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        data = None
+    handed = data.get("handed_off") if isinstance(data, dict) else None
+    handed = set(handed) if isinstance(handed, list) and all(isinstance(name, str) for name in handed) else set()
+    return [area for area in LEGACY_AREAS if area not in handed]
+
+
+def _legacy_answers_findings(repo: Path) -> list[Finding]:
+    path = repo / LEGACY_ANSWERS
+    if not path.exists():
+        return []
+    try:
+        left = legacy_areas_left(path.read_text())
+    except (OSError, UnicodeDecodeError):
+        left = list(LEGACY_AREAS)
+    if not left:
+        return []
+    return [Finding(
+        "CIK-CORE-030", "legacy",
+        f"{LEGACY_ANSWERS_MESSAGE} (not handed off: {', '.join(left)})",
+        LEGACY_ANSWERS,
+    )]
+
+
 def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
     repo = Path(repo)
     answers, declarations = discover(repo)
@@ -155,6 +186,7 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             module_names.add(name)
 
     findings.extend(_version_findings(repo, answers))
+    findings.extend(_legacy_answers_findings(repo))
 
     modules = sorted(loaded)
     module_owned: set[str] = set()

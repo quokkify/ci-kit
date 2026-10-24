@@ -22,7 +22,7 @@ from ci_kit.migrate_legacy import CODEQL_CATEGORY, migrate_legacy, render_marker
 from ci_kit.migration_marker import MARKER, parse_marker
 from ci_kit.plan import build_plan
 from ci_kit.update import commit_all, run_update
-from module_test_support import ROOT, git, lifecycle_template_repo, mkdtemp
+from module_test_support import ROOT, git, hide_legacy_exit_finding, lifecycle_template_repo, mkdtemp
 from test_hybrid_update_lifecycle import NEXT_REF, REF, hybrid_validate_repo
 from test_legacy_module_parity import OPTIONS
 
@@ -40,6 +40,10 @@ def tree(repo: Path, ref: str = "HEAD") -> dict[str, bytes]:
 
 def is_answers(path: str) -> bool:
     return path.startswith(".copier-answers") or path.startswith(".ci/modules/")
+
+
+def setUpModule() -> None:
+    hide_legacy_exit_finding()
 
 
 class MigrateLegacyTests(unittest.TestCase):

@@ -29,6 +29,21 @@ def _cleanup_temp_dirs() -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def hide_legacy_exit_finding() -> None:
+    """Call from setUpModule: hide CIK-CORE-030 from build_plan for the rest of the module.
+
+    v4 refuses legacy answers that do not hand every area off (CIK-CORE-030, covered by
+    test_ci_kit_plan). The v3 legacy suites that call this exercise the legacy checks on such
+    repositories and are removed together with the legacy template.
+    """
+    import unittest
+    from unittest import mock
+
+    patcher = mock.patch("ci_kit.plan._legacy_answers_findings", return_value=[])
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
 def git(cwd: Path, *args: str) -> str:
     import os
 

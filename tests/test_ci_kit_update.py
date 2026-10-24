@@ -20,7 +20,8 @@ from ci_kit.modules import MODULES, ModuleInfo
 from ci_kit.plan import build_plan
 from ci_kit.update import ModuleUpdate, copier_update_command, run_update, update_order
 from module_test_support import (
-    BASE_PATHS, ROOT, base_handoff_template_repo, git, lifecycle_template_repo, mkdtemp, rendered_from,
+    BASE_PATHS, ROOT, base_handoff_template_repo, git, hide_legacy_exit_finding, lifecycle_template_repo, mkdtemp,
+    rendered_from,
 )
 
 _TEMPLATE: Path | None = None
@@ -63,6 +64,10 @@ def legacy_repo() -> Path:
 
 def subjects(repo: Path) -> list[str]:
     return git(repo, "log", "--format=%s").splitlines()
+
+
+def setUpModule() -> None:
+    hide_legacy_exit_finding()
 
 
 class OrderTests(unittest.TestCase):

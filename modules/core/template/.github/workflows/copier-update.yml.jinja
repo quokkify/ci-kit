@@ -69,93 +69,71 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Repositories still on the legacy template update it first; module-only
-          # repositories have no .copier-answers.yml and skip this step.
-          legacy=false
+          # ci-kit v4 has no legacy template. Legacy answers that hand every area off render
+          # nothing and are dropped in a commit of their own; legacy answers that still render
+          # files are refused without changes (CIK-CORE-030).
+          message="chore(template): update shared project template"
           if [[ -f .copier-answers.yml ]]; then
-            legacy=true
-            python - <<'PY'
+            left="$(python - <<'PY'
           from pathlib import Path
           import yaml
 
+          areas = ('validate', 'base', 'security', 'release', 'allure', 'renovate')
           answers = yaml.safe_load(Path('.copier-answers.yml').read_text())
-          components = answers.get('components') if isinstance(answers, dict) else None
-          missing = [
-              str(component.get('path', index))
-              for index, component in enumerate(components or [])
-              if isinstance(component, dict)
-              and ('id' not in component or 'name' not in component)
-          ]
-          if missing:
-              raise SystemExit(
-                  'Breaking component migration requires explicit id and name for: '
-                  + ', '.join(missing)
-              )
-          PY
-
-            command=(copier update --trust --defaults --conflict=rej --skip-tasks --vcs-ref "$ref")
-            command+=(--data "toolkit_version=$ref")
-            "${command[@]}" .
-          fi
-
-          # A partial update is never pushed. Conflicts fail the run the same way the fleet
-          # automation fails a repository, so the branch never holds a half-applied template
-          # that a reviewer could mistake for a clean one.
-          mapfile -t rejected < <(find . -name '*.rej' -not -path './.git/*' -print)
-          if (( {% raw %}${#rejected[@]}{% endraw %} )); then
-            printf 'Copier produced conflict files:\n' >&2
-            printf '  %s\n' "${rejected[@]}" >&2
-            exit 1
-          fi
-
-          # ci-kit update commits every module it updates; the commits are squashed
-          # back into the single update commit below.
-          base="$(git rev-parse HEAD)"
-          update_args=(--repo . --to "$ref")
-          if [[ "$legacy" == true ]]; then
-            git add --all
-            if ! git diff --cached --quiet; then
-              git -c user.name="quokkify-copier[bot]" -c user.email="quokkify-copier[bot]@users.noreply.github.com" \
-                commit -q -m "chore(template): pending legacy update"
-            fi
-            update_args+=(--skip-legacy)
-          fi
-          python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"
-          ci-kit update "${update_args[@]}"
-          git reset --soft "$base"
-
-          # Copier deliberately preserves files with local edits, even when the
-          # answers already name this ref. Verify the executable release helper
-          # against the selected template revision on every run, including a
-          # same-ref update. Do not overwrite a consumer customization here.
-          helper=".github/scripts/enrich_release_notes.py"
-          release=false
-          if [[ -f .copier-answers.release.yml ]]; then
-            release=true
-          elif [[ "$legacy" == true ]]; then
-            release="$(python - <<'PY'
-          from pathlib import Path
-          import yaml
-
-          answers = yaml.safe_load(Path('.copier-answers.yml').read_text())
-          print('true' if isinstance(answers, dict) and answers.get('release_please') is True else 'false')
+          handed = answers.get('handed_off') if isinstance(answers, dict) else None
+          handed = handed if isinstance(handed, list) else []
+          print(', '.join(area for area in areas if area not in handed))
           PY
           )"
-          fi
-          if [[ "$release" == "true" && ! -f "$helper" ]]; then
-            printf 'Refusing template update: %s is missing while the release module is installed. Restore the helper, then rerun.\n' "$helper" >&2
-            exit 1
-          fi
-          if [[ -f "$helper" ]]; then
-            template_helper="$(mktemp)"
-            trap 'rm -f "$template_helper"' EXIT
-            git fetch --quiet --depth=1 https://github.com/quokkify/ci-kit.git \
-              "refs/tags/$ref"
-            git show "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja" \
-              > "$template_helper"
-            if ! cmp -s "$template_helper" "$helper"; then
-              printf 'Refusing template update: %s differs from ci-kit %s. Reconcile this project-owned/customized helper with the template, then rerun.\n' "$helper" "$ref" >&2
+            if [[ -n "$left" ]]; then
+              printf 'Refusing template update: CIK-CORE-030 legacy answers still render files; migrate with ci-kit v3.11.x (not handed off: %s). See https://github.com/quokkify/ci-kit/blob/main/docs/errors/CIK-CORE-030.md\n' "$left" >&2
               exit 1
+            fi
+            git rm -q .copier-answers.yml
+            message="chore(ci-kit): drop empty legacy answers"
+          else
+            # A partial update is never pushed. Conflicts fail the run the same way the fleet
+            # automation fails a repository, so the branch never holds a half-applied template
+            # that a reviewer could mistake for a clean one.
+            mapfile -t rejected < <(find . -name '*.rej' -not -path './.git/*' -print)
+            if (( {% raw %}${#rejected[@]}{% endraw %} )); then
+              printf 'Copier produced conflict files:\n' >&2
+              printf '  %s\n' "${rejected[@]}" >&2
+              exit 1
+            fi
+
+            # ci-kit update commits every module it updates; the commits are squashed
+            # back into the single update commit below.
+            base="$(git rev-parse HEAD)"
+            update_args=(--repo . --to "$ref")
+            python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"
+            ci-kit update "${update_args[@]}"
+            git reset --soft "$base"
+
+            # Copier deliberately preserves files with local edits, even when the
+            # answers already name this ref. Verify the executable release helper
+            # against the selected template revision on every run, including a
+            # same-ref update. Do not overwrite a consumer customization here.
+            helper=".github/scripts/enrich_release_notes.py"
+            release=false
+            if [[ -f .copier-answers.release.yml ]]; then
+              release=true
+            fi
+            if [[ "$release" == "true" && ! -f "$helper" ]]; then
+              printf 'Refusing template update: %s is missing while the release module is installed. Restore the helper, then rerun.\n' "$helper" >&2
+              exit 1
+            fi
+            if [[ -f "$helper" ]]; then
+              template_helper="$(mktemp)"
+              trap 'rm -f "$template_helper"' EXIT
+              git fetch --quiet --depth=1 https://github.com/quokkify/ci-kit.git \
+                "refs/tags/$ref"
+              git show "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja" \
+                > "$template_helper"
+              if ! cmp -s "$template_helper" "$helper"; then
+                printf 'Refusing template update: %s differs from ci-kit %s. Reconcile this project-owned/customized helper with the template, then rerun.\n' "$helper" "$ref" >&2
+                exit 1
+              fi
             fi
           fi
 
@@ -168,7 +146,7 @@ jobs:
           fi
 
           git diff --cached --check
-          git commit -m "chore(template): update shared project template"
+          git commit -m "$message"
 
           remote="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"
           if [[ -n "$remote" ]]; then

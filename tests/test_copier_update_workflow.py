@@ -235,6 +235,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 self.assertFalse((temporary / "copier.log").exists())
 
 
+LEGACY_AREAS = ("validate", "base", "security", "release", "allure", "renovate")
 STABLE = {"tagName": "v2.21.5", "publishedAt": "2026-09-01T00:00:00Z", "isDraft": False, "isPrerelease": False}
 
 
@@ -294,18 +295,44 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
             self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
             self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "3")
 
-    def test_copier_update_with_legacy(self) -> None:
+    def legacy_checkout(self, temporary: Path, handed_off: list[str]) -> tuple[Path, Path]:
+        checkout, bare = self.module_checkout(temporary)
+        (checkout / ".copier-answers.yml").write_text(
+            "_src_path: gh:quokkify/ci-kit\nhanded_off:\n" + "".join(f"  - {area}\n" for area in handed_off), encoding="utf-8"
+        )
+        run_git("add", ".", cwd=checkout)
+        run_git("commit", "-m", "legacy answers", cwd=checkout)
+        run_git("push", "origin", "HEAD:refs/heads/main", cwd=checkout)
+        return checkout, bare
+
+    def test_copier_update_drops_empty_legacy(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             temporary = Path(raw)
-            checkout, bare = self.make_checkout(temporary)
+            checkout, bare = self.legacy_checkout(temporary, list(LEGACY_AREAS))
             result = self.execute(checkout, temporary, STABLE)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((temporary / "copier.log").read_text(encoding="utf-8"), "copier-called\n")
-            self.assertEqual((temporary / "ci-kit.log").read_text(encoding="utf-8"), "update --repo . --to v2.21.5 --skip-legacy\n")
-            tree = run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", "automation/copier-template-update", cwd=temporary).splitlines()
-            self.assertIn(".copier-created", tree)
-            self.assertIn(".ci-kit-updated", tree)
-            self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", "automation/copier-template-update", cwd=temporary), "2")
+            self.assertFalse((temporary / "copier.log").exists())
+            self.assertFalse((temporary / "ci-kit.log").exists())
+            branch = "automation/copier-template-update"
+            self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", f"main..{branch}", cwd=temporary), "1")
+            self.assertEqual(run_git("--git-dir", str(bare), "log", "-1", "--format=%s", branch, cwd=temporary), "chore(ci-kit): drop empty legacy answers")
+            self.assertEqual(run_git("--git-dir", str(bare), "diff", "--name-status", "main", branch, cwd=temporary), "D\t.copier-answers.yml")
+
+    def test_copier_update_refuses_partial_legacy(self) -> None:
+        for handed_off in (["validate", "base"], []):
+            with self.subTest(handed_off=handed_off), tempfile.TemporaryDirectory() as raw:
+                temporary = Path(raw)
+                checkout, bare = self.legacy_checkout(temporary, handed_off)
+                head = run_git("rev-parse", "HEAD", cwd=checkout)
+                result = self.execute(checkout, temporary, STABLE)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("CIK-CORE-030 legacy answers still render files", result.stderr)
+                self.assertIn("security, release, allure, renovate", result.stderr)
+                self.assertFalse((temporary / "copier.log").exists())
+                self.assertFalse((temporary / "ci-kit.log").exists())
+                self.assertEqual(run_git("status", "--porcelain", cwd=checkout), "")
+                self.assertEqual(run_git("rev-parse", "HEAD", cwd=checkout), head)
+                self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
 
     def test_release_module_requires_helper(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -360,21 +387,22 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
     def test_module_update_step_is_guarded_and_ordered(self) -> None:
         script = self.script
         guard = script.index("if [[ -f .copier-answers.yml ]]; then")
-        legacy = script.index('"${command[@]}" .')
-        skip = script.index("update_args+=(--skip-legacy)")
+        drop = script.index("git rm -q .copier-answers.yml")
+        otherwise = script.index("\nelse\n")
         install = script.index('python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"')
         update = script.index('ci-kit update "${update_args[@]}"')
         reset = script.index('git reset --soft "$base"')
-        self.assertLess(guard, legacy)
-        self.assertLess(legacy, skip)
-        self.assertLess(skip, install)
+        self.assertLess(guard, drop)
+        self.assertLess(drop, otherwise)
+        self.assertLess(otherwise, install)
         self.assertLess(install, update)
         self.assertLess(update, reset)
         self.assertIn('update_args=(--repo . --to "$ref")', script)
 
     def test_module_update_uses_temp_commit_identity_and_no_swallowed_failure(self) -> None:
+        # No legacy update precedes the module step any more, so no temporary commit (and identity) is needed.
         self.assertIn('base="$(git rev-parse HEAD)"', self.script)
-        self.assertIn("-c user.name=", self.script)
+        self.assertNotIn("pending legacy update", self.script)
         section = self.script[self.script.index('base="$(git rev-parse HEAD)"'):self.script.index('git reset --soft "$base"')]
         self.assertNotIn("|| true", section)
 
@@ -385,14 +413,17 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
         self.assertNotIn("${{", stripped)
         self.assertNotIn("{{", stripped)
 
-    # The legacy workflow skips the module step for a pure legacy checkout; core never does, so the inherited test does not apply.
+    # The legacy workflow updates a legacy checkout with Copier; core never runs the legacy template, so these do not apply.
     test_pure_legacy_checkout_skips_module_update = None
+    test_published_stable_tag_allows_copier_and_pushes_add_only_file = None
 
-    def test_module_update_step_is_unconditional(self) -> None:
-        # core renders this workflow, so .copier-answers.core.yml always exists and the
-        # module step is unconditional; a legacy checkout only adds --skip-legacy.
+    def test_module_update_never_runs_the_legacy_template(self) -> None:
+        # core renders this workflow, so .copier-answers.core.yml always exists; the module
+        # step runs whenever there are no legacy answers to drop or refuse.
         self.assertNotIn("compgen", self.script)
-        self.assertIn("\nci-kit update", self.script)
+        self.assertNotIn("copier update", self.script)
+        self.assertNotIn("--skip-legacy", self.script)
+        self.assertIn("\n  ci-kit update", self.script)
 
 
 if __name__ == "__main__":

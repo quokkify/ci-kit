@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.legacy import handoff_findings
 from ci_kit.plan import build_plan
-from module_test_support import ROOT, mkdtemp, render, run_copier, shared_template_repo
+from module_test_support import ROOT, hide_legacy_exit_finding, mkdtemp, render, run_copier, shared_template_repo
 
 _CACHE: dict[tuple, Path] = {}
 LEGACY_WORKFLOW = ".github/workflows/gitleaks.yml"
@@ -62,6 +62,10 @@ def edit_answers(repo: Path, **changes) -> None:
         else:
             data[key] = value
     path.write_text(yaml.safe_dump(data))
+
+
+def setUpModule() -> None:
+    hide_legacy_exit_finding()
 
 
 class HandoffTests(unittest.TestCase):

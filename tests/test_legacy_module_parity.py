@@ -261,18 +261,19 @@ class BaseParityTests(unittest.TestCase):
                 for path in self.STARTERS:
                     self.assertEqual(expected[path], legacy[path].replace(self.LEGACY_GUIDE, self.CORE_GUIDE), path)
 
-    def test_copier_update_keeps_legacy_step_behind_answers_file(self) -> None:
+    def test_copier_update_drops_or_refuses_legacy_answers_instead_of_updating_them(self) -> None:
         template = shared_template_repo()
         core = render_tree(template, None, {"module": "core", "toolkit_version": PIN})[".github/workflows/copier-update.yml"].decode()
         legacy = render_tree(template, SCENARIOS / "python.yml", {"toolkit_version": PIN})[".github/workflows/copier-update.yml"].decode()
         guard = core.index("if [[ -f .copier-answers.yml ]]; then")
-        self.assertLess(guard, core.index('"${command[@]}" .'))
+        self.assertLess(guard, core.index("git rm -q .copier-answers.yml"))
+        self.assertNotIn("copier update", core)
         self.assertIn('ci-kit update "${update_args[@]}"', core)
         self.assertIn("FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja", core)
         self.assertNotIn("FETCH_HEAD:template/", core)
-        # Everything up to the legacy step is the legacy workflow verbatim.
-        prefix = legacy[: legacy.index("          python - <<'PY'")]
-        self.assertTrue(core.startswith(prefix))
+        # Everything up to the legacy answers step is the legacy workflow verbatim.
+        identity = '          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"\n'
+        self.assertEqual(core[: core.index(identity)], legacy[: legacy.index(identity)])
 
 
 if __name__ == "__main__":

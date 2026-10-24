@@ -37,7 +37,7 @@ from ci_kit.drift import TRUSTED_SRC_RE
 from ci_kit.handoff import AREAS
 from ci_kit.modules import MODULES
 from ci_kit.migrate_legacy import MIGRATED, MigrateLegacyResult, render_marker
-from ci_kit.plan import ANSWERS_RE, Finding
+from ci_kit.plan import ANSWERS_RE, LEGACY_ANSWERS_MESSAGE, Finding, legacy_areas_left
 
 ANSWERS_FILE = ".copier-answers.yml"
 LEGACY_MODULE = "legacy"
@@ -47,6 +47,7 @@ DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
 PR_TITLE = "chore(template): update shared project template"
+DROP_LEGACY_ANSWERS_TITLE = "chore(ci-kit): drop empty legacy answers"
 MIGRATE_LEGACY_BRANCH = "ci-kit/migrate-legacy"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
@@ -1114,6 +1115,8 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("failed", "Update failed; raw error below.", "**Re-run** for this repository; investigate if it fails again."))
     elif status == "migrate-rejected":
         facts.append(Fact("failed", f"Migration rejected: {markdown_text(result.detail)}; nothing pushed.", "**Review** the findings below."))
+    elif status == "legacy-refused":
+        facts.append(Fact("failed", f"Update refused: {markdown_text(result.detail)}; nothing pushed.", "**Migrate** the repository with ci-kit v3.11.x ([CIK-CORE-030](https://github.com/quokkify/ci-kit/blob/main/docs/errors/CIK-CORE-030.md))."))
     elif status == "needs-update-first":
         facts.append(Fact("update-first", f"Needs update first: {markdown_text(result.detail)}.", "**Run** the template update first, then migrate again."))
     elif status == "would-migrate":
@@ -2563,6 +2566,9 @@ def process_repository(
         if modules:
             areas = ",".join(legacy_handed_off(cloned_answers))
             inventory = replace(inventory, modules=modules, state=f"hybrid({areas})")
+        left = legacy_areas_left(cloned_answers)
+        if left:
+            return Result(name, "legacy-refused", f"CIK-CORE-030: {LEGACY_ANSWERS_MESSAGE} (not handed off: {', '.join(left)})", inventory)
     else:
         primary = "core" if "core" in modules else modules[0]
         primary_answers = parse_answers((destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8"))
@@ -2574,39 +2580,30 @@ def process_repository(
         )
     try:
         paths: list[str] = []
-        if raw_answers is not None:
-            paths = update_template(
-                destination,
-                template_source=expected_template,
-                template_ref=template_ref,
-                env=env,
-                repository=repository,
-            )
-            updated_answers_path = destination / ANSWERS_FILE
-            if is_regular_file(updated_answers_path, repository_root=destination):
-                updated_answers = parse_answers(updated_answers_path.read_text(encoding="utf-8"))
-                updated_commit = updated_answers.get("_commit")
-                if isinstance(updated_commit, str) and updated_commit.strip():
-                    inventory = replace(inventory, target_commit=updated_commit.strip())
         rows: list[dict[str, str]] = []
-        if modules:
+        message = PR_TITLE
+        if raw_answers is not None:
+            # Every area is handed off, so the legacy answers render nothing: drop them alone.
+            run(["git", "rm", "-q", "--", ANSWERS_FILE], cwd=destination)
+            paths = [ANSWERS_FILE]
+            message = DROP_LEGACY_ANSWERS_TITLE
+        elif modules:
             if not template_ref:
                 raise FleetUpdateError("module update requires a resolved template ref")
             rows = apply_module_updates(destination, template_ref, env=env)
             paths = changed_paths(destination)
-            if raw_answers is None:
-                target = parse_answers(
-                    (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
-                ).get("_commit")
-                if isinstance(target, str) and target.strip():
-                    inventory = replace(inventory, target_commit=target.strip())
+            target = parse_answers(
+                (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
+            ).get("_commit")
+            if isinstance(target, str) and target.strip():
+                inventory = replace(inventory, target_commit=target.strip())
         if not paths:
             return Result(name, "up-to-date", inventory=inventory)
         if dry_run:
             return Result(name, "would-update", ", ".join(paths), inventory)
 
         replaced: list[str] = []
-        head = push_automation_branch(repository, destination, branch=branch, env=env, replaced=replaced)
+        head = push_automation_branch(repository, destination, branch=branch, env=env, message=message, replaced=replaced)
         url = ensure_pull_request(
             repository,
             branch=branch,
@@ -2985,7 +2982,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json_report:
         args.json_report.parent.mkdir(parents=True, exist_ok=True)
         args.json_report.write_text(json_report(results, counts, run), encoding="utf-8")
-    if failures or counts.get("migrate-rejected", 0):
+    if failures or counts.get("migrate-rejected", 0) or counts.get("legacy-refused", 0):
         return 1
     if args.dry_run and counts.get("would-update", 0):
         print("template drift detected; run write mode from a CODEOWNER session", file=sys.stderr)

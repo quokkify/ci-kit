@@ -187,6 +187,28 @@ class PlanTests(unittest.TestCase):
         found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-012"]
         self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")] * 2)
 
+    def test_core_030_when_area_not_handed_off(self):
+        repo = rendered_repo("core")
+        for handed_off, expected in (
+            ("[validate, base, security, release, allure]", ["renovate"]),
+            ("[]", ["validate", "base", "security", "release", "allure", "renovate"]),
+            ("validate", ["validate", "base", "security", "release", "allure", "renovate"]),
+        ):
+            with self.subTest(handed_off=handed_off):
+                (repo / ".copier-answers.yml").write_text(f"_src_path: gh:quokkify/ci-kit\nhanded_off: {handed_off}\n")
+                found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-030"]
+                self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")])
+                self.assertIn("legacy answers still render files", found[0].message)
+                self.assertIn(", ".join(expected), found[0].message)
+
+    def test_no_core_030_when_every_area_is_handed_off_or_no_legacy_answers(self):
+        repo = rendered_repo("core")
+        self.assertNotIn("CIK-CORE-030", codes(build_plan(repo, drift=False)))
+        (repo / ".copier-answers.yml").write_text(
+            "_src_path: gh:quokkify/ci-kit\nhanded_off: [validate, base, security, release, allure, renovate]\n"
+        )
+        self.assertNotIn("CIK-CORE-030", codes(build_plan(repo, drift=False)))
+
 
 class CliTests(unittest.TestCase):
     def run_cli(self, *argv: str, env: dict | None = None) -> tuple[int, str, str]:
