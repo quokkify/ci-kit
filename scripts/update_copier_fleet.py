@@ -2029,8 +2029,10 @@ def push_automation_branch(
         cwd=repository_path,
     )
     run(["git", "add", "--all"], cwd=repository_path)
-    run(["git", "diff", "--cached", "--check"], cwd=repository_path)
-    run(["git", "commit", "-m", message], cwd=repository_path)
+    # A run that only drops empty legacy answers has already committed everything.
+    if run(["git", "diff", "--cached", "--quiet"], cwd=repository_path, check=False).returncode:
+        run(["git", "diff", "--cached", "--check"], cwd=repository_path)
+        run(["git", "commit", "-m", message], cwd=repository_path)
 
     remote = run(
         [*authenticated_git(), "ls-remote", "--heads", "origin", f"refs/heads/{branch}"],
@@ -2145,6 +2147,19 @@ def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[
     rows = run_ci_kit_update(repository_path, template_ref, env=env)
     squash_to_base(repository_path, base)
     return rows
+
+
+def drop_legacy_answers(repository_path: Path) -> None:
+    # The commit reuses the base commit's dates, so rerunning on the same base yields the same
+    # commit and remote_has_same_change still recognizes an unchanged automation branch.
+    date = run(["git", "log", "-1", "--format=%cI"], cwd=repository_path).stdout.strip()
+    run(["git", "rm", "-q", "--", ANSWERS_FILE], cwd=repository_path)
+    run(
+        ["git", "-c", "user.name=quokkify-copier[bot]", "-c", "user.email=quokkify-copier[bot]@users.noreply.github.com",
+         "commit", "-q", "-m", DROP_LEGACY_ANSWERS_TITLE],
+        cwd=repository_path,
+        env={**os.environ, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date},
+    )
 
 
 def git_head(repository_path: Path) -> str:
@@ -2581,17 +2596,17 @@ def process_repository(
     try:
         paths: list[str] = []
         rows: list[dict[str, str]] = []
-        message = PR_TITLE
         if raw_answers is not None:
-            # Every area is handed off, so the legacy answers render nothing: drop them alone.
-            run(["git", "rm", "-q", "--", ANSWERS_FILE], cwd=destination)
+            # Every area is handed off, so the legacy answers render nothing: their deletion is a
+            # commit of its own, and the module update below follows it on the same branch.
+            drop_legacy_answers(destination)
             paths = [ANSWERS_FILE]
-            message = DROP_LEGACY_ANSWERS_TITLE
-        elif modules:
+        if modules:
             if not template_ref:
                 raise FleetUpdateError("module update requires a resolved template ref")
+            primary = "core" if "core" in modules else modules[0]
             rows = apply_module_updates(destination, template_ref, env=env)
-            paths = changed_paths(destination)
+            paths = sorted(set(paths) | set(changed_paths(destination)))
             target = parse_answers(
                 (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
             ).get("_commit")
@@ -2603,7 +2618,7 @@ def process_repository(
             return Result(name, "would-update", ", ".join(paths), inventory)
 
         replaced: list[str] = []
-        head = push_automation_branch(repository, destination, branch=branch, env=env, message=message, replaced=replaced)
+        head = push_automation_branch(repository, destination, branch=branch, env=env, replaced=replaced)
         url = ensure_pull_request(
             repository,
             branch=branch,

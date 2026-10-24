@@ -70,18 +70,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           # ci-kit v4 has no legacy template. Legacy answers that hand every area off render
-          # nothing and are dropped in a commit of their own; legacy answers that still render
-          # files are refused without changes (CIK-CORE-030).
-          message="chore(template): update shared project template"
+          # nothing: their deletion is a commit of its own, and the module update follows on the
+          # same branch. Legacy answers that still render files are refused without changes
+          # (CIK-CORE-030).
+          dropped=false
           if [[ -f .copier-answers.yml ]]; then
             left="$(python - <<'PY'
           from pathlib import Path
           import yaml
 
           areas = ('validate', 'base', 'security', 'release', 'allure', 'renovate')
-          answers = yaml.safe_load(Path('.copier-answers.yml').read_text())
+          try:
+              answers = yaml.safe_load(Path('.copier-answers.yml').read_text())
+          except (OSError, UnicodeDecodeError, yaml.YAMLError):
+              answers = None
           handed = answers.get('handed_off') if isinstance(answers, dict) else None
-          handed = handed if isinstance(handed, list) else []
+          if not isinstance(handed, list) or not all(isinstance(area, str) for area in handed):
+              handed = []
           print(', '.join(area for area in areas if area not in handed))
           PY
           )"
@@ -90,63 +95,64 @@ jobs:
               exit 1
             fi
             git rm -q .copier-answers.yml
-            message="chore(ci-kit): drop empty legacy answers"
-          else
-            # A partial update is never pushed. Conflicts fail the run the same way the fleet
-            # automation fails a repository, so the branch never holds a half-applied template
-            # that a reviewer could mistake for a clean one.
-            mapfile -t rejected < <(find . -name '*.rej' -not -path './.git/*' -print)
-            if (( {% raw %}${#rejected[@]}{% endraw %} )); then
-              printf 'Copier produced conflict files:\n' >&2
-              printf '  %s\n' "${rejected[@]}" >&2
-              exit 1
-            fi
+            git commit -q -m "chore(ci-kit): drop empty legacy answers"
+            dropped=true
+          fi
 
-            # ci-kit update commits every module it updates; the commits are squashed
-            # back into the single update commit below.
-            base="$(git rev-parse HEAD)"
-            update_args=(--repo . --to "$ref")
-            python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"
-            ci-kit update "${update_args[@]}"
-            git reset --soft "$base"
+          # A partial update is never pushed. Conflicts fail the run the same way the fleet
+          # automation fails a repository, so the branch never holds a half-applied template
+          # that a reviewer could mistake for a clean one.
+          mapfile -t rejected < <(find . -name '*.rej' -not -path './.git/*' -print)
+          if (( {% raw %}${#rejected[@]}{% endraw %} )); then
+            printf 'Copier produced conflict files:\n' >&2
+            printf '  %s\n' "${rejected[@]}" >&2
+            exit 1
+          fi
 
-            # Copier deliberately preserves files with local edits, even when the
-            # answers already name this ref. Verify the executable release helper
-            # against the selected template revision on every run, including a
-            # same-ref update. Do not overwrite a consumer customization here.
-            helper=".github/scripts/enrich_release_notes.py"
-            release=false
-            if [[ -f .copier-answers.release.yml ]]; then
-              release=true
-            fi
-            if [[ "$release" == "true" && ! -f "$helper" ]]; then
-              printf 'Refusing template update: %s is missing while the release module is installed. Restore the helper, then rerun.\n' "$helper" >&2
+          # ci-kit update commits every module it updates; the commits are squashed
+          # back into the single update commit below.
+          base="$(git rev-parse HEAD)"
+          update_args=(--repo . --to "$ref")
+          python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"
+          ci-kit update "${update_args[@]}"
+          git reset --soft "$base"
+
+          # Copier deliberately preserves files with local edits, even when the
+          # answers already name this ref. Verify the executable release helper
+          # against the selected template revision on every run, including a
+          # same-ref update. Do not overwrite a consumer customization here.
+          helper=".github/scripts/enrich_release_notes.py"
+          release=false
+          if [[ -f .copier-answers.release.yml ]]; then
+            release=true
+          fi
+          if [[ "$release" == "true" && ! -f "$helper" ]]; then
+            printf 'Refusing template update: %s is missing while the release module is installed. Restore the helper, then rerun.\n' "$helper" >&2
+            exit 1
+          fi
+          if [[ -f "$helper" ]]; then
+            template_helper="$(mktemp)"
+            trap 'rm -f "$template_helper"' EXIT
+            git fetch --quiet --depth=1 https://github.com/quokkify/ci-kit.git \
+              "refs/tags/$ref"
+            git show "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja" \
+              > "$template_helper"
+            if ! cmp -s "$template_helper" "$helper"; then
+              printf 'Refusing template update: %s differs from ci-kit %s. Reconcile this project-owned/customized helper with the template, then rerun.\n' "$helper" "$ref" >&2
               exit 1
-            fi
-            if [[ -f "$helper" ]]; then
-              template_helper="$(mktemp)"
-              trap 'rm -f "$template_helper"' EXIT
-              git fetch --quiet --depth=1 https://github.com/quokkify/ci-kit.git \
-                "refs/tags/$ref"
-              git show "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja" \
-                > "$template_helper"
-              if ! cmp -s "$template_helper" "$helper"; then
-                printf 'Refusing template update: %s differs from ci-kit %s. Reconcile this project-owned/customized helper with the template, then rerun.\n' "$helper" "$ref" >&2
-                exit 1
-              fi
             fi
           fi
 
           # Stage before checking for changes so Copier-created untracked files
           # are included in the no-op decision.
           git add --all
-          if git diff --cached --quiet; then
+          if ! git diff --cached --quiet; then
+            git diff --cached --check
+            git commit -m "chore(template): update shared project template"
+          elif [[ "$dropped" != true ]]; then
             printf 'Already up to date with %s; nothing to push.\n' "$ref" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-
-          git diff --cached --check
-          git commit -m "$message"
 
           remote="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"
           if [[ -n "$remote" ]]; then

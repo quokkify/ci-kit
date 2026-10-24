@@ -102,7 +102,7 @@ def legacy_areas_left(raw: str) -> list[str]:
     return [area for area in LEGACY_AREAS if area not in handed]
 
 
-def _legacy_answers_findings(repo: Path) -> list[Finding]:
+def legacy_answers_findings(repo: Path) -> list[Finding]:
     path = repo / LEGACY_ANSWERS
     if not path.exists():
         return []
@@ -186,7 +186,7 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
             module_names.add(name)
 
     findings.extend(_version_findings(repo, answers))
-    findings.extend(_legacy_answers_findings(repo))
+    findings.extend(legacy_answers_findings(repo))
 
     modules = sorted(loaded)
     module_owned: set[str] = set()

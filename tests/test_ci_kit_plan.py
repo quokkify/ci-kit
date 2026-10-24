@@ -338,6 +338,19 @@ class CliTests(unittest.TestCase):
         code, _, _ = self.run_cli("plan", "--repo", str(repo))
         self.assertEqual(code, 1)
 
+    def test_update_and_doctor_refuse_core_030_before_touching_the_tree(self):
+        repo = rendered_repo("core")
+        (repo / ".copier-answers.yml").write_text("_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\n")
+        before = {path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}
+        with mock.patch("ci_kit.update.subprocess.run", side_effect=AssertionError("must not run copier or git")):
+            code, out, _ = self.run_cli("update", "--repo", str(repo), "--to", "v99.0.0")
+        self.assertEqual(code, 1)
+        self.assertEqual([line.split()[0] for line in out.splitlines()], ["CIK-CORE-030"])
+        self.assertEqual({path: path.read_bytes() for path in repo.rglob("*") if path.is_file()}, before)
+        code, out, _ = self.run_cli("doctor", "--repo", str(repo), "--template-src", str(shared_template_repo()))
+        self.assertEqual(code, 1)
+        self.assertIn("CIK-CORE-030", out)
+
     def test_cli_has_no_migrate(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:

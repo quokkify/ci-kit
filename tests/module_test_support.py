@@ -39,7 +39,7 @@ def hide_legacy_exit_finding() -> None:
     import unittest
     from unittest import mock
 
-    patcher = mock.patch("ci_kit.plan._legacy_answers_findings", return_value=[])
+    patcher = mock.patch("ci_kit.plan.legacy_answers_findings", return_value=[])
     patcher.start()
     unittest.addModuleCleanup(patcher.stop)
 

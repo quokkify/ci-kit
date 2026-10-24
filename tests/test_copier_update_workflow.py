@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import shutil
@@ -247,12 +248,14 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
 
     def fake_tools(self, temporary: Path) -> Path:
         bin_dir = super().fake_tools(temporary)
+        update = "" if getattr(self, "ci_kit_noop", False) else (
+            "printf 'module update\\n' > .ci-kit-updated\n"
+            "git add --all && git -c user.name=t -c user.email=t@example.com commit -q -m 'chore(ci-kit): update core'\n"
+        )
         (bin_dir / "ci-kit").write_text(
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
-            "printf '%s\\n' \"$*\" >> \"$CI_KIT_LOG\"\n"
-            "printf 'module update\\n' > .ci-kit-updated\n"
-            "git add --all && git -c user.name=t -c user.email=t@example.com commit -q -m 'chore(ci-kit): update core'\n",
+            "printf '%s\\n' \"$*\" >> \"$CI_KIT_LOG\"\n" + update,
             encoding="utf-8",
         )
         (bin_dir / "python").write_text(
@@ -295,44 +298,78 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
             self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
             self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "3")
 
-    def legacy_checkout(self, temporary: Path, handed_off: list[str]) -> tuple[Path, Path]:
+    def legacy_checkout(self, temporary: Path, answers: str) -> tuple[Path, Path]:
         checkout, bare = self.module_checkout(temporary)
-        (checkout / ".copier-answers.yml").write_text(
-            "_src_path: gh:quokkify/ci-kit\nhanded_off:\n" + "".join(f"  - {area}\n" for area in handed_off), encoding="utf-8"
-        )
+        (checkout / ".copier-answers.yml").write_text(answers, encoding="utf-8")
         run_git("add", ".", cwd=checkout)
         run_git("commit", "-m", "legacy answers", cwd=checkout)
         run_git("push", "origin", "HEAD:refs/heads/main", cwd=checkout)
         return checkout, bare
 
+    @staticmethod
+    def handed_off(areas) -> str:
+        return "_src_path: gh:quokkify/ci-kit\nhanded_off:\n" + "".join(f"  - {area}\n" for area in areas)
+
     def test_copier_update_drops_empty_legacy(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             temporary = Path(raw)
-            checkout, bare = self.legacy_checkout(temporary, list(LEGACY_AREAS))
+            checkout, bare = self.legacy_checkout(temporary, self.handed_off(LEGACY_AREAS))
             result = self.execute(checkout, temporary, STABLE)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((temporary / "copier.log").exists())
-            self.assertFalse((temporary / "ci-kit.log").exists())
+            self.assertEqual((temporary / "ci-kit.log").read_text(encoding="utf-8"), "update --repo . --to v2.21.5\n")
             branch = "automation/copier-template-update"
-            self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", f"main..{branch}", cwd=temporary), "1")
-            self.assertEqual(run_git("--git-dir", str(bare), "log", "-1", "--format=%s", branch, cwd=temporary), "chore(ci-kit): drop empty legacy answers")
-            self.assertEqual(run_git("--git-dir", str(bare), "diff", "--name-status", "main", branch, cwd=temporary), "D\t.copier-answers.yml")
+            git = ("--git-dir", str(bare))
+            drop, update = run_git(*git, "rev-list", "--reverse", f"main..{branch}", cwd=temporary).split()
+            self.assertEqual(run_git(*git, "log", "-1", "--format=%s", drop, cwd=temporary), "chore(ci-kit): drop empty legacy answers")
+            self.assertEqual(run_git(*git, "diff", "--name-status", "main", drop, cwd=temporary), "D\t.copier-answers.yml")
+            self.assertEqual(run_git(*git, "log", "-1", "--format=%s", update, cwd=temporary), "chore(template): update shared project template")
+            self.assertEqual(run_git(*git, "diff", "--name-status", drop, update, cwd=temporary), "A\t.ci-kit-updated")
+
+    def test_copier_update_pushes_the_drop_alone_when_modules_are_current(self) -> None:
+        self.ci_kit_noop = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.legacy_checkout(temporary, self.handed_off(LEGACY_AREAS))
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            branch = "automation/copier-template-update"
+            commits = run_git("--git-dir", str(bare), "log", "--format=%s", f"main..{branch}", cwd=temporary).splitlines()
+            self.assertEqual(commits, ["chore(ci-kit): drop empty legacy answers"])
 
     def test_copier_update_refuses_partial_legacy(self) -> None:
-        for handed_off in (["validate", "base"], []):
-            with self.subTest(handed_off=handed_off), tempfile.TemporaryDirectory() as raw:
+        cases = (
+            self.handed_off(["validate", "base"]),
+            self.handed_off([]),
+            "handed_off: [validate, base, security, release, allure, renovate, 1]\n",
+            "handed_off: validate\n",
+            "handed_off: [validate\n",
+            "- not a mapping\n",
+        )
+        for answers in cases:
+            with self.subTest(answers=answers), tempfile.TemporaryDirectory() as raw:
                 temporary = Path(raw)
-                checkout, bare = self.legacy_checkout(temporary, handed_off)
+                checkout, bare = self.legacy_checkout(temporary, answers)
                 head = run_git("rev-parse", "HEAD", cwd=checkout)
                 result = self.execute(checkout, temporary, STABLE)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("CIK-CORE-030 legacy answers still render files", result.stderr)
                 self.assertIn("security, release, allure, renovate", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
                 self.assertFalse((temporary / "copier.log").exists())
                 self.assertFalse((temporary / "ci-kit.log").exists())
                 self.assertEqual(run_git("status", "--porcelain", cwd=checkout), "")
                 self.assertEqual(run_git("rev-parse", "HEAD", cwd=checkout), head)
                 self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
+
+    def test_workflow_areas_match_the_plan(self) -> None:
+        sys.path.insert(0, str(ROOT / "tools"))
+        from ci_kit.plan import LEGACY_AREAS as PLAN_AREAS
+
+        match = re.search(r"^areas = (\(.*\))$", self.script, flags=re.MULTILINE)
+        self.assertIsNotNone(match)
+        self.assertEqual(ast.literal_eval(match.group(1)), PLAN_AREAS)
+        self.assertEqual(LEGACY_AREAS, PLAN_AREAS)
 
     def test_release_module_requires_helper(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -387,14 +424,12 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
     def test_module_update_step_is_guarded_and_ordered(self) -> None:
         script = self.script
         guard = script.index("if [[ -f .copier-answers.yml ]]; then")
-        drop = script.index("git rm -q .copier-answers.yml")
-        otherwise = script.index("\nelse\n")
+        drop = script.index('git commit -q -m "chore(ci-kit): drop empty legacy answers"')
         install = script.index('python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"')
         update = script.index('ci-kit update "${update_args[@]}"')
         reset = script.index('git reset --soft "$base"')
         self.assertLess(guard, drop)
-        self.assertLess(drop, otherwise)
-        self.assertLess(otherwise, install)
+        self.assertLess(drop, install)
         self.assertLess(install, update)
         self.assertLess(update, reset)
         self.assertIn('update_args=(--repo . --to "$ref")', script)
@@ -423,7 +458,7 @@ class CoreCopierUpdateWorkflowTests(CopierUpdateWorkflowTests):
         self.assertNotIn("compgen", self.script)
         self.assertNotIn("copier update", self.script)
         self.assertNotIn("--skip-legacy", self.script)
-        self.assertIn("\n  ci-kit update", self.script)
+        self.assertIn("\nci-kit update", self.script)
 
 
 if __name__ == "__main__":

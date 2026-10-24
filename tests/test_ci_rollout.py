@@ -306,6 +306,26 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
                 gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
 
+    def test_pilot_after_dropping_empty_legacy_answers_passes_on_the_target(self):
+        # The v4 fleet run drops a fully handed-off .copier-answers.yml and updates the modules on the
+        # same branch, so the PR head has no legacy answers and core answers on the target.
+        def head(endpoint, *, missing_ok=False):
+            if endpoint.endswith(f".copier-answers.yml?ref={SHA}"):
+                self.assertTrue(missing_ok)
+                return None
+            content = {
+                ".copier-answers.core.yml?": b"_commit: v4.0.0\n_src_path: gh:quokkify/ci-kit\n",
+                ".copier-answers.security.yml?": b"_commit: v4.0.0\ncodeql: true\ngitleaks: true\n",
+            }[next(name for name in (".copier-answers.core.yml?", ".copier-answers.security.yml?") if name in endpoint)]
+            return {"content": base64.b64encode(content).decode()}
+
+        with patch.object(gate, "current_snapshot", return_value=(SHA, OTHER, SHA)), \
+             patch.object(gate, "api", side_effect=head), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", return_value=True) as ready:
+            self.assertEqual(gate.verify_pilot("quokkify/skills", 7, "v4.0.0", 0), SHA)
+            self.assertIn("ci / gate", ready.call_args.args[2])
+
     def test_api_returns_none_only_for_a_confirmed_404(self):
         def failing(stderr):
             return subprocess.CalledProcessError(1, ["gh"], stderr=stderr)

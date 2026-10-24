@@ -2355,7 +2355,6 @@ class RepositoryProcessingTests(TestCase):
         clone_mock.assert_called_once()
         update_mock.assert_called_once()
         push_mock.assert_called_once()
-        self.assertEqual(push_mock.call_args.kwargs["message"], fleet.PR_TITLE)
         pull_request_mock.assert_called_once()
 
     @mock.patch.object(fleet, "ensure_pull_request")
@@ -2645,7 +2644,8 @@ class LegacyAnswersExitTests(TestCase):
         subprocess.run(["git", "clone", "-q", str(bare), str(work)], check=True, capture_output=True)
         materialize_files(files)(None, work, env={})
         subprocess.run(["git", "add", "--all"], cwd=work, check=True)
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "seed"], cwd=work, check=True)
+        seeded = {**os.environ, "GIT_AUTHOR_DATE": "2001-02-03T04:05:06+00:00", "GIT_COMMITTER_DATE": "2001-02-03T04:05:06+00:00"}
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "seed"], cwd=work, check=True, env=seeded)
         subprocess.run(["git", "push", "-q", "origin", "HEAD:refs/heads/main"], cwd=work, check=True)
         base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, check=True, capture_output=True, text=True).stdout.strip()
 
@@ -2655,41 +2655,68 @@ class LegacyAnswersExitTests(TestCase):
 
         return bare, base, clone
 
-    def test_fleet_drops_empty_legacy_answers(self) -> None:
+    @staticmethod
+    def module_update(target: str):
+        def update(repository_path: Path, template_ref: str, *, env: dict[str, str]):
+            del env
+            answers = repository_path / ".copier-answers.core.yml"
+            answers.write_text(answers.read_text().replace("_commit: v3.0.0", f"_commit: {template_ref}"))
+            return [{"module": "core", "from": "v3.0.0", "to": template_ref, "doctor": "ok"}] if template_ref == target else []
+        return update
+
+    def drop_run(self, *, template_ref: str, dry_run: bool = False):
         files = {"legacy": EMPTY_LEGACY_ANSWERS_TEXT, "core": CORE_ANSWERS_TEXT}
         tree = {".copier-answers.yml": EMPTY_LEGACY_ANSWERS_TEXT, ".copier-answers.core.yml": CORE_ANSWERS_TEXT, "README.md": "x\n"}
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            bare, base, clone = self.git_fixture(root, tree)
-            with mock.patch.object(fleet, "update_template") as update_mock, \
-                 mock.patch.object(fleet, "apply_module_updates") as modules_mock, \
-                 mock.patch.object(fleet, "authenticated_git", return_value=["git"]), \
-                 mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
-                result, _ = process(files, dry_run=False, workspace=root / "work", clone=clone)
-            update_mock.assert_not_called()
-            modules_mock.assert_not_called()
-            self.assertEqual((result.status, result.detail), ("pull-request", "https://example.invalid/pr"))
-            self.assertEqual(pr_mock.call_args.kwargs["changed"], [".copier-answers.yml"])
-            branch = fleet.DEFAULT_BRANCH
-            git = ["git", "--git-dir", str(bare)]
-            self.assertEqual(subprocess.run([*git, "rev-list", f"{base}..{branch}"], check=True, capture_output=True, text=True).stdout.count("\n"), 1)
-            self.assertEqual(subprocess.run([*git, "log", "-1", "--format=%s", branch], check=True, capture_output=True, text=True).stdout.strip(),
-                             "chore(ci-kit): drop empty legacy answers")
-            self.assertEqual(subprocess.run([*git, "diff", "--name-status", base, branch], check=True, capture_output=True, text=True).stdout,
-                             "D\t.copier-answers.yml\n")
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        bare, base, clone = self.git_fixture(root, tree)
+        with mock.patch.object(fleet, "update_template") as update_mock, \
+             mock.patch.object(fleet, "apply_module_updates", side_effect=self.module_update("v4.0.0")) as modules_mock, \
+             mock.patch.object(fleet, "authenticated_git", return_value=["git"]), \
+             mock.patch.object(fleet, "ensure_pull_request", return_value="https://example.invalid/pr") as pr_mock:
+            result, _ = process(files, dry_run=dry_run, template_ref=template_ref, workspace=root / "work", clone=clone)
+        update_mock.assert_not_called()
+        modules_mock.assert_called_once()
+        return result, pr_mock, bare, base
+
+    def git_out(self, bare: Path, *args: str) -> str:
+        return subprocess.run(["git", "--git-dir", str(bare), *args], check=True, capture_output=True, text=True).stdout
+
+    def test_fleet_drops_empty_legacy_answers(self) -> None:
+        result, pr_mock, bare, base = self.drop_run(template_ref="v4.0.0")
+        self.assertEqual((result.status, result.detail), ("pull-request", "https://example.invalid/pr"))
+        self.assertEqual(pr_mock.call_args.kwargs["changed"], [".copier-answers.core.yml", ".copier-answers.yml"])
+        branch = fleet.DEFAULT_BRANCH
+        commits = self.git_out(bare, "rev-list", "--reverse", f"{base}..{branch}").split()
+        self.assertEqual(len(commits), 2)
+        self.assertEqual(self.git_out(bare, "log", "-1", "--format=%s", commits[0]).strip(), "chore(ci-kit): drop empty legacy answers")
+        self.assertEqual(self.git_out(bare, "diff", "--name-status", base, commits[0]), "D\t.copier-answers.yml\n")
+        self.assertEqual(self.git_out(bare, "log", "-1", "--format=%s", commits[1]).strip(), fleet.PR_TITLE)
+        # The PR head is what the rollout pilot gate reads: no legacy answers, modules on the target.
+        self.assertNotIn(".copier-answers.yml", self.git_out(bare, "ls-tree", "--name-only", branch).split())
+        self.assertIn("_commit: v4.0.0", self.git_out(bare, "show", f"{branch}:.copier-answers.core.yml"))
+        self.assertEqual(result.inventory.target_commit, "v4.0.0")
+
+    def test_fleet_drop_without_module_changes_pushes_the_drop_commit_alone(self) -> None:
+        result, pr_mock, bare, base = self.drop_run(template_ref="v3.0.0")
+        self.assertEqual(result.status, "pull-request")
+        self.assertEqual(pr_mock.call_args.kwargs["changed"], [".copier-answers.yml"])
+        commits = self.git_out(bare, "rev-list", f"{base}..{fleet.DEFAULT_BRANCH}").split()
+        self.assertEqual(len(commits), 1)
+        self.assertEqual(self.git_out(bare, "log", "-1", "--format=%s", commits[0]).strip(), "chore(ci-kit): drop empty legacy answers")
+
+    def test_fleet_drop_commit_reuses_the_base_dates(self) -> None:
+        # Same base, same drop commit: a rerun does not push a new head over unchanged pilot evidence.
+        _, _, bare, base = self.drop_run(template_ref="v3.0.0")
+        self.assertEqual(self.git_out(bare, "log", "-1", "--format=%cI %aI", fleet.DEFAULT_BRANCH).split(),
+                         [self.git_out(bare, "log", "-1", "--format=%cI", base).strip()] * 2)
 
     def test_fleet_dry_run_reports_the_empty_legacy_answers_drop(self) -> None:
-        files = {"legacy": EMPTY_LEGACY_ANSWERS_TEXT, "core": CORE_ANSWERS_TEXT}
-        tree = {".copier-answers.yml": EMPTY_LEGACY_ANSWERS_TEXT, ".copier-answers.core.yml": CORE_ANSWERS_TEXT}
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _, _, clone = self.git_fixture(root, tree)
-            with mock.patch.object(fleet, "apply_module_updates") as modules_mock, \
-                 mock.patch.object(fleet, "push_automation_branch") as push_mock:
-                result, _ = process(files, workspace=root / "work", clone=clone)
-        modules_mock.assert_not_called()
-        push_mock.assert_not_called()
-        self.assertEqual((result.status, result.detail), ("would-update", ".copier-answers.yml"))
+        result, pr_mock, bare, _ = self.drop_run(template_ref="v4.0.0", dry_run=True)
+        pr_mock.assert_not_called()
+        self.assertEqual((result.status, result.detail), ("would-update", ".copier-answers.core.yml, .copier-answers.yml"))
+        self.assertNotIn(fleet.DEFAULT_BRANCH, self.git_out(bare, "branch", "--list"))
 
     def test_fleet_refuses_partial_legacy(self) -> None:
         files = {"legacy": PARTIAL_LEGACY_ANSWERS_TEXT, "core": CORE_ANSWERS_TEXT}

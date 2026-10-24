@@ -12,6 +12,7 @@ import yaml
 from .drift import RENDER_TIMEOUT, TRUSTED_SRC_RE, _copier
 from .handoff import AREAS, HANDOFF_GATED
 from .modules import MODULES
+from . import plan
 from .plan import Finding, build_plan, discover
 
 LEGACY = "legacy"
@@ -123,6 +124,10 @@ def run_update(
     skip_legacy: bool = False, src_override: str | None = None,
 ) -> tuple[list[ModuleUpdate], list[Finding]]:
     repo = Path(repo).resolve()
+    # v4 does not update legacy answers that still render files; refuse before touching the tree.
+    refused = plan.legacy_answers_findings(repo)
+    if refused:
+        return [], refused
     answers = _answers_files(repo)
     if skip_legacy:
         answers.pop(LEGACY, None)
