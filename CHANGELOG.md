@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.0.0](https://github.com/quokkify/ci-kit/compare/v3.11.2...v4.0.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* module: legacy, template/ and .copier-answers.yml are gone; migrate with ci-kit v3.11.x (docs/errors/CIK-CORE-030.md).
+
+### ✨ Features
+
+* remove the legacy template ([#505](https://github.com/quokkify/ci-kit/issues/505)) ([95bbd52](https://github.com/quokkify/ci-kit/commit/95bbd52e8bdabf2d214377a8af3b53e5a50cde6b))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.178.5 ([#496](https://github.com/quokkify/ci-kit/issues/496)) ([a0561d6](https://github.com/quokkify/ci-kit/commit/a0561d6b3e8f1990e876da1a76598924d95e1eb0))
+
 ## [3.11.2](https://github.com/quokkify/ci-kit/compare/v3.11.1...v3.11.2) (2026-10-23)
 
 
