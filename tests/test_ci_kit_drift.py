@@ -127,8 +127,7 @@ class DriftTests(unittest.TestCase):
         self.assertEqual(set(codes(findings)), {"CIK-CORE-010"})
 
     def test_render_command_is_untrusted_and_separates_args(self):
-        # Copier lets core read the seeded legacy answers inside the resolved destination without --trust;
-        # drift runs on fork pull requests, so the render never trusts the template or runs its tasks.
+        # Drift runs on fork pull requests, so the render never trusts the template or runs its tasks.
         real = subprocess.run
         seen = []
 

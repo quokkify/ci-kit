@@ -13,13 +13,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from ci_kit.handoff import AREAS
-from ci_kit.legacy_answers import module_answers
 from module_test_support import ROOT, mkdtemp, modules_repo, render, render_tree, shared_template_repo
-from test_legacy_module_parity import assert_parity
 
 PIN = "v99.0.0"
-SCENARIOS = ROOT / "tests/scenarios"
 REUSABLE = ROOT / ".github/workflows/codeql-analysis.yml"
 CODEQL = ".github/workflows/codeql.yml"
 GITLEAKS = ".github/workflows/gitleaks.yml"
@@ -29,12 +25,6 @@ def data_file(data: dict) -> Path:
     path = mkdtemp("codeql-data-") / "data.yml"
     path.write_text(yaml.safe_dump(data))
     return path
-
-
-def legacy_tree(scenario: str, overrides: dict | None = None) -> dict[str, bytes]:
-    data = yaml.safe_load((SCENARIOS / f"{scenario}.yml").read_text())
-    data.update({"toolkit_version": PIN, **(overrides or {})})
-    return render_tree(shared_template_repo(), data_file(data))
 
 
 def security_tree(answers: dict) -> dict[str, bytes]:
@@ -109,39 +99,32 @@ def analyze_category(job: dict) -> str:
     return next(step["with"]["category"] for step in job["steps"] if "codeql-action/analyze@" in step.get("uses", ""))
 
 
-def legacy_analyze(tree: dict[str, bytes]) -> dict:
-    return yaml.safe_load(tree[CODEQL])["jobs"]["analyze"]
-
-
 def reusable_analyze() -> dict:
     return yaml.safe_load(REUSABLE.read_text())["jobs"]["analyze"]
 
 
 class CodeqlLanguageTests(unittest.TestCase):
-    def test_codeql_language_parity(self) -> None:
-        checked = 0
-        for path in sorted(SCENARIOS.glob("*.yml")):
-            with self.subTest(scenario=path.stem):
-                legacy = legacy_tree(path.stem)
-                if CODEQL not in legacy:
-                    continue
-                checked += 1
-                answers = yaml.safe_load(legacy[".copier-answers.yml"])
-                security = security_tree(module_answers(answers)["security"])
-                legacy_job = legacy_analyze(legacy)
-                languages = effective_languages(security, answers.get("components") or [])
-                self.assertEqual(len(languages), len(set(languages)))
-                self.assertEqual(set(languages), set(legacy_job["strategy"]["matrix"]["language"]))
-                self.assertEqual(analyze_category(reusable_analyze()), analyze_category(legacy_job))
-        self.assertTrue(checked)
+    def test_codeql_languages_follow_language_modules(self) -> None:
+        security = security_tree({})
+        python = {"type": "python", "id": "app-python", "name": "App Python", "path": "."}
+        node = {"type": "node", "id": "web-node", "name": "Web Node", "path": "web"}
+        java = {"type": "java", "id": "api-java", "name": "Api Java", "path": "api"}
+        cases = (
+            ([python], ["actions", "python"]),
+            ([node], ["actions", "javascript-typescript"]),
+            ([java], ["actions", "java-kotlin"]),
+            ([python, node, java], ["actions", "python", "javascript-typescript", "java-kotlin"]),
+        )
+        for components, expected in cases:
+            with self.subTest(components=[component["type"] for component in components]):
+                self.assertEqual(effective_languages(security, components), expected)
+        self.assertTrue(analyze_category(reusable_analyze()))
 
     def test_override_wins(self) -> None:
         override = ["actions", "go"]
-        legacy = legacy_tree("polyglot", {"codeql_languages": override})
-        answers = yaml.safe_load(legacy[".copier-answers.yml"])
-        security = security_tree(module_answers(answers)["security"])
-        self.assertEqual(effective_languages(security, answers["components"]), override)
-        self.assertEqual(legacy_analyze(legacy)["strategy"]["matrix"]["language"], override)
+        security = security_tree({"codeql_languages": override})
+        components = [{"type": "python", "id": "app-python", "name": "App Python", "path": "."}]
+        self.assertEqual(effective_languages(security, components), override)
         self.assertEqual(select_languages('["go"]', '["actions","python"]'), ["go"])
         self.assertEqual(select_languages("[]", '["actions","python"]'), ["actions", "python"])
 
@@ -214,52 +197,24 @@ class CodeqlLanguageTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("languages", outputs)
 
-    def test_reusable_analyze_matches_legacy(self) -> None:
-        legacy_job = legacy_analyze(legacy_tree("python"))
-        job = reusable_analyze()
-        self.assertEqual(job["name"], legacy_job["name"])
-        self.assertEqual(job["permissions"], legacy_job["permissions"])
-        self.assertEqual(job["timeout-minutes"], legacy_job["timeout-minutes"])
-        self.assertEqual(job["strategy"]["fail-fast"], legacy_job["strategy"]["fail-fast"])
-        self.assertEqual(job["strategy"]["matrix"]["language"], "${{ fromJSON(needs.plan.outputs.languages) }}")
-        codeql_steps = lambda steps: [step for step in steps if "github/codeql-action/" in step.get("uses", "")]
-        self.assertEqual(codeql_steps(job["steps"]), codeql_steps(legacy_job["steps"]))
-        self.assertEqual(job["steps"][0]["with"], legacy_job["steps"][0]["with"])
-
-    def test_caller_keeps_legacy_triggers(self) -> None:
-        legacy = yaml.safe_load(legacy_tree("python")[CODEQL])
+    def test_caller_delegates_to_the_reusable_analysis(self) -> None:
         caller = yaml.safe_load(security_tree({})[CODEQL])
-        for key in ("name", True, "permissions", "concurrency"):
-            self.assertEqual(caller[key], legacy[key])
         self.assertEqual(caller["jobs"]["codeql"]["uses"], f"quokkify/ci-kit/.github/workflows/codeql-analysis.yml@{PIN}")
-        self.assertEqual(caller["jobs"]["codeql"]["permissions"], legacy["jobs"]["analyze"]["permissions"])
+        self.assertEqual(caller["jobs"]["codeql"]["permissions"], reusable_analyze()["permissions"])
         self.assertEqual(caller["jobs"]["codeql"]["with"], {"languages-override": "[]"})
 
 
 class SecurityModuleTests(unittest.TestCase):
-    def test_gitleaks_parity(self) -> None:
-        scenarios = [path.stem for path in sorted(SCENARIOS.glob("*.yml")) if yaml.safe_load(path.read_text()).get("gitleaks", True)]
-        self.assertTrue(scenarios)
-        for scenario in scenarios:
-            with self.subTest(scenario=scenario):
-                assert_parity("security", "security", scenario, exclude={CODEQL})
-
     def test_security_flags(self) -> None:
-        base = {".copier-answers.yml", ".ci/modules/security.yml"}
+        base = {".copier-answers.security.yml", ".ci/modules/security.yml"}
         cases = (
             ({"codeql": False, "gitleaks": True}, base | {GITLEAKS}),
             ({"codeql": True, "gitleaks": False}, base | {CODEQL}),
-            ({}, base | set(AREAS["security"].legacy_paths)),
+            ({}, base | {CODEQL, GITLEAKS}),
         )
         for answers, expected in cases:
             with self.subTest(answers=answers):
                 self.assertEqual(set(security_tree(answers)), expected)
-
-    def test_module_answers_security(self) -> None:
-        legacy = {"codeql": True, "gitleaks": False, "codeql_languages": ["go"], "components": []}
-        self.assertEqual(module_answers(legacy)["security"], {"codeql": True, "gitleaks": False, "codeql_languages": ["go"]})
-        self.assertEqual(module_answers({"codeql": False, "gitleaks": True})["security"], {"codeql": False, "gitleaks": True})
-        self.assertNotIn("security", module_answers({"codeql": False, "gitleaks": False}))
 
     def test_reusable_codeql_actionlint(self) -> None:
         self.assertIsNotNone(shutil.which("actionlint"), "actionlint is required for workflow linting")

@@ -41,7 +41,7 @@ shards do not cover every suite once or when a weight names a missing suite, and
 `python scripts/validate.py --skip-suites` skips the runner for jobs that shard it.
 
 CodeQL scans toolkit scripts, tests, shipped actions, and executable workflows.
-The Actions analysis also renders all `tests/scenarios/*.yml` from the current
+The Actions analysis also renders all `tests/scenarios/modules/*.yml` from the current
 working tree before initialization. Generated YAML is temporarily placed under
 `.github/workflows/codeql-generated-*` for extraction; raw Jinja files are not
 workflow evidence. This rendering does not execute template tasks or extensions.

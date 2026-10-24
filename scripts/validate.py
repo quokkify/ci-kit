@@ -8,14 +8,12 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 import tomllib
 import urllib.error
 import urllib.request
-import zipfile
 from pathlib import Path
 
 import yaml
@@ -1106,8 +1104,8 @@ def codeql_runner_workflow_errors(path: Path) -> list[str]:
 
 
 RENOVATE_SCHEMA = "https://docs.renovatebot.com/renovate-schema.json"
-# Legacy and module templates both ship toolkit-owned workflows.
-TEMPLATE_WORKFLOW_SOURCES = (ROOT / "template/.github/workflows", *sorted(ROOT.glob("modules/*/template/.github/workflows")))
+# Module templates ship the toolkit-owned workflows.
+TEMPLATE_WORKFLOW_SOURCES = tuple(sorted(ROOT.glob("modules/*/template/.github/workflows")))
 # The API endpoint rather than raw.githubusercontent.com: raw is CDN-cached for
 # several minutes, which would fail this check against a preset that was already
 # updated. Authorization is attached when a token is present so CI is not subject
@@ -1208,7 +1206,7 @@ def assert_generated_renovate_config(path: Path, expected_extends: list[str], la
 
 
 for path in sorted([*ROOT.rglob("*.yml"), *ROOT.rglob("*.yaml")]):
-    if ".git" in path.parts or path.is_relative_to(ROOT / "template"):
+    if ".git" in path.parts:
         continue
     try:
         yaml.safe_load(path.read_text())
@@ -1967,721 +1965,69 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     run(["git", "config", "core.hooksPath", "/dev/null"], template_source)
     run(["git", "add", "."], template_source)
     run(["git", "commit", "--no-verify", "-qm", "candidate template"], template_source)
-    expected_scenario_presets = {
-        "python": ["default", "github-actions", "python"],
-        "node": ["default", "github-actions", "javascript"],
-        "java": ["default", "github-actions", "java"],
-        "polyglot": ["default", "github-actions", "python", "javascript", "java"],
-        "same-type": ["default", "github-actions", "python"],
-        "allure-polyglot": ["default", "github-actions", "python", "javascript", "java"],
-        "allure-pages": ["default", "github-actions", "python"],
-        "allure-external": ["default", "github-actions"],
-        "wave1-release": ["default", "github-actions"],
-        "allure-component-less-default": ["default", "github-actions"],
-        "docker": ["default", "github-actions", "python", "docker"],
-    }
-    for scenario, expected_presets in expected_scenario_presets.items():
-        dest = tmp_path / scenario
-        run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data-file",
-                str(template_source / f"tests/scenarios/{scenario}.yml"),
-                str(template_source),
-                str(dest),
-            ]
+
+    def copy_module(module: str, dest: Path, data: dict[str, object] | None = None, *, check_result: bool = True) -> subprocess.CompletedProcess[str]:
+        """Render one module into dest with Copier, answers passed through a data file."""
+        data_file = tmp_path / f"{dest.name}-{module}-data.yml"
+        data_file.write_text(yaml.safe_dump(data or {}), encoding="utf-8")
+        command = [
+            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
+            "-a", f".copier-answers.{module}.yml", "-d", f"module={module}",
+            "--data-file", str(data_file), str(template_source), str(dest),
+        ]
+        result = subprocess.run(command, text=True, capture_output=True, check=False)
+        if check_result and result.returncode:
+            ERRORS.append(f"copier render of module {module} failed: {(result.stderr or result.stdout).strip()}")
+        return result
+
+    for owned in ("/README.md", ".github/renovate.json"):
+        check(
+            owned in skip_if_exists,
+            f"copier.yml must keep {owned} in _skip_if_exists so an update never "
+            "overwrites a file the project owns",
         )
-        if scenario == "allure-external":
-            external_workflow = dest / ".github/workflows/test.yml"
-            external_workflow.write_text(
-                "name: Run tests\n"
-                "on: [pull_request]\n"
-                "permissions:\n"
-                "  contents: read\n"
-                "jobs:\n"
-                "  test:\n"
-                "    runs-on: ubuntu-latest\n"
-                "    steps:\n"
-                "      - run: echo fixture\n",
-                encoding="utf-8",
-            )
-            categories = dest / ".github/allure/categories.json"
-            categories.parent.mkdir(parents=True, exist_ok=True)
-            categories.write_text("[]\n", encoding="utf-8")
-        for generated_workflow in sorted((dest / ".github/workflows").glob("*.yml")):
-            if generated_workflow.name == "allure-report.yml":
-                continue
+
+    # Every workflow a module scenario renders must pass actionlint.
+    for scenario in sorted((template_source / "tests/scenarios/modules").glob("*.yml")):
+        dest = tmp_path / f"scenario-{scenario.stem}"
+        for module, answers in (yaml.safe_load(scenario.read_text()) or {}).items():
+            copy_module(module, dest, answers)
+        workflows = sorted((dest / ".github/workflows").glob("*.yml"))
+        check(bool(workflows), f"{scenario.name}: no workflows rendered")
+        for generated_workflow in workflows:
             run([actionlint, str(generated_workflow)])
-        allure_workflow_path = dest / ".github/workflows/allure-report.yml"
-        allure_config_path = dest / ".github/allure/allurerc.mjs"
-        allure_extractor_path = dest / ".github/allure/safe_extract.py"
-        if scenario.startswith("allure-"):
-            run([actionlint, str(allure_workflow_path)])
-            check(allure_config_path.is_file(), f"{scenario}: missing Allure 3 config")
-            if allure_config_path.is_file():
-                run(["node", "--check", str(allure_config_path)])
-            resolver_script = yaml.safe_load(ALLURE_WORKFLOW.read_text())["jobs"]["resolve"]["steps"][0]["with"]["script"]
-            resolver_script_path = tmp_path / f"{scenario}-resolver.js"
-            resolver_script_path.write_text(f"async function main() {{\n{resolver_script}\n}}\n", encoding="utf-8")
-            run(["node", "--check", str(resolver_script_path)])
-            check(allure_extractor_path.is_file(), f"{scenario}: missing bounded ZIP extractor")
-            if allure_extractor_path.is_file():
-                run([sys.executable, "-m", "py_compile", str(allure_extractor_path)])
-            allure_workflow = yaml.safe_load(allure_workflow_path.read_text())
-            allure_triggers = allure_workflow.get("on", allure_workflow.get(True))
-            expected_source_workflows = ["Validate", "Run tests"] if scenario == "allure-external" else ["Validate"]
-            check(
-                allure_triggers
-                == {"workflow_run": {"workflows": expected_source_workflows, "types": ["completed"]}},
-                f"{scenario}: report workflow has the wrong source workflow trigger",
-            )
-            check(
-                allure_workflow.get("permissions") == {},
-                f"{scenario}: workflow-level permissions must remain empty",
-            )
-            caller_jobs = allure_workflow.get("jobs", {})
-            caller = caller_jobs.get("report", {})
-            check(set(caller_jobs) == ({"report", "pages"} if scenario == "allure-pages" else {"report"})
-                  and caller.get("uses") == "quokkify/ci-kit/.github/workflows/allure-publisher-core.yml@v1.0.0"
-                  and caller.get("permissions") == {"actions": "read", "contents": "read", "pull-requests": "write"}
-                  and all("steps" not in job and "secrets" not in job for job in caller_jobs.values()),
-                  f"{scenario}: generated caller must delegate without broad token secrets")
-            jobs = yaml.safe_load(ALLURE_WORKFLOW.read_text())["jobs"]
-            if scenario == "allure-pages":
-                jobs["pages"] = yaml.safe_load(ALLURE_PAGES_WORKFLOW.read_text())["jobs"]["pages"]
-                check(caller_jobs["pages"].get("uses") == "quokkify/ci-kit/.github/workflows/allure-pages.yml@v1.0.0"
-                      and caller_jobs["pages"].get("permissions") == {"actions": "read", "contents": "write", "pull-requests": "read"},
-                      "allure-pages: only the separate Pages call may grant contents:write")
-            check(
-                jobs.get("resolve", {}).get("permissions")
-                == {"actions": "read", "contents": "read", "pull-requests": "read"},
-                f"{scenario}: resolver permissions are not read-only",
-            )
-            resolve_condition = jobs.get("resolve", {}).get("if", "")
-            check(
-                "github.event.workflow_run.event == 'pull_request'" in resolve_condition
-                and 'fromJSON(\'["success","failure","neutral","timed_out"]\')'
-                in resolve_condition
-                and "github.event.workflow_run.conclusion" in resolve_condition,
-                f"{scenario}: resolver does not allowlist reportable source conclusions",
-            )
-            check(
-                jobs.get("generate", {}).get("permissions")
-                == {"actions": "read", "contents": "read"},
-                f"{scenario}: untrusted report generation has write permissions",
-            )
-            check(
-                jobs.get("comment", {}).get("permissions")
-                == {"actions": "read", "pull-requests": "write"},
-                f"{scenario}: comment job permissions are not narrowly scoped",
-            )
-            write_content_jobs = [
-                name
-                for name, job in jobs.items()
-                if isinstance(job, dict)
-                and job.get("permissions", {}).get("contents") == "write"
-            ]
-            check(
-                write_content_jobs == (["pages"] if scenario == "allure-pages" else []),
-                f"{scenario}: only the opt-in Pages job may receive contents:write",
-            )
-            caller_text = allure_workflow_path.read_text()
-            report_text = ALLURE_WORKFLOW.read_text() + (ALLURE_PAGES_WORKFLOW.read_text() if scenario == "allure-pages" else "")
-            pr_number_script_steps = []
-            for job_name in ("comment", "pages"):
-                for step in jobs.get(job_name, {}).get("steps", []):
-                    script = step.get("with", {}).get("script", "")
-                    if "const prNumber" in script:
-                        pr_number_script_steps.append(step)
-            check(
-                len(pr_number_script_steps) == (3 if scenario == "allure-pages" else 1)
-                and all(
-                    step.get("env", {}).get("PR_NUMBER")
-                    in ("${{ needs.resolve.outputs.pr-number }}", "${{ inputs.pr-number }}")
-                    and "const prNumber = Number(process.env.PR_NUMBER);"
-                    in step.get("with", {}).get("script", "")
-                    and "${{ needs.resolve.outputs.pr-number }}"
-                    not in step.get("with", {}).get("script", "")
-                    for step in pr_number_script_steps
-                ),
-                f"{scenario}: PR number is interpolated directly into a github-script body",
-            )
-            check(
-                "ref: ${{ github.sha }}" in report_text
-                and "github.event.repository.default_branch" not in report_text,
-                f"{scenario}: report config is not pinned to the downstream default-branch SHA",
-            )
-            extractor_text = allure_extractor_path.read_text()
-            external_allure = scenario == "allure-external"
-            preflight_jobs = (jobs["download"], jobs.get("pages", {"steps": []}))
-            check(
-                all(
-                    "actions/download-artifact@" not in str(step.get("uses", ""))
-                    for job in preflight_jobs
-                    for step in job.get("steps", [])
-                )
-                and "artifact_manifest" in report_text
-                and "${{ runner.temp }}/allure-archives" in report_text
-                and "${{ runner.temp }}/allure-expanded" in report_text
-                and "MATERIALIZE_ROOT: ${{ github.workspace }}/${{ needs.resolve.outputs.materialize-root }}"
-                in report_text
-                and "python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja" in report_text
-                and "repository: ${{ job.workflow_repository }}" in report_text
-                and "ref: ${{ job.workflow_sha }}" in report_text,
-                f"{scenario}: source or Pages ZIPs are extracted before bounded preflight",
-            )
-            check(
-                "workflow_run.pull_requests[0]" not in report_text
-                and "Expected exactly one current open PR" in report_text
-                and "A newer source workflow run exists" in report_text,
-                f"{scenario}: PR resolution or stale-run suppression is incomplete",
-            )
-            check(
-                "preflight_eocd" in extractor_text
-                and "MAX_CENTRAL_DIRECTORY" in extractor_text
-                and "MAX_UNCOMPRESSED" in extractor_text
-                and "duplicate artifact path" in extractor_text
-                and 'pull.user?.login === "dependabot[bot]"' in report_text,
-                f"{scenario}: pre-extraction collision and resource bounds are missing",
-            )
-            artifact_names = ["allure-results-app-python"]
-            if scenario == "allure-polyglot":
-                artifact_names = [
-                    "allure-results-backend-python",
-                    "allure-results-frontend-node",
-                    "allure-results-worker-java",
-                ]
-            if scenario == "allure-external":
-                artifact_names = ["external-allure-one", "external-allure-two"]
-                configured = caller["with"]
-                check('workflows: [Validate, "Run tests"]' in caller_text
-                      and configured.get("source-workflow") == "Run tests"
-                      and configured.get("source-workflow-path") == ".github/workflows/test.yml"
-                      and configured.get("artifact-mode") == "external"
-                      and configured.get("artifact-prefix") == "external-allure-"
-                      and configured.get("minimum-artifacts") == 2
-                      and configured.get("maximum-artifacts") == 7
-                      and configured.get("skip-empty-artifacts") is True
-                      and configured.get("categories-file") == ".github/allure/categories.json",
-                      "allure-external: rendered source workflow or bounded artifact contract is incomplete")
-            elif scenario == "allure-component-less-default":
-                configured = caller["with"]
-                check(configured.get("artifact-mode") == "external"
-                      and configured.get("source-workflow") == "Validate"
-                      and configured.get("source-workflow-path") == ".github/workflows/validate.yml"
-                      and configured.get("artifact-prefix") == "allure-results-"
-                      and configured.get("minimum-artifacts") == 1
-                      and configured.get("maximum-artifacts") == 50,
-                      f"{scenario}: default external source artifact contract is incomplete")
-            else:
-                check(caller["with"].get("artifact-mode") == "component"
-                      and caller["with"].get("source-workflow") == "Validate"
-                      and caller["with"].get("source-workflow-path") == ".github/workflows/validate.yml"
-                      and "const sourceArtifactContractVersion = 1" in report_text
-                      and "const componentArtifactPattern = /^allure-results-[A-Za-z_][A-Za-z0-9_-]*$/" in report_text,
-                      f"{scenario}: migration-safe source artifact contract is missing")
-            check('source-artifacts-directory: ${{ needs.resolve.outputs.source-artifacts-directory }}' in report_text
-                  and 'const materializeRoot = componentMode ? ".allure-input/results" : ".allure-input/source-artifacts";' in report_text
-                  and "allureArtifacts.map((artifact) => ({" in report_text,
-                  f"{scenario}: stable Allure source materialization contract is missing")
-            if scenario == "allure-polyglot":
-                probe_root = tmp_path / "allure-zip-probe"
-                fixture_archives = probe_root / "fixtures"
-                archive_root = probe_root / "downloaded"
-                output_root = probe_root / "output"
-                materialized_root = dest / ".allure-input" / "results"
-                fixture_archives.mkdir(parents=True)
-                manifest = [
-                    {"name": artifact_name, "id": index}
-                    for index, artifact_name in enumerate(artifact_names, 1)
-                ]
-
-                def write_archives(files_by_artifact: dict[str, dict[str, str]]) -> None:
-                    shutil.rmtree(fixture_archives, ignore_errors=True)
-                    fixture_archives.mkdir(parents=True)
-                    for artifact_name, files in files_by_artifact.items():
-                        with zipfile.ZipFile(
-                            fixture_archives / f"{artifact_name}.zip",
-                            "w",
-                            compression=zipfile.ZIP_DEFLATED,
-                        ) as bundle:
-                            for relative, content in files.items():
-                                bundle.writestr(relative, content)
-
-                extract_env = dict(
-                    os.environ,
-                    ARTIFACT_MANIFEST=json.dumps(manifest),
-                    ARTIFACT_ARCHIVE_DIR=str(fixture_archives),
-                    ARCHIVE_ROOT=str(archive_root),
-                    OUTPUT_ROOT=str(output_root),
-                    MATERIALIZE_ROOT=str(materialized_root),
-                    GITHUB_WORKSPACE=str(dest),
-                )
-                valid_files = {
-                    artifact_name: {f"{artifact_name}.json": "{}"}
-                    for artifact_name in artifact_names
-                }
-                write_archives(valid_files)
-                run([sys.executable, str(allure_extractor_path)], dest, extract_env)
+        for name in ("README.md", "docs/ci-kit.md"):
+            generated = dest / name
+            check(generated.is_file(), f"{scenario.name}: core did not render {name}")
+            if generated.is_file():
+                text = generated.read_text()
                 check(
-                    {path.name for path in materialized_root.iterdir()}
-                    == {f"{artifact_name}.json" for artifact_name in artifact_names},
-                    "allure-polyglot: bounded ZIP merge omitted expected files",
+                    not text.endswith("\n\n") and "{%" not in text and "{{" not in text,
+                    f"{scenario.name}: {name} has unrendered Jinja or a trailing blank line",
                 )
 
-                shutil.rmtree(materialized_root.parent)
-                external_target = probe_root / "must-stay-empty"
-                external_target.mkdir()
-                materialized_root.parent.symlink_to(external_target, target_is_directory=True)
-                materialization_probe = subprocess.run(
-                    [sys.executable, str(allure_extractor_path)],
-                    cwd=dest,
-                    env=extract_env,
-                    text=True,
-                    capture_output=True,
-                )
-                check(
-                    materialization_probe.returncode != 0
-                    and "unsafe workspace ancestor" in materialization_probe.stderr
-                    and not any(external_target.iterdir()),
-                    "allure-polyglot: validated materialization followed a workspace symlink",
-                )
-                materialized_root.parent.unlink()
+    renovate_cases: tuple[tuple[str, dict[str, object], str, list[str]], ...] = (
+        ("renovate-default", {}, "quokkify/renovate-presets", ["default", "github-actions", "python"]),
+        ("custom-renovate-all", {
+            "renovate_config_repository": "acme/shared-renovate",
+            "renovate_presets": ["default", "python", "javascript", "java", "docker", "github-actions"],
+        }, "acme/shared-renovate", ["default", "python", "javascript", "java", "docker", "github-actions"]),
+        ("custom-renovate-dotted-repo", {
+            "renovate_config_repository": "acme/renovate.presets",
+            "renovate_presets": ["default"],
+        }, "acme/renovate.presets", ["default"]),
+        ("custom-renovate-selected", {
+            "renovate_config_repository": "acme/shared-renovate",
+            "renovate_presets": ["default", "docker"],
+        }, "acme/shared-renovate", ["default", "docker"]),
+    )
+    for label, data, repository, presets in renovate_cases:
+        dest = tmp_path / label
+        copy_module("renovate", dest, data)
+        assert_generated_renovate_config(dest / ".github/renovate.json", renovate_extends(repository, presets), label)
 
-                collision_files = dict(valid_files)
-                collision_files[artifact_names[0]] = {"collision.json": "{}"}
-                collision_files[artifact_names[1]] = {"collision.json": "{}"}
-                write_archives(collision_files)
-                collision_probe = subprocess.run(
-                    [sys.executable, str(allure_extractor_path)],
-                    cwd=dest,
-                    env=extract_env,
-                    text=True,
-                    capture_output=True,
-                )
-                check(
-                    collision_probe.returncode != 0
-                    and "duplicate artifact path: collision.json" in collision_probe.stderr,
-                    "allure-polyglot: duplicate ZIP paths were not rejected before extraction",
-                )
-
-                traversal_files = dict(valid_files)
-                traversal_files[artifact_names[0]] = {"../escape.json": "{}"}
-                write_archives(traversal_files)
-                traversal_probe = subprocess.run(
-                    [sys.executable, str(allure_extractor_path)],
-                    cwd=dest,
-                    env=extract_env,
-                    text=True,
-                    capture_output=True,
-                )
-                check(
-                    traversal_probe.returncode != 0
-                    and "unsafe path in artifact ZIP" in traversal_probe.stderr,
-                    "allure-polyglot: ZIP path traversal was not rejected",
-                )
-
-                write_archives(valid_files)
-                symlink_archive = fixture_archives / f"{artifact_names[0]}.zip"
-                with zipfile.ZipFile(symlink_archive, "w") as bundle:
-                    symlink = zipfile.ZipInfo("link.json")
-                    symlink.create_system = 3
-                    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
-                    bundle.writestr(symlink, "target.json")
-                symlink_probe = subprocess.run(
-                    [sys.executable, str(allure_extractor_path)],
-                    cwd=dest,
-                    env=extract_env,
-                    text=True,
-                    capture_output=True,
-                )
-                check(
-                    symlink_probe.returncode != 0
-                    and "non-regular ZIP entry rejected" in symlink_probe.stderr,
-                    "allure-polyglot: ZIP symlink was not rejected before extraction",
-                )
-
-                write_archives(valid_files)
-                oversized_archive = fixture_archives / f"{artifact_names[0]}.zip"
-                archive_bytes = bytearray(oversized_archive.read_bytes())
-                central_header = archive_bytes.index(b"PK\x01\x02")
-                archive_bytes[central_header + 24 : central_header + 28] = (1073741825).to_bytes(
-                    4, "little"
-                )
-                oversized_archive.write_bytes(archive_bytes)
-                shutil.rmtree(output_root, ignore_errors=True)
-                shutil.rmtree(materialized_root, ignore_errors=True)
-                oversized_probe = subprocess.run(
-                    [sys.executable, str(allure_extractor_path)],
-                    cwd=dest,
-                    env=extract_env,
-                    text=True,
-                    capture_output=True,
-                )
-                check(
-                    oversized_probe.returncode != 0
-                    and (
-                        "artifact entry exceeds 256 MiB" in oversized_probe.stderr
-                        or "pre-extraction file-count or 1 GiB limits" in oversized_probe.stderr
-                    )
-                    and not output_root.exists()
-                    and not materialized_root.exists(),
-                    "allure-polyglot: declared ZIP bomb was not rejected before extraction",
-                )
-            check(caller["with"].get("publish-pages") == (scenario == "allure-pages")
-                  and caller["with"].get("managed-pages-layout") is True
-                  and ("pages" in caller_jobs) == (scenario == "allure-pages"),
-                  f"{scenario}: Pages publishing does not match the Copier answers")
-            if scenario == "allure-pages":
-                check(caller["with"].get("pages-url") == "https://quokkify.github.io/fixture-allure-pages"
-                      and caller_jobs["pages"]["with"].get("pages-destination-directory")
-                      == "${{ format('allure/pr-{0}', needs.report.outputs.pr-number) }}"
-                      and "format('{0}/allure/pr-{1}/allure-report/'" in report_text,
-                      "allure-pages: commented report URL does not address the published report directory")
-
-        else:
-            check(not allure_workflow_path.exists(), f"{scenario}: Allure workflow generated while disabled")
-            check(not allure_config_path.exists(), f"{scenario}: Allure config generated while disabled")
-            check(not allure_extractor_path.exists(), f"{scenario}: Allure extractor generated while disabled")
-        generated_readme = (dest / "README.md").read_text()
-        check(
-            not generated_readme.endswith("\n\n"),
-            f"{scenario}: README has a trailing blank line that blocks Copier rollout",
-        )
-        onboarding_path = dest / "docs/ci-kit.md"
-        check(onboarding_path.is_file(), f"{scenario}: missing docs/ci-kit.md onboarding guide")
-        if onboarding_path.is_file():
-            onboarding = onboarding_path.read_text()
-            check(
-                not onboarding.endswith("\n\n") and "{%" not in onboarding and "{{" not in onboarding,
-                f"{scenario}: onboarding guide has unrendered Jinja or a trailing blank line",
-            )
-            check(
-                ("allure-report.yml" in onboarding) == scenario.startswith("allure-"),
-                f"{scenario}: onboarding guide Allure row does not match the Copier answers",
-            )
-        for owned in ("/README.md", ".github/renovate.json"):
-            check(
-                owned in skip_if_exists,
-                f"copier.yml must keep {owned} in _skip_if_exists so an update never "
-                "overwrites a file the project owns",
-            )
-        check(
-            (dest / ".copier-answers.yml").exists(),
-            f"{scenario}: missing .copier-answers.yml",
-        )
-        assert_generated_renovate_config(
-            dest / ".github/renovate.json",
-            renovate_extends("quokkify/renovate-presets", expected_presets),
-            scenario,
-        )
-        if scenario == "python":
-            run(["git", "init", "-q"], dest)
-            run(["git", "config", "user.email", "fixture@example.invalid"], dest)
-            run(["git", "config", "user.name", "Fixture"], dest)
-            run(["git", "config", "commit.gpgsign", "false"], dest)
-            run(["git", "config", "core.hooksPath", "/dev/null"], dest)
-            run(["git", "add", "."], dest)
-            run(["git", "commit", "--no-verify", "-qm", "fixture"], dest)
-            run([copier, "update", "--trust", "--defaults"], dest)
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=dest, text=True
-            )
-            check(status == "", f"copier update was not idempotent: {status}")
-            answers = yaml.safe_load((dest / ".copier-answers.yml").read_text())
-            check(
-                answers.get("renovate_config_repository")
-                == "quokkify/renovate-presets",
-                "copier update did not persist renovate_config_repository",
-            )
-            check(
-                answers.get("renovate_presets") == ["default", "github-actions", "python"],
-                "copier update did not persist inferred renovate_presets",
-            )
-
-    invalid_component_cases = {
-        "duplicate-id": [{"type": "python", "path": ".", "id": "same", "name": "One"}, {"type": "node", "path": ".", "id": "same", "name": "Two"}],
-        "invalid-id": [{"type": "python", "path": ".", "id": "bad.id", "name": "Application"}],
-        "empty-name": [{"type": "python", "path": ".", "id": "app-python", "name": "  "}],
-        "reserved-id": [{"type": "python", "path": ".", "id": "docker", "name": "Application"}],
-        "missing-required-fields": [{"type": "python", "path": "."}],
-    }
-    for reserved_id in (
-        "template-contract", "docker", "release", "update", "scan", "analyze",
-        "resolve", "generate", "comment", "pages", "changes", "integration",
-    ):
-        invalid_component_cases[f"reserved-{reserved_id}"] = [
-            {"type": "python", "path": ".", "id": reserved_id, "name": "Application"}
-        ]
-    for case_name, invalid_components in invalid_component_cases.items():
-        invalid_data = tmp_path / f"{case_name}.yml"
-        invalid_data.write_text(yaml.safe_dump({"components": invalid_components}))
-        invalid_result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data-file",
-                str(invalid_data),
-                str(template_source),
-                str(tmp_path / case_name),
-            ],
-            text=True,
-            capture_output=True,
-        )
-        check(
-            invalid_result.returncode != 0,
-            f"{case_name}: invalid component configuration was accepted",
-        )
-
-    config_only_data = tmp_path / "config-only.yml"
-    config_only_data.write_text(
-        yaml.safe_dump(
-            {
-                "project_name": "fixture-config-only",
-                "toolkit_version": "v1.0.0",
-                "components": [],
-                "docker": False,
-                "release_please": True,
-                "renovate": True,
-                "renovate_config_repository": "quokkify/renovate-presets",
-                "renovate_presets": ["default", "github-actions"],
-            }
-        )
-    )
-    config_only_dest = tmp_path / "config-only"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(config_only_data),
-            str(template_source),
-            str(config_only_dest),
-        ]
-    )
-    check(
-        not (config_only_dest / ".github/workflows/validate.yml").exists(),
-        "legacy template rendered validate.yml, which the core module owns",
-    )
-    for generated_workflow in sorted((config_only_dest / ".github/workflows").glob("*.yml")):
-        run([actionlint, str(generated_workflow)])
-    config_only_gitleaks = (config_only_dest / ".github/workflows/gitleaks.yml").read_text()
-    check(
-        'install -m 0755 gitleaks "$RUNNER_TEMP/bin/gitleaks"' in config_only_gitleaks,
-        "generated Gitleaks workflow installs outside its extraction directory",
-    )
-    check(
-        'git show "$TRUSTED_REF:.gitleaks.toml"' in config_only_gitleaks
-        and '--config "$RUNNER_TEMP/gitleaks.toml"' in config_only_gitleaks
-        and '--gitleaks-ignore-path "$RUNNER_TEMP/gitleaksignore"' in config_only_gitleaks,
-        "generated Gitleaks workflow does not protect policy from pull request changes",
-    )
-    check(
-        'if ! git cat-file -e "$TRUSTED_REF^{commit}" 2>/dev/null; then' in config_only_gitleaks,
-        "generated Gitleaks workflow fetches a ref the credential-less checkout already contains",
-    )
-    check(
-        (config_only_dest / ".github/workflows/release.yml").exists(),
-        "config-only project lost Release Please workflow",
-    )
-    assert_generated_renovate_config(
-        config_only_dest / ".github/renovate.json",
-        renovate_extends("quokkify/renovate-presets", ["default", "github-actions"]),
-        "config-only",
-    )
-
-    no_renovate_data = tmp_path / "no-renovate.yml"
-    no_renovate_data.write_text(
-        yaml.safe_dump(
-            {
-                "project_name": "fixture-no-renovate",
-                "toolkit_version": "v1.0.0",
-                "components": [{"type": "node", "path": ".", "id": "app-node", "name": "Application Node"}],
-                "docker": False,
-                "release_please": False,
-                "renovate": False,
-            }
-        )
-    )
-    no_renovate_dest = tmp_path / "no-renovate"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(no_renovate_data),
-            str(template_source),
-            str(no_renovate_dest),
-        ]
-    )
-    check(
-        not (no_renovate_dest / ".github/renovate.json").exists(),
-        "renovate=false generated .github/renovate.json",
-    )
-
-    no_codeql_data = tmp_path / "no-codeql.yml"
-    no_codeql_data.write_text(
-        yaml.safe_dump(
-            {
-                "project_name": "fixture-no-codeql",
-                "toolkit_version": "v1.0.0",
-                "components": [],
-                "docker": False,
-                "codeql": False,
-                "release_please": False,
-                "renovate": False,
-            }
-        )
-    )
-    no_codeql_dest = tmp_path / "no-codeql"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(no_codeql_data),
-            str(template_source),
-            str(no_codeql_dest),
-        ]
-    )
-    check(
-        not (no_codeql_dest / ".github/workflows/codeql.yml").exists(),
-        "codeql=false generated .github/workflows/codeql.yml",
-    )
-    check(
-        (no_codeql_dest / ".github/workflows/gitleaks.yml").is_file(),
-        "codeql=false dropped the gitleaks.yml baseline workflow",
-    )
-
-    no_gitleaks_data = tmp_path / "no-gitleaks.yml"
-    no_gitleaks_data.write_text(
-        yaml.safe_dump({"components": [], "codeql": True, "gitleaks": False, "release_please": False, "renovate": False})
-    )
-    no_gitleaks_dest = tmp_path / "no-gitleaks"
-    run([
-        copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-        "--data-file", str(no_gitleaks_data), str(template_source), str(no_gitleaks_dest),
-    ])
-    check(
-        not (no_gitleaks_dest / ".github/workflows/gitleaks.yml").exists(),
-        "gitleaks=false generated .github/workflows/gitleaks.yml",
-    )
-    check(
-        (no_gitleaks_dest / ".github/workflows/codeql.yml").exists(),
-        "gitleaks=false scenario unexpectedly changed CodeQL output",
-    )
-
-    custom_all_data = tmp_path / "custom-renovate-all.yml"
-    custom_all_data.write_text(
-        yaml.safe_dump(
-            {
-                "renovate_config_repository": "acme/shared-renovate",
-                "renovate_presets": list(RENOVATE_PRESET_PATHS),
-            }
-        )
-    )
-    custom_dest = tmp_path / "custom-renovate-all"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(custom_all_data),
-            str(template_source),
-            str(custom_dest),
-        ]
-    )
-    assert_generated_renovate_config(
-        custom_dest / ".github/renovate.json",
-        renovate_extends("acme/shared-renovate", list(RENOVATE_PRESET_PATHS)),
-        "custom-renovate-all",
-    )
-
-    dotted_repo_data = tmp_path / "custom-renovate-dotted-repo.yml"
-    dotted_repo_data.write_text(
-        yaml.safe_dump(
-            {
-                "renovate_config_repository": "octocat/octocat.github.io",
-                "renovate_presets": ["default"],
-            }
-        )
-    )
-    dotted_repo_dest = tmp_path / "custom-renovate-dotted-repo"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(dotted_repo_data),
-            str(template_source),
-            str(dotted_repo_dest),
-        ]
-    )
-    assert_generated_renovate_config(
-        dotted_repo_dest / ".github/renovate.json",
-        renovate_extends("octocat/octocat.github.io", ["default"]),
-        "custom-renovate-dotted-repo",
-    )
-
-    custom_selected_data = tmp_path / "custom-renovate-selected.yml"
-    custom_selected_data.write_text(
-        yaml.safe_dump(
-            {
-                "renovate_config_repository": "acme/shared-renovate",
-                "renovate_presets": ["default", "javascript", "github-actions"],
-            }
-        )
-    )
-    custom_selected_dest = tmp_path / "custom-renovate-selected"
-    run(
-        [
-            copier,
-            "copy",
-            "--trust",
-            "--defaults",
-            "--vcs-ref",
-            "HEAD",
-            "--data-file",
-            str(custom_selected_data),
-            str(template_source),
-            str(custom_selected_dest),
-        ]
-    )
-    assert_generated_renovate_config(
-        custom_selected_dest / ".github/renovate.json",
-        renovate_extends("acme/shared-renovate", ["default", "javascript", "github-actions"]),
-        "custom-renovate-selected",
-    )
-
+    # Each refused value pairs a module with the answers its validator must reject.
+    invalid_cases: list[tuple[str, str, dict[str, object]]] = []
     for invalid_value in (
         "https://github.com/acme/shared-renovate",
         "github>acme/shared-renovate",
@@ -2692,273 +2038,33 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         "acme/../shared-renovate",
         "{{ acme }}/shared-renovate",
     ):
-        invalid_label = re.sub(r"[^A-Za-z0-9]+", "-", invalid_value).strip("-")
-        bad_dest = tmp_path / ("invalid-renovate-" + invalid_label)
-        result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data",
-                f"renovate_config_repository={invalid_value}",
-                str(template_source),
-                str(bad_dest),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(
-            result.returncode != 0,
-            f"invalid renovate_config_repository accepted: {invalid_value}",
-        )
-
-    invalid_preset_values: tuple[tuple[str, object], ...] = (
+        invalid_cases.append(("renovate", f"renovate_config_repository={invalid_value}", {"renovate_config_repository": invalid_value}))
+    for invalid_label, invalid_value in (
         ("unknown", ["default", "ruby"]),
         ("duplicate", ["default", "python", "python"]),
         ("empty", []),
         ("scalar-string", "default"),
         ("scalar-number", 1),
         ("map", {"default": True}),
-    )
-    for invalid_label, invalid_value in invalid_preset_values:
-        invalid_data = tmp_path / f"invalid-renovate-presets-{invalid_label}.yml"
-        invalid_data.write_text(yaml.safe_dump({"renovate_presets": invalid_value}))
-        bad_dest = tmp_path / f"invalid-renovate-presets-{invalid_label}"
-        result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data-file",
-                str(invalid_data),
-                str(template_source),
-                str(bad_dest),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(
-            result.returncode != 0,
-            f"invalid renovate_presets accepted: {invalid_label}={invalid_value!r}",
-        )
-
-    # A repository whose source is not described by components must still be able to
-    # declare what CodeQL scans; deriving the list from components alone silently
-    # dropped Java and Python coverage across the fleet.
-    explicit_languages_data = tmp_path / "codeql-languages.yml"
-    explicit_languages_data.write_text(
-        yaml.safe_dump({"components": [], "codeql": True, "codeql_languages": ["actions", "java-kotlin"]})
-    )
-    explicit_languages_dest = tmp_path / "codeql-languages"
-    run(
-        [
-            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-            "--data-file", str(explicit_languages_data),
-            str(template_source), str(explicit_languages_dest),
-        ]
-    )
-    explicit_codeql = (explicit_languages_dest / ".github/workflows/codeql.yml").read_text()
-    check(
-        'language: ["actions", "java-kotlin"]' in explicit_codeql,
-        "codeql_languages must override the language matrix derived from components",
-    )
-    run([actionlint, str(explicit_languages_dest / ".github/workflows/codeql.yml")])
-
-    derived_languages_data = tmp_path / "codeql-derived.yml"
-    derived_languages_data.write_text(
-        yaml.safe_dump({"components": [{"type": "java", "path": ".", "id": "app-java", "name": "Application Java"}], "codeql": True})
-    )
-    derived_languages_dest = tmp_path / "codeql-derived"
-    run(
-        [
-            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-            "--data-file", str(derived_languages_data),
-            str(template_source), str(derived_languages_dest),
-        ]
-    )
-    check(
-        'language: ["actions", "java-kotlin"]'
-        in (derived_languages_dest / ".github/workflows/codeql.yml").read_text(),
-        "an empty codeql_languages must still derive the matrix from components",
-    )
-
-    # The reusable release workflow has always supported manifest mode; the template
-    # hardcoded single, which a repository releasing independently versioned components
-    # cannot express and must therefore diverge from the template forever.
-    manifest_release_data = tmp_path / "release-manifest.yml"
-    manifest_release_data.write_text(
-        yaml.safe_dump({"release_please": True, "release_mode": "manifest"})
-    )
-    manifest_release_dest = tmp_path / "release-manifest"
-    run(
-        [
-            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-            "--data-file", str(manifest_release_data),
-            str(template_source), str(manifest_release_dest),
-        ]
-    )
-    manifest_release = (manifest_release_dest / ".github/workflows/release.yml").read_text()
-    for expected in (
-        "mode: manifest",
-        "config-file: .github/release-please/config.json",
-        "manifest-file: .github/release-please/manifest.json",
     ):
-        check(
-            expected in manifest_release,
-            f"manifest release mode must emit {expected!r}",
-        )
-    run([actionlint, str(manifest_release_dest / ".github/workflows/release.yml")])
-
-    single_release_data = tmp_path / "release-single.yml"
-    single_release_data.write_text(yaml.safe_dump({"release_please": True}))
-    single_release_dest = tmp_path / "release-single"
-    run(
-        [
-            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-            "--data-file", str(single_release_data),
-            str(template_source), str(single_release_dest),
-        ]
-    )
-    single_release = (single_release_dest / ".github/workflows/release.yml").read_text()
-    check("mode: single" in single_release, "the default release mode must stay single")
-    check(
-        "config-file: .github/release-please/config.json" in single_release
-        and "manifest-file: .github/release-please/manifest.json" in single_release,
-        "single release mode must use the config-backed root manifest",
-    )
-    check(
-        "config-backed-single: true" in single_release,
-        "single release mode must opt into config-backed workflow inputs",
-    )
-
-    invalid_release_data = tmp_path / "invalid-release-mode.yml"
-    invalid_release_data.write_text(
-        yaml.safe_dump({"release_please": True, "release_mode": "components"})
-    )
-    invalid_release_result = subprocess.run(
-        [
-            copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-            "--data-file", str(invalid_release_data),
-            str(template_source), str(tmp_path / "invalid-release-mode"),
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    check(
-        invalid_release_result.returncode != 0,
-        "invalid release_mode accepted",
-    )
-
-    invalid_language_values: tuple[tuple[str, object], ...] = (
+        invalid_cases.append(("renovate", f"renovate_presets {invalid_label}", {"renovate_presets": invalid_value}))
+    for invalid_label, invalid_value in (
         ("unsupported", ["actions", "cobol"]),
         ("duplicate", ["actions", "actions"]),
         ("scalar-string", "actions"),
         ("map", {"actions": True}),
         ("non-string-entry", ["actions", 1]),
-    )
-    for invalid_label, invalid_value in invalid_language_values:
-        invalid_data = tmp_path / f"invalid-codeql-languages-{invalid_label}.yml"
-        invalid_data.write_text(
-            yaml.safe_dump({"codeql": True, "codeql_languages": invalid_value})
-        )
-        bad_dest = tmp_path / f"invalid-codeql-languages-{invalid_label}"
-        result = subprocess.run(
-            [
-                copier, "copy", "--trust", "--defaults", "--vcs-ref", "HEAD",
-                "--data-file", str(invalid_data),
-                str(template_source), str(bad_dest),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(
-            result.returncode != 0,
-            f"invalid codeql_languages accepted: {invalid_label}={invalid_value!r}",
-        )
-
-    for invalid_label, invalid_path in (
-        ("traversal", "../allure-results"),
-        ("absolute", "/tmp/allure-results"),
-        ("glob", "reports/*"),
-        ("backslash", "reports\\allure-results"),
-        ("empty-segment", "reports//allure-results"),
     ):
-        invalid_data = tmp_path / f"invalid-allure-path-{invalid_label}.yml"
-        invalid_data.write_text(
-            yaml.safe_dump(
-                {
-                    "allure_report": True,
-                    "components": [
-                        {
-                            "type": "python",
-                            "path": ".",
-                            "id": "app-python",
-                            "name": "Application Python",
-                            "allure_results_path": invalid_path,
-                        }
-                    ],
-                }
-            )
-        )
-        result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data-file",
-                str(invalid_data),
-                str(template_source),
-                str(tmp_path / f"invalid-allure-path-{invalid_label}"),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(result.returncode != 0, f"unsafe allure_results_path accepted: {invalid_path}")
-
+        invalid_cases.append(("security", f"codeql_languages {invalid_label}", {"codeql": True, "codeql_languages": invalid_value}))
+    invalid_cases.append(("release", "release_mode components", {"release_mode": "components"}))
     for invalid_label, invalid_url in (
         ("http", "http://owner.github.io/repository"),
         ("trailing-slash", "https://owner.github.io/repository/"),
         ("query", "https://owner.github.io/repository?ref=main"),
         ("template", "https://{{ owner }}.github.io/repository"),
     ):
-        result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data",
-                "allure_report=true",
-                "--data",
-                "allure_publish_pages=true",
-                "--data",
-                f"allure_pages_url={invalid_url}",
-                str(template_source),
-                str(tmp_path / f"invalid-allure-url-{invalid_label}"),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(result.returncode != 0, f"unsafe allure_pages_url accepted: {invalid_url}")
-
-    invalid_external_values: tuple[tuple[str, str, object], ...] = (
+        invalid_cases.append(("allure", f"allure_pages_url {invalid_label}", {"allure_publish_pages": True, "allure_pages_url": invalid_url}))
+    for invalid_label, field, invalid_value in (
         ("workflow-path-traversal", "allure_external_workflow_path", "../test.yml"),
         ("artifact-prefix-glob", "allure_external_artifact_prefix", "allure-*"),
         ("minimum-zero", "allure_external_artifact_min_count", 0),
@@ -2966,11 +2072,9 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
         ("maximum-over-limit", "allure_external_artifact_max_count", 51),
         ("maximum-below-minimum", "allure_external_artifact_max_count", 1),
         ("categories-traversal", "allure_categories_file", "../categories.json"),
-    )
-    for invalid_label, field, invalid_value in invalid_external_values:
+    ):
         external_data: dict[str, object] = {
-            "components": [],
-            "allure_report": True,
+            "allure_source": "external",
             "allure_external_workflow_name": "Run tests",
             "allure_external_workflow_path": ".github/workflows/test.yml",
             "allure_external_artifact_prefix": "allure-results-",
@@ -2978,26 +2082,10 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
             "allure_external_artifact_max_count": 7,
         }
         external_data[field] = invalid_value
-        invalid_data = tmp_path / f"invalid-allure-external-{invalid_label}.yml"
-        invalid_data.write_text(yaml.safe_dump(external_data), encoding="utf-8")
-        result = subprocess.run(
-            [
-                copier,
-                "copy",
-                "--trust",
-                "--defaults",
-                "--vcs-ref",
-                "HEAD",
-                "--data-file",
-                str(invalid_data),
-                str(template_source),
-                str(tmp_path / f"invalid-allure-external-{invalid_label}"),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        check(result.returncode != 0, f"unsafe external Allure value accepted: {field}={invalid_value!r}")
+        invalid_cases.append(("allure", f"external Allure {invalid_label}", external_data))
+    for index, (module, label, data) in enumerate(invalid_cases):
+        result = copy_module(module, tmp_path / f"invalid-{index}", data, check_result=False)
+        check(result.returncode != 0, f"{module}: invalid value accepted: {label}")
 
 # Consumers run formatters over generated files. A config the template emits in a
 # shape no formatter agrees with fails their checks on every template update, so
@@ -3028,7 +2116,6 @@ if GENERATED_RENOVATE_CONFIGS:
 # invoke this validator do not recursively start the suite runner again.
 if not ARGS.skip_suites:
     run([sys.executable, "scripts/run_test_suites.py"])
-run(["bash", "-n", "scripts/rollout_ci_kit.sh"])
 
 if not ARGS.static:
     fixture_commands = (

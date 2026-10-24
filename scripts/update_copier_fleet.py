@@ -10,13 +10,10 @@ without pushing anything.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import json
 import os
-import posixpath
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -34,21 +31,19 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from ci_kit.drift import TRUSTED_SRC_RE
-from ci_kit.handoff import AREAS
 from ci_kit.modules import MODULES
-from ci_kit.migrate_legacy import MIGRATED, MigrateLegacyResult, render_marker
-from ci_kit.plan import ANSWERS_RE, LEGACY_ANSWERS_MESSAGE, Finding, legacy_areas_left
+from ci_kit.plan import ANSWERS_RE, LEGACY_ANSWERS_MESSAGE, legacy_areas_left
 
+# ci-kit v4 has no legacy template: the root answers file is only read to drop it once every
+# area is handed off, or to refuse the repository (CIK-CORE-030) while any is left.
 ANSWERS_FILE = ".copier-answers.yml"
 LEGACY_MODULE = "legacy"
 CI_KIT_TOOLS = Path(__file__).resolve().parents[1] / "tools"
-TEMPLATE_RELEASE_CONFIG = Path(__file__).resolve().parents[1] / "template/.github/release-please/config.json.jinja"
 DEFAULT_BRANCH = "automation/copier-template-update"
 DEFAULT_TEMPLATE_REPOSITORY = "quokkify/ci-kit"
 RENAMED_TEMPLATE_REPOSITORIES = {"quokkify/project-toolkit": "quokkify/ci-kit"}
 PR_TITLE = "chore(template): update shared project template"
 DROP_LEGACY_ANSWERS_TITLE = "chore(ci-kit): drop empty legacy answers"
-MIGRATE_LEGACY_BRANCH = "ci-kit/migrate-legacy"
 PRIVATE_REPOSITORY_ERROR = (
     "--public-only rejects non-public repositories; private consumers are not served by the "
     "public fleet automation and are updated by a maintainer running this script without "
@@ -58,14 +53,6 @@ RELEASE_TAG_PATTERN = re.compile(
     r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-# Answers files are written in the style Prettier emits for YAML, by both the
-# template and this updater: plain scalars where YAML reads them back as the same
-# string, double-quoted JSON strings otherwise, and sequences indented under their
-# key. The template's .copier-answers.yml.jinja repeats these two patterns.
-ANSWERS_PLAIN_PATTERN = re.compile(r"^[A-Za-z_./][A-Za-z0-9_./@+-]*(?::[A-Za-z0-9_./@+-]+)*(?: [A-Za-z0-9_./@+-]+(?::[A-Za-z0-9_./@+-]+)*)*$")
-ANSWERS_RESERVED_PATTERN = re.compile(r"^(?:y|n|yes|no|true|false|on|off|null|\.inf|\.nan|\.[0-9].*)$", re.IGNORECASE)
-
-
 class FleetUpdateError(RuntimeError):
     """A repository or fleet operation could not be completed safely."""
 
@@ -96,7 +83,6 @@ class Result:
     inventory: "TemplateInventory | None" = None
     health: dict[str, Any] | None = None
     auto_merge: dict[str, str] | None = None
-    migration: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -112,7 +98,7 @@ class TemplateInventory:
     release_please: str
     renovate: str
     modules: tuple[str, ...] = ()
-    state: str = "legacy"
+    state: str = "modules"
 
 
 BASELINE_PATHS = (
@@ -209,18 +195,6 @@ def gh_json_or_none(arguments: Sequence[str], *, env: dict[str, str]) -> Any:
         if "HTTP 404" in str(exc):
             return None
         raise
-
-
-def gh_json_lines(arguments: Sequence[str], *, env: dict[str, str]) -> list[Any]:
-    """Read one JSON value per line, including paginated gh API output."""
-    completed = run(["gh", *arguments], env=env)
-    values: list[Any] = []
-    for line in completed.stdout.splitlines():
-        try:
-            values.append(json.loads(line))
-        except json.JSONDecodeError as exc:
-            raise FleetUpdateError(f"gh returned invalid JSON for {' '.join(arguments)}") from exc
-    return values
 
 
 def resolve_template_ref(
@@ -383,309 +357,6 @@ def parse_template_source(raw_answers: str) -> str:
     return answers["_src_path"]
 
 
-def _shell_heredoc_free(run: str) -> str:
-    """Remove heredoc bodies before inspecting shell command tokens."""
-    lines = run.splitlines(keepends=True)
-    kept: list[str] = []
-    delimiters: list[tuple[str, bool, bool]] = []
-    quote: str | None = None
-    arithmetic_depth = 0
-    paren_arithmetic_depth = 0
-    line_index = 0
-    while line_index < len(lines):
-        line = lines[line_index]
-        if delimiters:
-            delimiter, strip_tabs, quoted = delimiters.pop(0)
-            body_lines = [line]
-            consumed_body_lines = 1
-            # For an unquoted heredoc, Bash removes backslash-newline pairs
-            # from the body before checking the closing delimiter.  Fold the
-            # physical lines here so a delimiter-like line joined to prior
-            # body text cannot be mistaken for the closing delimiter.
-            if not quoted:
-                while True:
-                    body_text = body_lines[-1].rstrip("\r\n")
-                    trailing_slashes = len(body_text) - len(body_text.rstrip("\\"))
-                    if trailing_slashes % 2 == 0:
-                        break
-                    next_index = line_index + consumed_body_lines
-                    if next_index >= len(lines):
-                        break
-                    body_lines[-1] = body_text[:-1]
-                    body_lines.append(lines[next_index])
-                    consumed_body_lines += 1
-            candidate = "".join(body_lines).rstrip("\r\n")
-            if (candidate.lstrip("\t") if strip_tabs else candidate) != delimiter:
-                delimiters.insert(0, (delimiter, strip_tabs, quoted))
-            else:
-                # The command line already retained its terminating newline,
-                # which separates it from commands after the heredoc.
-                pass
-            line_index += consumed_body_lines
-            continue
-        # A backslash-newline is removed by the shell before parsing.  Fold
-        # such continuations for delimiter recognition, while retaining the
-        # original physical lines in the output and advancing past them.
-        logical_line = line
-        consumed_lines = 1
-        while logical_line.rstrip("\r\n").endswith("\\"):
-            continuation = logical_line.rstrip("\r\n")
-            trailing_slashes = len(continuation) - len(continuation.rstrip("\\"))
-            if trailing_slashes % 2 == 0 or line_index + consumed_lines >= len(lines):
-                break
-            logical_line = continuation[:-1] + lines[line_index + consumed_lines]
-            consumed_lines += 1
-        kept.extend(lines[line_index : line_index + consumed_lines])
-        line = logical_line
-        comment = False
-        index = 0
-        while index < len(line):
-            character = line[index]
-            if character == "\n":
-                comment = False
-                index += 1
-                continue
-            if comment:
-                index += 1
-                continue
-            if quote:
-                if character == quote and (index == 0 or line[index - 1] != "\\"):
-                    quote = None
-                index += 1
-                continue
-            if character in "'\"":
-                quote = character
-                index += 1
-                continue
-            # A heredoc marker in a shell comment is just comment text. A
-            # comment may begin directly after a shell control operator.
-            previous = line[:index].rstrip()
-            if character == "#" and (
-                not previous
-                or line[index - 1].isspace()
-                or previous.endswith((";", "&&", "||", "|", "&"))
-            ):
-                comment = True
-                break
-            if line.startswith("$((", index):
-                arithmetic_depth += 1
-                index += 3
-                continue
-            if arithmetic_depth and line.startswith("))", index):
-                arithmetic_depth -= 1
-                index += 2
-                continue
-            if not arithmetic_depth and line.startswith("((", index):
-                paren_arithmetic_depth += 1
-                index += 2
-                continue
-            if paren_arithmetic_depth and line.startswith("))", index):
-                paren_arithmetic_depth -= 1
-                index += 2
-                continue
-            # A here-string (<<<) consumes one word, not following lines.
-            if line[index : index + 2] != "<<":
-                index += 1
-                continue
-            if arithmetic_depth or paren_arithmetic_depth:
-                index += 2
-                continue
-            if line[index : index + 3] == "<<<":
-                index += 3
-                continue
-            index += 2
-            strip_tabs = index < len(line) and line[index] == "-"
-            if strip_tabs:
-                index += 1
-            while index < len(line) and line[index] in " \t":
-                index += 1
-            if index >= len(line):
-                break
-            # Read the complete shell word and apply quote removal. Delimiter
-            # words may mix quoted and unquoted segments, and an escaped
-            # whitespace remains part of the word (e.g. <<E\ OF).
-            delimiter_chars: list[str] = []
-            delimiter_quote: str | None = None
-            delimiter_was_quoted = False
-            escaped_delimiter = False
-            while index < len(line):
-                delimiter_character = line[index]
-                if escaped_delimiter:
-                    # In an unquoted word, a backslash quotes any following
-                    # character. Within double quotes it only quotes the
-                    # shell's escapable characters; otherwise it is literal.
-                    if delimiter_quote == '"' and delimiter_character not in '$`"\\\n':
-                        delimiter_chars.append("\\")
-                    delimiter_chars.append(delimiter_character)
-                    escaped_delimiter = False
-                elif delimiter_character == "\\" and delimiter_quote != "'":
-                    escaped_delimiter = True
-                    delimiter_was_quoted = True
-                elif delimiter_quote:
-                    if delimiter_character == delimiter_quote:
-                        delimiter_quote = None
-                    else:
-                        delimiter_chars.append(delimiter_character)
-                elif delimiter_character in "'\"":
-                    delimiter_quote = delimiter_character
-                    delimiter_was_quoted = True
-                elif delimiter_character in " \t;&|\r\n":
-                    break
-                else:
-                    delimiter_chars.append(delimiter_character)
-                index += 1
-            if escaped_delimiter:
-                delimiter_chars.append("\\")
-            if delimiter_quote:
-                break
-            delimiter = "".join(delimiter_chars)
-            if delimiter:
-                delimiters.append((delimiter, strip_tabs, delimiter_was_quoted))
-            # A command can contain multiple heredoc redirects. Find all of
-            # them so every body is suppressed before tokenization.
-            index += 1
-        line_index += consumed_lines
-    return "".join(kept)
-
-
-def _shell_newline_separated(run: str) -> str:
-    """Make unescaped shell newlines visible as command separators."""
-    result: list[str] = []
-    quote: str | None = None
-    escaped = False
-    comment = False
-    for character in run:
-        if character == "\n":
-            if escaped:
-                if result and result[-1] == "\\":
-                    result.pop()
-                result.append(" ")
-                escaped = False
-                continue
-            # Keep a physical newline after a comment so shlex can terminate
-            # the comment.  Newlines after a shell continuation operator are
-            # whitespace, not an additional command separator.
-            if quote is None and not comment:
-                stripped = "".join(result).rstrip()
-                if stripped.endswith(("&&", "||", "|")):
-                    result.append(character)
-                else:
-                    result.append(";")
-            elif comment:
-                result.append(";")
-            else:
-                result.append(character)
-            comment = False
-            escaped = False
-            continue
-        if quote is None and not comment and character == "#":
-            previous = "".join(result).rstrip()
-            if (
-                not previous
-                or (result and result[-1].isspace())
-                or previous.endswith((";", "&&", "||", "|", "&"))
-            ):
-                comment = True
-        if comment:
-            # Do not let shlex's comment mode consume following physical
-            # lines; retain only whitespace until the newline above.
-            result.append(" ")
-            escaped = False
-            continue
-        if character == "\n" and escaped:
-            if result and result[-1] == "\\":
-                result.pop()
-            result.append(" ")
-            escaped = False
-            continue
-        if character == "\\" and not escaped:
-            result.append(character)
-            escaped = True
-            continue
-        if character in "'\"" and not escaped:
-            quote = None if quote == character else character if quote is None else quote
-        result.append(character)
-        escaped = False
-    return "".join(result)
-
-
-def _shell_extractor_paths(run: str) -> set[str]:
-    """Find extractor paths used as shell commands, not embedded text."""
-    try:
-        source = _shell_newline_separated(_shell_heredoc_free(run))
-        lexer = shlex.shlex(source, posix=True, punctuation_chars=";&|")
-        lexer.commenters = "#"
-        lexer.whitespace_split = True
-        tokens = list(lexer)
-    except ValueError:
-        return set()
-
-    extractors: set[str] = set()
-    command_start = True
-    working_directory = "."
-    pending_cd = False
-    for index, token in enumerate(tokens):
-        if token in {";", "&&", "||", "|", "&"}:
-            command_start = True
-            pending_cd = False
-            continue
-        if command_start and token == "cd":
-            pending_cd = True
-        elif pending_cd:
-            working_directory = posixpath.normpath(
-                posixpath.join(working_directory, token)
-            )
-            pending_cd = False
-        elif command_start and token in {"python", "python3"}:
-            extractor_index = index + 1
-            while extractor_index < len(tokens) and tokens[extractor_index] in {"\\", "\n"}:
-                extractor_index += 1
-            if extractor_index >= len(tokens):
-                command_start = False
-                continue
-            extractor = tokens[extractor_index]
-            if extractor.endswith("safe_extract.py"):
-                extractors.add(posixpath.normpath(posixpath.join(working_directory, extractor)))
-        command_start = False
-    return extractors
-
-
-def has_custom_allure_outputs(repository_path: Path) -> bool:
-    """Recognize complete custom Allure output in executable workflow steps."""
-    for workflow_path in workflow_files(repository_path):
-        try:
-            document = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
-            continue
-        config_paths: set[str] = set()
-        extractor_paths: set[str] = set()
-        for job in document["jobs"].values():
-            if not isinstance(job, dict):
-                continue
-            executable_units = [job]
-            steps = job.get("steps")
-            if isinstance(steps, list):
-                executable_units.extend(step for step in steps if isinstance(step, dict))
-            for unit in executable_units:
-                options = unit.get("with")
-                config_path = options.get("config-file") if isinstance(options, dict) else None
-                if isinstance(config_path, str):
-                    config_paths.add(config_path)
-                run = unit.get("run")
-                if isinstance(run, str):
-                    extractor_paths.update(_shell_extractor_paths(run))
-        if any(
-            is_regular_file(repository_path / config, repository_root=repository_path)
-            and is_regular_file(repository_path / extractor, repository_root=repository_path)
-            for config in config_paths
-            for extractor in extractor_paths
-        ):
-            return True
-    return False
-
-
 def workflow_files(repository_path: Path) -> list[Path]:
     """Return regular workflow files without following repository symlinks."""
     workflows = repository_path / ".github" / "workflows"
@@ -763,119 +434,6 @@ def inferred_components(repository_path: Path) -> tuple[str, ...]:
                     if re.search(pattern, text, re.IGNORECASE):
                         found.add(f"{component}:{path}")
     return tuple(sorted(found))
-
-
-def has_custom_release_please_outputs(repository_path: Path) -> bool:
-    """Recognize an executable custom Release Please workflow.
-
-    Parse the workflow document before inspecting jobs and steps.  Searching
-    raw YAML text would treat comments and quoted values as executable action
-    evidence, hiding a real configuration gap.
-    """
-    standard = repository_path / FEATURE_PATHS["release_please"]
-    action_pattern = re.compile(r"(?:^|/)release[-_]please-action@", re.IGNORECASE)
-    for workflow in workflow_files(repository_path):
-        if workflow == standard:
-            continue
-        try:
-            document = yaml.safe_load(workflow.read_text(encoding="utf-8"))
-        except yaml.YAMLError:
-            continue
-        if not isinstance(document, dict):
-            continue
-        jobs = document.get("jobs")
-        if not isinstance(jobs, dict):
-            continue
-        for job in jobs.values():
-            if not isinstance(job, dict):
-                continue
-            executable_uses = [job.get("uses")]
-            steps = job.get("steps")
-            if isinstance(steps, list):
-                executable_uses.extend(
-                    step.get("uses") for step in steps if isinstance(step, dict)
-                )
-            if any(isinstance(uses, str) and action_pattern.search(uses) for uses in executable_uses):
-                return True
-    return False
-
-
-def feature_state(answers: dict[str, Any], key: str, repository_path: Path) -> str:
-    configured = answers.get(key)
-    if not isinstance(configured, bool):
-        return "unknown"
-    expected_paths = ALLURE_EXPECTED_PATHS if key == "allure_report" else (FEATURE_PATHS[key],)
-    materialized = tuple(
-        is_regular_file(repository_path / path, repository_root=repository_path)
-        for path in expected_paths
-    )
-    if configured:
-        if all(materialized):
-            return "enabled"
-        if key == "allure_report" and has_custom_allure_outputs(repository_path):
-            return "custom"
-        if key == "release_please" and has_custom_release_please_outputs(repository_path):
-            return "custom"
-        return "missing"
-    if key == "release_please" and has_custom_release_please_outputs(repository_path):
-        return "custom"
-    return "custom" if any(materialized) else "disabled"
-
-
-def inventory_from_answers(raw_answers: str, repository_path: Path) -> TemplateInventory:
-    answers = parse_answers(raw_answers)
-    commit = answers.get("_commit")
-    if not isinstance(commit, str) or not commit.strip():
-        commit = "unknown"
-
-    raw_components = answers.get("components")
-    components: list[str] = []
-    components_valid = True
-    if isinstance(raw_components, list):
-        for component in raw_components:
-            if not isinstance(component, dict):
-                components_valid = False
-                break
-            component_type = component.get("type")
-            component_path = component.get("path")
-            if not isinstance(component_type, str) or not isinstance(component_path, str):
-                components_valid = False
-                break
-            components.append(f"{component_type}:{component_path}")
-    elif raw_components is not None:
-        components_valid = False
-    if not components_valid:
-        components = ["unknown"]
-    else:
-        components = list(inferred_components(repository_path)) if not components else components
-        if not components:
-            components = ["none"]
-
-    missing_baseline = tuple(
-        path
-        for path in BASELINE_PATHS
-        if not is_regular_file(repository_path / path, repository_root=repository_path)
-    )
-    present_baseline = len(BASELINE_PATHS) - len(missing_baseline)
-    docker = answers.get("docker")
-    docker_state = "enabled" if docker is True else "disabled" if docker is False else "unknown"
-    return TemplateInventory(
-        commit=commit.strip(),
-        target_commit=None,
-        components=tuple(components),
-        baseline=f"{present_baseline}/{len(BASELINE_PATHS)}",
-        missing_baseline=missing_baseline,
-        docker=docker_state,
-        codeql=feature_state(answers, "codeql", repository_path),
-        allure_report=feature_state(answers, "allure_report", repository_path),
-        release_please=feature_state(answers, "release_please", repository_path),
-        renovate=feature_state(answers, "renovate", repository_path),
-    )
-
-
-def legacy_handed_off(raw_answers: str) -> list[str]:
-    handed = parse_answers(raw_answers).get("handed_off")
-    return [area for area in handed if isinstance(area, str)] if isinstance(handed, list) else []
 
 
 def modules_inventory(commit: str, modules: Sequence[str], repository_path: Path) -> TemplateInventory:
@@ -1113,14 +671,8 @@ def attention_facts(result: Result, pull_request: dict[str, Any] | None) -> tupl
         facts.append(Fact("conflict", f"Copier conflict in {markdown_text(files)}; nothing pushed.", "**Resolve** the conflicting files on the default branch, then re-run for this repository."))
     elif status == "failed":
         facts.append(Fact("failed", "Update failed; raw error below.", "**Re-run** for this repository; investigate if it fails again."))
-    elif status == "migrate-rejected":
-        facts.append(Fact("failed", f"Migration rejected: {markdown_text(result.detail)}; nothing pushed.", "**Review** the findings below."))
     elif status == "legacy-refused":
         facts.append(Fact("failed", f"Update refused: {markdown_text(result.detail)}; nothing pushed.", "**Migrate** the repository with ci-kit v3.11.x ([CIK-CORE-030](https://github.com/quokkify/ci-kit/blob/main/docs/errors/CIK-CORE-030.md))."))
-    elif status == "needs-update-first":
-        facts.append(Fact("update-first", f"Needs update first: {markdown_text(result.detail)}.", "**Run** the template update first, then migrate again."))
-    elif status == "would-migrate":
-        facts.append(Fact("drift", f"Would migrate: {markdown_text(result.detail)}.", "**Review** the drift; a write-mode run opens the PR."))
     elif status in {"unsafe-answers-file", "unknown-module", "foreign-module-template"}:
         facts.append(Fact("gap", f"{markdown_text(status.replace('-', ' ').capitalize())}: {markdown_text(result.detail)}.", "**Fix** the module answers file in the repository."))
     elif status == "would-update":
@@ -1199,11 +751,7 @@ def rerun_command(result: Result, run: dict[str, Any]) -> str | None:
 
 
 def raw_evidence(result: Result) -> list[str]:
-    evidence = [result.detail] if result.detail and result.status not in {"pull-request", "would-update"} else []
-    for finding in (result.migration or {}).get("findings", []):
-        message = str(finding.get("message") or "").splitlines()
-        evidence.append(f"{finding.get('code')} {message[0] if message else ''}".rstrip())
-    return evidence
+    return [result.detail] if result.detail and result.status not in {"pull-request", "would-update"} else []
 
 
 def generated_text(value: Any) -> str | None:
@@ -1445,9 +993,9 @@ def results_from_report(payload: dict[str, Any]) -> list[Result]:
                 release_please=template["release_please"],
                 renovate=template["renovate"],
                 modules=tuple(template.get("modules", ())),
-                state=template.get("state", "legacy"),
+                state=template.get("state", "modules"),
             )
-        results.append(Result(item["repository"], item["status"], item.get("detail", ""), inventory, item.get("health"), item.get("auto_merge"), item.get("migration")))
+        results.append(Result(item["repository"], item["status"], item.get("detail", ""), inventory, item.get("health"), item.get("auto_merge")))
     return results
 
 
@@ -1481,8 +1029,6 @@ def json_report(results: Sequence[Result], counts: dict[str, int], run: dict[str
             item["health"] = result.health
         if result.auto_merge is not None:
             item["auto_merge"] = result.auto_merge
-        if result.migration is not None:
-            item["migration"] = result.migration
         repositories.append(item)
     gaps = configuration_gap_count(results)
     payload = {
@@ -1495,38 +1041,6 @@ def json_report(results: Sequence[Result], counts: dict[str, int], run: dict[str
     if run is not None:
         payload["run"] = run
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
-
-
-def canonical_template_source(source: str) -> str:
-    """Return a Copier and Renovate compatible HTTPS Git URL."""
-    normalized = normalize_template_source(source)
-    if normalized is None:
-        raise FleetUpdateError(f"unsupported template source: {source}")
-    return f"https://github.com/{normalized}.git"
-
-
-def canonicalize_answers_source(repository_path: Path, expected_template: str) -> bool:
-    """Replace Copier's GitHub shorthand without reserializing the answers file."""
-    answers_path = repository_path / ANSWERS_FILE
-    if answers_path.is_symlink():
-        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
-    content = answers_path.read_text(encoding="utf-8")
-    current = parse_template_source(content)
-    if normalize_template_source(current) != normalize_template_source(expected_template):
-        raise FleetUpdateError(f"{ANSWERS_FILE} is managed by a different template")
-    canonical = canonical_template_source(expected_template)
-    if current == canonical:
-        return False
-    updated, substitutions = re.subn(
-        r"^_src_path:.*$",
-        f"_src_path: {canonical}",
-        content,
-        flags=re.MULTILINE,
-    )
-    if substitutions != 1:
-        raise FleetUpdateError(f"{ANSWERS_FILE} must contain exactly one _src_path entry")
-    answers_path.write_text(updated, encoding="utf-8")
-    return True
 
 
 def clone_repository(repository: Repository, destination: Path, *, env: dict[str, str]) -> None:
@@ -1571,357 +1085,6 @@ def changed_paths(repository_path: Path) -> list[str]:
     return sorted(set(paths))
 
 
-def restore_answers_format_if_semantically_equal(
-    answers_path: Path,
-    original_text: str,
-) -> None:
-    if answers_path.is_symlink():
-        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
-    if not answers_path.is_file():
-        raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
-
-    updated_text = answers_path.read_text(encoding="utf-8")
-    original_answers = parse_answers(original_text)
-    updated_answers = parse_answers(updated_text)
-    if original_answers == updated_answers and original_text != updated_text:
-        answers_path.write_text(original_text, encoding="utf-8")
-    elif original_answers != updated_answers:
-        answers_path.write_text(render_answers(updated_answers), encoding="utf-8")
-
-
-def render_answers_scalar(value: Any) -> str:
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return json.dumps(value)
-    text = str(value)
-    if ANSWERS_PLAIN_PATTERN.fullmatch(text) and not ANSWERS_RESERVED_PATTERN.fullmatch(text):
-        return text
-    return json.dumps(text, ensure_ascii=False)
-
-
-def _render_answers_lines(value: Any, indent: int) -> list[str]:
-    pad = " " * indent
-    lines: list[str] = []
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(item, (dict, list)) and item:
-                lines.append(f"{pad}{render_answers_scalar(key)}:")
-                lines.extend(_render_answers_lines(item, indent + 2))
-            else:
-                inline = ("{}" if isinstance(item, dict) else "[]") if isinstance(item, (dict, list)) else render_answers_scalar(item)
-                lines.append(f"{pad}{render_answers_scalar(key)}: {inline}")
-        return lines
-    for item in value:
-        if isinstance(item, (dict, list)) and item:
-            nested = _render_answers_lines(item, indent + 2)
-            lines.append(f"{pad}- {nested[0].lstrip()}")
-            lines.extend(nested[1:])
-        else:
-            inline = ("{}" if isinstance(item, dict) else "[]") if isinstance(item, (dict, list)) else render_answers_scalar(item)
-            lines.append(f"{pad}- {inline}")
-    return lines
-
-
-def render_answers(answers: dict[str, Any]) -> str:
-    """Serialize Copier answers exactly as the template's answers file does."""
-    return "\n".join(_render_answers_lines(answers, 0)) + "\n"
-
-
-def verify_release_helper(repository_path: Path, template_source: str, template_ref: str, *, env: dict[str, str]) -> None:
-    """Fail closed when Copier preserved a stale or customized executable helper."""
-    helper = repository_path / ".github/scripts/enrich_release_notes.py"
-    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
-    if not helper.exists():
-        if answers.get("release_please") is True:
-            raise FleetUpdateError(
-                f"{helper.relative_to(repository_path)} is missing although release_please is enabled; "
-                "restore the template helper before retrying"
-            )
-        return
-    with tempfile.TemporaryDirectory(prefix="copier-helper-") as temporary:
-        fetched = Path(temporary) / "expected.py"
-        source = canonical_template_source(template_source)
-        run(["git", "fetch", "--quiet", "--depth=1", source, template_ref], cwd=repository_path, env=env)
-        result = run(
-            ["git", "show", "FETCH_HEAD:modules/release/template/.github/scripts/enrich_release_notes.py.jinja"],
-            cwd=repository_path,
-            env=env,
-        )
-        fetched.write_text(result.stdout, encoding="utf-8")
-        if fetched.read_bytes() != helper.read_bytes():
-            raise FleetUpdateError(
-                ".github/scripts/enrich_release_notes.py differs from the selected ci-kit ref; "
-                "reconcile project-owned/customized changes with the template before retrying"
-            )
-
-
-def ensure_release_dependency_sections(repository_path: Path) -> bool:
-    """Give every Release Please package a visible deps changelog section.
-
-    The config is project-owned, so Copier never touches it after generation. A
-    config without changelog-sections falls back to Release Please defaults, which
-    drop every deps(...) commit, and the reusable release workflow then refuses it.
-    """
-    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
-    path = repository_path / ".github/release-please/config.json"
-    if answers.get("release_please") is not True or not path.is_file():
-        return False
-    config = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict) or not isinstance(config.get("packages"), dict):
-        raise FleetUpdateError(f"cannot repair {path.relative_to(repository_path)}: packages must be a mapping")
-    template = json.loads(TEMPLATE_RELEASE_CONFIG.read_text(encoding="utf-8"))["packages"]["."]["changelog-sections"]
-    changed = False
-    for package in config["packages"].values():
-        if not isinstance(package, dict):
-            continue
-        sections = package.get("changelog-sections", config.get("changelog-sections"))
-        if not isinstance(sections, list):
-            sections = [dict(section) for section in template]
-        elif not any(isinstance(s, dict) and s.get("type") == "deps" and not s.get("hidden") for s in sections):
-            sections = [
-                {k: v for k, v in s.items() if k != "hidden"} if isinstance(s, dict) and s.get("type") == "deps" else s
-                for s in sections
-            ]
-            if not any(isinstance(s, dict) and s.get("type") == "deps" for s in sections):
-                sections.append(next(dict(s) for s in template if s["type"] == "deps"))
-        else:
-            continue
-        package["changelog-sections"] = sections
-        changed = True
-    if changed:
-        path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return changed
-
-
-def seed_single_release_manifest(
-    repository_path: Path,
-    repository: Repository,
-    *,
-    env: dict[str, str],
-) -> None:
-    """Seed the root manifest from an existing stable release, never 0.1.0."""
-    answers = parse_answers((repository_path / ANSWERS_FILE).read_text(encoding="utf-8"))
-    manifest = repository_path / ".github/release-please/manifest.json"
-    release_mode = answers.get("release_mode", "single")
-    if (
-        answers.get("release_please") is not True
-        or release_mode != "single"
-        or manifest.exists()
-    ):
-        return
-    releases = gh_json(
-        ["release", "list", "--repo", repository.name_with_owner,
-         "--exclude-drafts", "--exclude-pre-releases", "--limit", "2",
-         "--json", "tagName,isLatest"], env=env
-    )
-    stable = [
-        item for item in releases
-        if isinstance(item, dict) and isinstance(item.get("tagName"), str)
-        and item.get("isLatest") is True
-        and RELEASE_TAG_PATTERN.fullmatch(item["tagName"])
-    ]
-    if len(stable) > 1:
-        raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous")
-    if len(stable) == 1:
-        tag_name = stable[0]["tagName"]
-    else:
-        # GitHub Releases can be absent for a valid stable tag (for example
-        # repositories that publish artifacts elsewhere).  Fall back to the
-        # repository's exact SemVer tags, and never accept a template default.
-        tags = gh_json_lines(
-            ["api", f"repos/{repository.name_with_owner}/tags", "--paginate", "--jq", ".[].name | @json"],
-            env=env,
-        )
-        candidates = sorted(
-            {
-                tag for tag in tags
-                if isinstance(tag, str) and RELEASE_TAG_PATTERN.fullmatch(tag)
-            },
-            key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
-            reverse=True,
-        )
-        if not candidates:
-            raise FleetUpdateError("cannot seed release manifest: stable release is ambiguous or missing")
-        tag_name = candidates[0]
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(json.dumps({".": tag_name[1:]}, indent=2) + "\n", encoding="utf-8")
-
-
-def update_template(
-    repository_path: Path,
-    *,
-    template_source: str,
-    template_ref: str | None,
-    env: dict[str, str],
-    repository: Repository | None = None,
-) -> list[str]:
-    answers_path = repository_path / ANSWERS_FILE
-    if answers_path.is_symlink():
-        raise FleetUpdateError(f"{ANSWERS_FILE} must not be a symlink")
-    if not answers_path.is_file():
-        raise FleetUpdateError(f"{ANSWERS_FILE} must be a regular file")
-    original_answers_text = answers_path.read_text(encoding="utf-8")
-
-    # This is a breaking schema migration.  Copier's --defaults mode answers
-    # the changed component question with its new default, which would replace
-    # a legacy component's type/path.  Pass migrated answers as --data instead
-    # of writing them before Copier starts: Copier requires a pristine
-    # destination, and the resulting answers file is written by Copier itself.
-    try:
-        answers = yaml.safe_load(original_answers_text)
-    except yaml.YAMLError as exc:
-        raise FleetUpdateError(f"{ANSWERS_FILE} is not valid YAML: {exc}") from exc
-    components = answers.get("components") if isinstance(answers, dict) else None
-    if isinstance(components, list):
-        migrated_components: list[dict[str, Any]] = []
-        generated_ids: set[str] = {
-            component["id"]
-            for component in components
-            if isinstance(component, dict) and isinstance(component.get("id"), str)
-        }
-        for index, component in enumerate(components):
-            if not isinstance(component, dict):
-                raise FleetUpdateError(f"components[{index}] must be a mapping")
-            migrated = dict(component)
-            if "id" not in migrated or "name" not in migrated:
-                component_type = migrated.get("type")
-                component_path = migrated.get("path")
-                if not isinstance(component_type, str) or not isinstance(component_path, str):
-                    raise FleetUpdateError(
-                        f"cannot migrate components[{index}]: type and path are required"
-                    )
-                path_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", component_path.strip("./")).strip("-")
-                path_slug = path_slug or "app"
-                candidate_id = f"{path_slug}-{component_type}"
-                # Legacy paths may begin with a digit, while the breaking
-                # schema deliberately uses the GitHub Actions identifier
-                # grammar.  Prefix rather than dropping path information so
-                # the generated identity remains stable and recognizable.
-                if not re.match(r"^[A-Za-z_]", candidate_id):
-                    candidate_id = f"component-{candidate_id}"
-                if candidate_id in {
-                    "template-contract", "docker", "release", "update", "scan",
-                    "analyze", "resolve", "generate", "comment", "pages",
-                    "changes", "integration",
-                }:
-                    candidate_id = f"component-{candidate_id}"
-                # Distinct legacy paths can normalize to the same slug (for
-                # example ``api/v1`` and ``api-v1``).  Keep the readable slug
-                # where possible, and add a deterministic digest only when a
-                # collision occurs.  This is a migration identity, not the
-                # old type/index workflow fallback: every generated ID still
-                # derives from the component's complete legacy identity.
-                if candidate_id in generated_ids:
-                    identity_key = f"{component_path}\0{component_type}"
-                    digest = hashlib.sha256(identity_key.encode("utf-8")).hexdigest()
-                    # A legacy template allowed repeated identical components.
-                    # Bound the disambiguation by the input size: this keeps
-                    # migration deterministic without an unbounded loop when
-                    # every digest prefix is already occupied.
-                    digest_candidate = f"{candidate_id}-{digest[:8]}"
-                    candidate_id = digest_candidate
-                    suffix = 2
-                    while candidate_id in generated_ids and suffix <= len(components) + 1:
-                        candidate_id = f"{digest_candidate}-{suffix}"
-                        suffix += 1
-                    if candidate_id in generated_ids:
-                        raise FleetUpdateError(
-                            f"cannot migrate components[{index}]: unable to allocate a unique stable identity"
-                        )
-                generated_ids.add(candidate_id)
-                migrated.setdefault("id", candidate_id)
-                migrated.setdefault("name", f"{path_slug.replace('-', ' ').title()} {component_type.title()}")
-            migrated_components.append(migrated)
-        if migrated_components != components:
-            answers["components"] = migrated_components
-
-    command = [
-        "copier",
-        "update",
-        "--trust",
-        "--defaults",
-        "--conflict=rej",
-        # Generated workflows often receive harmless local edits near template
-        # changes. A one-line context keeps Copier's three-line default from
-        # rejecting otherwise clean hunks while still surfacing overlapping edits.
-        "--context-lines",
-        "1",
-        "--skip-tasks",
-    ]
-    if isinstance(components, list) and answers.get("components") != components:
-        command.extend(
-            [
-                "--data",
-                "components=" + json.dumps(answers["components"], separators=(",", ":")),
-            ]
-        )
-    if "gitleaks" not in answers:
-        command.extend(["--data", "gitleaks=true"])
-    if template_ref:
-        command.extend(["--vcs-ref", template_ref])
-        if RELEASE_TAG_PATTERN.fullmatch(template_ref):
-            command.extend(["--data", f"toolkit_version={template_ref}"])
-    command.append(".")
-    run(command, cwd=repository_path, env=env)
-    if template_ref:
-        verify_release_helper(repository_path, template_source, template_ref, env=env)
-    if repository is not None:
-        # Copier requires a pristine checkout. Seed a missing single-project
-        # Release Please manifest only after the update has completed.
-        seed_single_release_manifest(repository_path, repository, env=env)
-    ensure_release_dependency_sections(repository_path)
-    restore_answers_format_if_semantically_equal(answers_path, original_answers_text)
-    canonicalize_answers_source(repository_path, template_source)
-    if template_ref and RELEASE_TAG_PATTERN.fullmatch(template_ref):
-        bump_project_owned_toolkit_refs(
-            repository_path,
-            template_ref,
-            resolve_commit=lambda: resolve_template_commit(
-                template_source, template_ref, env=env
-            ),
-        )
-    rejected = [
-        path
-        for path in sorted(repository_path.rglob("*.rej"))
-        if not discard_if_already_applied(repository_path, path)
-    ]
-    if rejected:
-        names = ", ".join(str(path.relative_to(repository_path)) for path in rejected)
-        raise FleetUpdateError(f"{CONFLICT_PREFIX} {names}")
-    return changed_paths(repository_path)
-
-
-def discard_if_already_applied(repository_path: Path, rejected: Path) -> bool:
-    """Delete a Copier .rej whose hunks the project already carries.
-
-    A project that already made the template's change locally (for example a lint fix
-    that dropped a trailing blank line) rejects the same change from the template,
-    although nothing is left to apply. When every rejected hunk applies in reverse, the
-    file is already in the template's new state and the conflict is not real.
-    """
-    target = rejected.with_suffix("").relative_to(repository_path).as_posix()
-    try:
-        lines = rejected.read_text(encoding="utf-8").splitlines(keepends=True)
-    except UnicodeDecodeError:
-        return False
-    if not lines or not lines[0].startswith("diff "):
-        return False
-    patch = f"--- a/{target}\n+++ b/{target}\n" + "".join(lines[1:])
-    with tempfile.NamedTemporaryFile("w", suffix=".diff", encoding="utf-8", delete=False) as handle:
-        handle.write(patch)
-    try:
-        completed = run(["git", "apply", "--check", "--reverse", handle.name], cwd=repository_path, check=False)
-    finally:
-        os.unlink(handle.name)
-    if completed.returncode:
-        return False
-    rejected.unlink()
-    return True
-
-
 def authenticated_git() -> list[str]:
     """Return a git invocation that authenticates through gh rather than a prompt.
 
@@ -1938,79 +1101,6 @@ def authenticated_git() -> list[str]:
         "-c",
         "credential.helper=!gh auth git-credential",
     ]
-
-
-TOOLKIT_REFERENCE_PREFIX = r"quokkify/ci-kit/(?:\.github/workflows|actions)/[^@\s]+@"
-TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+")
-TOOLKIT_DIGEST_REFERENCE = re.compile(
-    rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
-)
-RENAMED_TOOLKIT_REFERENCE = re.compile(
-    r"(?<![\w./-])(" + "|".join(re.escape(name) for name in RENAMED_TEMPLATE_REPOSITORIES) + r")/(?=(?:\.github/workflows|actions)/[^@\s]+@)"
-)
-
-
-def module_owned_paths(repository_path: Path) -> set[str]:
-    answers_path = repository_path / ANSWERS_FILE
-    if not answers_path.is_file():
-        return set()
-    return {
-        path
-        for area in legacy_handed_off(answers_path.read_text(encoding="utf-8"))
-        if area in AREAS
-        for path in AREAS[area].legacy_paths
-    }
-
-
-def bump_project_owned_toolkit_refs(
-    repository_path: Path,
-    template_ref: str,
-    *,
-    resolve_commit: Callable[[], str] | None = None,
-) -> list[str]:
-    """Move toolkit references in project-owned workflows to the new template version.
-
-    Copier rewrites the workflows it owns, but a project-owned workflow such as ci.yml
-    also references this toolkit, and the generated template contract requires every such
-    reference to match the recorded toolkit_version. Leaving those behind fails the
-    consumer's own validation immediately after an otherwise correct update, so the bump
-    has to be part of the same commit.
-
-    Files of a handed-off area belong to their module, whose own update moves them;
-    rewriting them here would make that update conflict.
-
-    Exact vMAJOR.MINOR.PATCH tags are rewritten to the new tag. A digest pin carrying a
-    release comment, which is what Renovate writes, is rewritten to the new tag's commit
-    together with its comment: the contract accepts a digest only while the comment still
-    names the recorded toolkit_version, so leaving the comment behind is the same failure
-    as leaving a stale tag behind, and neither this update nor the Renovate bump can pass
-    that check on its own. A digest pin without a release comment is left alone, since
-    nothing identifies which release it was meant to track. References that still use a
-    renamed toolkit repository name are moved to the current name first.
-
-    ``resolve_commit`` runs at most once, and only when a digest pin is present, so a
-    fleet of tag-only consumers costs no extra API call.
-    """
-    changed: list[str] = []
-    commit: str | None = None
-    module_owned = module_owned_paths(repository_path)
-    workflows = repository_path / ".github" / "workflows"
-    for workflow in sorted(workflows.glob("*.yml")) + sorted(workflows.glob("*.yaml")):
-        if workflow.relative_to(repository_path).as_posix() in module_owned:
-            continue
-        original = workflow.read_text(encoding="utf-8")
-        updated = RENAMED_TOOLKIT_REFERENCE.sub(lambda match: RENAMED_TEMPLATE_REPOSITORIES[match.group(1)] + "/", original)
-        updated = TOOLKIT_TAG_REFERENCE.sub(rf"\g<1>{template_ref}", updated)
-        if resolve_commit is not None and TOOLKIT_DIGEST_REFERENCE.search(updated):
-            if commit is None:
-                commit = resolve_commit()
-            updated = TOOLKIT_DIGEST_REFERENCE.sub(
-                rf"\g<1>{commit}\g<2>{template_ref}", updated
-            )
-        if updated != original:
-            workflow.write_text(updated, encoding="utf-8")
-            changed.append(workflow.relative_to(repository_path).as_posix())
-    return changed
 
 
 def push_automation_branch(
@@ -2106,7 +1196,6 @@ def run_ci_kit_update(repository_path: Path, template_ref: str, *, env: dict[str
                 str(repository_path),
                 "--to",
                 template_ref,
-                "--skip-legacy",
                 "--json",
                 str(report_path),
             ],
@@ -2139,11 +1228,7 @@ def run_ci_kit_update(repository_path: Path, template_ref: str, *, env: dict[str
 
 
 def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[str, str]) -> list[dict[str, str]]:
-    identity = ["-c", "user.name=quokkify-copier[bot]", "-c", "user.email=quokkify-copier[bot]@users.noreply.github.com"]
     base = git_head(repository_path)
-    run(["git", "add", "--all"], cwd=repository_path)
-    if run(["git", "status", "--porcelain"], cwd=repository_path).stdout.strip():
-        run(["git", *identity, "commit", "-q", "-m", "chore(template): pending legacy update"], cwd=repository_path)
     rows = run_ci_kit_update(repository_path, template_ref, env=env)
     squash_to_base(repository_path, base)
     return rows
@@ -2221,8 +1306,7 @@ def ensure_pull_request(
         + "\n".join(f"- `{path}`" for path in changed)
         + module_table(modules)
         + "\n\n## Verification\n\n"
-        "- `copier update --trust --defaults --conflict=rej --skip-tasks`\n"
-        "- Legacy components keep their `type`/`path`; the updater supplies stable `id`/`name` migration data.\n"
+        "- `ci-kit update` (`copier update --defaults --conflict=rej --skip-tasks` per module)\n"
         "- `git diff --cached --check`\n\n"
         "Do not edit the automation branch directly; make project-specific changes after merging "
         "or adjust the Copier answers/template.\n"
@@ -2457,9 +1541,6 @@ def trusted_answers_source(file: str, answers: dict[str, Any], expected_template
     source = answers.get("_src_path")
     if not isinstance(source, str):
         return False
-    if file == ANSWERS_FILE:
-        expected = normalize_template_source(expected_template)
-        return expected is not None and normalize_template_source(source) == expected
     return bool(TRUSTED_SRC_RE.fullmatch(source))
 
 
@@ -2488,6 +1569,8 @@ def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str
     differ = sorted(set(base) ^ set(head))
     if differ:
         return skipped(f"answers files differ: {', '.join(differ)}")
+    if ANSWERS_FILE in base:
+        return skipped(f"legacy {ANSWERS_FILE} is present")
     if not base:
         return skipped("no answers files")
     for file in sorted(base):
@@ -2497,11 +1580,8 @@ def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str
             or base[file].get("_src_path") != head[file].get("_src_path")
         ):
             return skipped(f"untrusted template source in {file}")
-    modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base if file != ANSWERS_FILE)
-    if ANSWERS_FILE in base:
-        primary = ANSWERS_FILE
-    else:
-        primary = answers_file_name("core" if "core" in modules else modules[0])
+    modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base)
+    primary = answers_file_name("core" if "core" in modules else modules[0])
     target = answers_commit(head[primary])
     rows: list[dict[str, str]] = []
     for module in modules:
@@ -2577,22 +1657,21 @@ def process_repository(
         cloned_source = normalize_template_source(parse_template_source(cloned_answers))
         if cloned_source != normalized_expected:
             raise FleetUpdateError("cloned repository changed to a different template during audit")
-        inventory = inventory_from_answers(cloned_answers, destination)
-        if modules:
-            areas = ",".join(legacy_handed_off(cloned_answers))
-            inventory = replace(inventory, modules=modules, state=f"hybrid({areas})")
+    if modules:
+        primary = "core" if "core" in modules else modules[0]
+        primary_commit = parse_answers((destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")).get("_commit")
+    else:
+        primary_commit = parse_answers(cloned_answers).get("_commit")
+    inventory = modules_inventory(
+        primary_commit.strip() if isinstance(primary_commit, str) and primary_commit.strip() else "unknown",
+        modules,
+        destination,
+    )
+    if raw_answers is not None:
         left = legacy_areas_left(cloned_answers)
         if left:
-            return Result(name, "legacy-refused", f"CIK-CORE-030: {LEGACY_ANSWERS_MESSAGE} (not handed off: {', '.join(left)})", inventory)
-    else:
-        primary = "core" if "core" in modules else modules[0]
-        primary_answers = parse_answers((destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8"))
-        primary_commit = primary_answers.get("_commit")
-        inventory = modules_inventory(
-            primary_commit.strip() if isinstance(primary_commit, str) and primary_commit.strip() else "unknown",
-            modules,
-            destination,
-        )
+            detail = f"CIK-CORE-030: {LEGACY_ANSWERS_MESSAGE} (not handed off: {', '.join(left)})"
+            return Result(name, "legacy-refused", detail, replace(inventory, state="legacy"))
     try:
         paths: list[str] = []
         rows: list[dict[str, str]] = []
@@ -2659,131 +1738,6 @@ def process_repository(
         raise RepositoryProcessError(str(exc), inventory) from exc
 
 
-def run_ci_kit_migrate_legacy(repository_path: Path, target_ref: str, *, env: dict[str, str]) -> MigrateLegacyResult:
-    # Never --template-src: the fleet renders from the source the legacy answers name.
-    with tempfile.TemporaryDirectory(prefix="ci-kit-migrate-legacy-") as temporary:
-        report_path = Path(temporary) / "migrate-legacy.json"
-        completed = run(
-            [
-                sys.executable, "-m", "ci_kit.cli", "migrate-legacy",
-                "--repo", str(repository_path), "--to", target_ref, "--json", str(report_path),
-            ],
-            env=ci_kit_environment(env),
-            check=False,
-        )
-        try:
-            payload = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            payload = None
-    if not isinstance(payload, dict):
-        raise FleetUpdateError(f"ci-kit migrate-legacy failed: exit {completed.returncode}")
-    return MigrateLegacyResult(
-        ref=str(payload.get("ref", target_ref)),
-        modules=[str(item) for item in payload.get("modules", [])],
-        commits=[str(item) for item in payload.get("commits", [])],
-        checks_before=[str(item) for item in payload.get("checks_before", [])],
-        checks_after=[str(item) for item in payload.get("checks_after", [])],
-        findings=[
-            Finding(str(item.get("code")), str(item.get("module")), str(item.get("message")), item.get("path"))
-            for item in payload.get("findings", [])
-            if isinstance(item, dict)
-        ],
-    )
-
-
-def migrate_legacy_title() -> str:
-    return f"chore(ci-kit): hand off {', '.join(MIGRATED)} to modules"
-
-
-def migrate_legacy_pr_body(result: MigrateLegacyResult) -> str:
-    checks_before = ", ".join(f"`{name}`" for name in result.checks_before) or "none"
-    checks_after = ", ".join(f"`{name}`" for name in result.checks_after) or "none"
-    rows = "".join(f"| {module} | `.copier-answers.{module}.yml` |\n" for module in ["core", *result.modules])
-    return (
-        "## Summary\n\n"
-        f"Hands the `{', '.join(MIGRATED)}` areas off from the legacy template to modules of "
-        f"[`quokkify/ci-kit`](https://github.com/quokkify/ci-kit) at `{result.ref}`. "
-        "Rendered files stay the same except `docs/ci-kit.md`, which now comes from `core`.\n\n"
-        "## Modules\n\n"
-        "| module | answers file |\n| --- | --- |\n"
-        + rows
-        + "\n## Commits\n\n"
-        "The pushed commit squashes the migration steps: hand off the areas, render core, add each module.\n\n"
-        + "".join(f"Head: `{sha}`\n" for sha in result.commits)
-        + "\n## Required checks\n\n"
-        f"{checks_before} → {checks_after}\n\n"
-        "The required checks do not change; no ruleset switch is needed.\n\n"
-        "## Rollback\n\n"
-        "Revert the squashed commit with `git revert <sha>`; the areas return to the legacy template.\n\n"
-        + render_marker(result)
-        + "\n"
-    )
-
-
-def ensure_migrate_legacy_pull_request(
-    repository: Repository, *, branch: str, result: MigrateLegacyResult, env: dict[str, str],
-) -> str:
-    name = repository.name_with_owner
-    existing = gh_json(["pr", "list", "--repo", name, "--state", "open", "--head", branch, "--json", "url"], env=env)
-    if existing:
-        url = existing[0]["url"]
-        run(["gh", "pr", "edit", url, "--repo", name, "--body", migrate_legacy_pr_body(result)], env=env)
-        return url
-    return run(
-        [
-            "gh", "pr", "create", "--repo", name, "--base", repository.default_branch, "--head", branch,
-            "--title", migrate_legacy_title(), "--body", migrate_legacy_pr_body(result),
-        ],
-        env=env,
-    ).stdout.strip()
-
-
-def migrate_legacy_repository(
-    repository: Repository,
-    *,
-    target_ref: str,
-    dry_run: bool,
-    env: dict[str, str],
-    workspace: Path,
-    branch: str = MIGRATE_LEGACY_BRANCH,
-    expected_template: str = DEFAULT_TEMPLATE_REPOSITORY,
-) -> Result:
-    name = repository.name_with_owner
-    try:
-        files = fetch_answers_files(name, env=env)
-    except UnsafeAnswersFileError as exc:
-        return Result(name, "unsafe-answers-file", str(exc))
-    raw_answers = files.get(LEGACY_MODULE)
-    if raw_answers is None or set(MIGRATED) <= set(legacy_handed_off(raw_answers)):
-        return Result(name, "not-applicable")
-    source = normalize_template_source(parse_template_source(raw_answers))
-    if source != normalize_template_source(expected_template):
-        return Result(name, "foreign-template", source or "unrecognized source")
-    applied = parse_answers(raw_answers).get("_commit")
-    if applied != target_ref:
-        return Result(name, "needs-update-first", f"legacy _commit is {applied}, target is {target_ref}")
-
-    destination = workspace / name.replace("/", "--")
-    clone_repository(repository, destination, env=env)
-    base = git_head(destination)
-    migrated = run_ci_kit_migrate_legacy(destination, target_ref, env=env)
-    if migrated.findings:
-        findings = [
-            {"code": item.code, "module": item.module, "message": item.message, "path": item.path}
-            for item in migrated.findings
-        ]
-        return Result(
-            name, "migrate-rejected", ", ".join(dict.fromkeys(item["code"] for item in findings)),
-            migration={"findings": findings},
-        )
-    if dry_run:
-        return Result(name, "would-migrate", ", ".join(["core", *migrated.modules]))
-    squash_to_base(destination, base)
-    head = push_automation_branch(repository, destination, branch=branch, env=env, message=migrate_legacy_title())
-    migrated.commits = [head]
-    return Result(name, "pull-request", ensure_migrate_legacy_pull_request(repository, branch=branch, result=migrated, env=env))
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org", default="quokkify")
@@ -2807,11 +1761,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip Copier and pushes; only evaluate and merge open automation PRs. Requires --write --auto-merge.",
     )
-    parser.add_argument(
-        "--migrate-legacy",
-        action="store_true",
-        help=f"Hand the legacy areas ({', '.join(MIGRATED)}) off to modules and open a PR on {MIGRATE_LEGACY_BRANCH} instead of updating.",
-    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--write", action="store_true")
@@ -2827,10 +1776,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--merge-ready requires --write and --auto-merge")
     if args.merge_ready and args.template_ref:
         parser.error("--merge-ready cannot be combined with --template-ref")
-    if args.migrate_legacy and args.auto_merge:
-        parser.error("--auto-merge cannot be combined with --migrate-legacy")
-    if args.migrate_legacy and args.merge_ready:
-        parser.error("--merge-ready cannot be combined with --migrate-legacy")
     env = os.environ.copy()
     if args.write:
         if not env.get("GH_TOKEN", "").strip():
@@ -2847,7 +1792,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
 
-    branch = MIGRATE_LEGACY_BRANCH if args.migrate_legacy and args.branch == DEFAULT_BRANCH else args.branch
+    branch = args.branch
 
     health_module = None
     health_exceptions: dict[str, dict[str, str]] = {}
@@ -2939,16 +1884,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 if args.merge_ready:
                     result = merge_ready_repository(repository, branch=branch, env=env, expected_template=args.template_repository)
-                elif args.migrate_legacy:
-                    result = migrate_legacy_repository(
-                        repository,
-                        target_ref=template_ref,
-                        dry_run=args.dry_run,
-                        env=env,
-                        workspace=workspace,
-                        branch=branch,
-                        expected_template=args.template_repository,
-                    )
                 else:
                     result = process_repository(
                         repository,
@@ -2997,7 +1932,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json_report:
         args.json_report.parent.mkdir(parents=True, exist_ok=True)
         args.json_report.write_text(json_report(results, counts, run), encoding="utf-8")
-    if failures or counts.get("migrate-rejected", 0) or counts.get("legacy-refused", 0):
+    if failures or counts.get("legacy-refused", 0):
         return 1
     if args.dry_run and counts.get("would-update", 0):
         print("template drift detected; run write mode from a CODEOWNER session", file=sys.stderr)

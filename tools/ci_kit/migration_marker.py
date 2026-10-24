@@ -52,7 +52,7 @@ def check_contexts(data: dict) -> list[str]:
 
 
 def security_contexts(answers: dict) -> list[str]:
-    """Required contexts of the codeql/gitleaks workflows, from legacy or security module answers."""
+    """Required contexts of the codeql/gitleaks workflows, from security module answers."""
     contexts = []
     if answers.get("codeql") is True:
         contexts.append("CodeQL")

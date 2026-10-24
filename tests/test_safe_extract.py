@@ -15,7 +15,7 @@ from unittest import TestCase, main
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-EXTRACTOR = ROOT / "template/.github/allure/safe_extract.py.jinja"
+EXTRACTOR = ROOT / "modules/allure/template/.github/allure/safe_extract.py.jinja"
 CORE = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())
 FRAGMENT = "ci-env-fragment.properties"
 

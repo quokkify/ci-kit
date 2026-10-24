@@ -4,7 +4,6 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,8 +12,6 @@ import yaml
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'scripts'))
-from update_copier_fleet import bump_project_owned_toolkit_refs
 
 
 class CheckoutTests(unittest.TestCase):
@@ -76,10 +73,10 @@ class CheckoutTests(unittest.TestCase):
         self.assertRegex(text, r'uses: actions/checkout@[0-9a-f]{40} # v\d+\.\d+\.\d+')
 
     def test_every_generated_checkout_tracks_the_copier_version(self):
-        sources = ROOT / 'template/.github/workflows'
-        expected = {'codeql.yml', 'gitleaks.yml', 'copier-update.yml'}
+        sources = sorted(ROOT.glob('modules/*/template/.github/workflows/*.jinja'))
+        expected = {'gitleaks.yml', 'copier-update.yml'}
         actual = set()
-        for source in sources.glob('*.jinja'):
+        for source in sources:
             text = source.read_text()
             self.assertNotIn('uses: actions/checkout@', text, source.name)
             for line in text.splitlines():
@@ -89,48 +86,12 @@ class CheckoutTests(unittest.TestCase):
                     self.assertTrue(rendered.endswith('/actions/checkout@v9.8.7'))
         self.assertEqual(actual, expected)
         # Allure delegates its checkout to the release-bound reusable workflows.
-        allure = (sources / 'allure-report.yml.jinja').read_text()
+        allure = (ROOT / 'modules/allure/template/.github/workflows/allure-report.yml.jinja').read_text()
         reusable_refs = [line for line in allure.splitlines() if 'uses: quokkify/ci-kit/.github/workflows/' in line]
         self.assertEqual(len(reusable_refs), 2)
         for line in reusable_refs:
             rendered = Environment(undefined=StrictUndefined).from_string(line).render(toolkit_version='v9.8.7')
             self.assertTrue(rendered.endswith('.yml@v9.8.7'))
-
-    def test_fleet_updates_checkout_without_changing_docs_steps(self):
-        # Model a caller-owned docs workflow after its one-time migration. Both
-        # exact tags and Renovate's SHA + version comment must advance atomically.
-        for ref in ('v2.22.0', 'a' * 40 + ' # v2.22.0'):
-            with self.subTest(ref=ref), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                path = root / '.github/workflows/docs.yml'
-                path.parent.mkdir(parents=True)
-                original = '''name: Publish documentation
-on: [push]
-permissions:
-  contents: write
-jobs:
-  docs:
-    runs-on: ubuntu-latest
-    steps:
-      - id: source
-        uses: quokkify/ci-kit/actions/checkout@REF
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: false
-      - run: zensical build
-'''.replace('@REF', '@' + ref)
-                path.write_text(original)
-                before = yaml.safe_load(original)
-                changed = bump_project_owned_toolkit_refs(root, 'v9.8.7', resolve_commit=lambda: 'b' * 40)
-                self.assertEqual(changed, ['.github/workflows/docs.yml'])
-                after = yaml.safe_load(path.read_text())
-                expected_ref = 'b' * 40 if ref.startswith('a' * 40) else 'v9.8.7'
-                before['jobs']['docs']['steps'][0]['uses'] = 'quokkify/ci-kit/actions/checkout@' + expected_ref
-                self.assertEqual(after, before)
-                self.assertIn('v9.8.7', path.read_text())
-                self.assertEqual(bump_project_owned_toolkit_refs(root, 'v9.8.7', resolve_commit=lambda: 'b' * 40), [])
-
 
     def test_copier_upgrade_migrates_generated_checkout_and_keeps_custom_workflows(self):
         with tempfile.TemporaryDirectory(prefix='checkout-copier-') as tmp:
@@ -138,7 +99,7 @@ jobs:
             source, consumer = root / 'source', root / 'consumer'
             source.mkdir()
             shutil.copy2(ROOT / 'copier.yml', source / 'copier.yml')
-            shutil.copytree(ROOT / 'template', source / 'template')
+            shutil.copytree(ROOT / 'modules', source / 'modules')
             current = {p: p.read_text() for p in source.rglob('*.yml.jinja')}
             upstream = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1'
             shared = 'quokkify/ci-kit/actions/checkout@{{ toolkit_version }}'
@@ -162,10 +123,11 @@ jobs:
             run('git', 'tag', 'v8.0.0')
             copier = shutil.which('copier')
             self.assertIsNotNone(copier, 'Copier is required for upgrade coverage')
-            run(copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'v8.0.0',
-                '--data', 'toolkit_version=v8.0.0', '--data', 'components=[]',
-                '--data', 'codeql=false', '--data', 'renovate=false',
-                str(source), str(consumer))
+            modules = {'core': (), 'security': ('--data', 'codeql=false')}
+            for module, data in modules.items():
+                run(copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'v8.0.0',
+                    '-a', f'.copier-answers.{module}.yml', '--data', f'module={module}',
+                    '--data', 'toolkit_version=v8.0.0', *data, str(source), str(consumer))
             custom = consumer / '.github/workflows/docs.yml'
             custom_text = 'name: Docs\non: [push]\njobs:\n  docs:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: ' + upstream + '\n      - run: zensical build\n'
             custom.write_text(custom_text)
@@ -177,11 +139,14 @@ jobs:
             run('git', 'add', '.')
             run('git', 'commit', '-qm', 'shared checkout')
             run('git', 'tag', 'v8.1.0')
-            run(copier, 'update', '--trust', '--defaults', '--conflict=rej',
-                '--vcs-ref', 'v8.1.0', '--data', 'toolkit_version=v8.1.0', '.', cwd=consumer)
-            answers = yaml.safe_load((consumer / '.copier-answers.yml').read_text())
-            self.assertEqual(answers['_commit'], 'v8.1.0')
-            self.assertEqual(answers['toolkit_version'], 'v8.1.0')
+            for module in modules:
+                run(copier, 'update', '--trust', '--defaults', '--conflict=rej', '-a', f'.copier-answers.{module}.yml',
+                    '--vcs-ref', 'v8.1.0', '--data', 'toolkit_version=v8.1.0', '.', cwd=consumer)
+                run('git', 'add', '.', cwd=consumer)
+                run('git', 'commit', '-qm', f'update {module}', cwd=consumer)
+                answers = yaml.safe_load((consumer / f'.copier-answers.{module}.yml').read_text())
+                self.assertEqual(answers['_commit'], 'v8.1.0')
+                self.assertEqual(answers['toolkit_version'], 'v8.1.0')
             self.assertFalse(list(consumer.rglob('*.rej')))
             self.assertEqual(custom.read_text(), custom_text)
             for name in ('gitleaks', 'copier-update'):

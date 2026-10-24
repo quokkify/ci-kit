@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render current template scenarios into runtime-only Actions CodeQL evidence."""
+"""Render the module scenarios into runtime-only Actions CodeQL evidence."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_workflows(root: Path = ROOT) -> list[Path]:
-    scenarios = sorted((root / "tests/scenarios").glob("*.yml"))
+    scenarios = sorted((root / "tests/scenarios/modules").glob("*.yml"))
     if not scenarios:
-        raise ValueError("no template scenarios found")
+        raise ValueError("no module scenarios found")
     target = root / ".github/workflows"
     evidence: dict[Path, bytes] = {}
     with tempfile.TemporaryDirectory(prefix="codeql-template-") as temporary:
@@ -28,14 +28,16 @@ def render_workflows(root: Path = ROOT) -> list[Path]:
         source = temporary_root / "source"
         source.mkdir()
         shutil.copy2(root / "copier.yml", source / "copier.yml")
-        shutil.copytree(root / "template", source / "template")
+        shutil.copytree(root / "modules", source / "modules")
         for scenario in scenarios:
             destination = temporary_root / scenario.stem
-            run_copy(
-                str(source), destination,
-                data=yaml.safe_load(scenario.read_text()),
-                defaults=True, quiet=True, skip_tasks=True,
-            )
+            for module, answers in yaml.safe_load(scenario.read_text()).items():
+                run_copy(
+                    str(source), destination,
+                    data={**(answers or {}), "module": module},
+                    answers_file=f".copier-answers.{module}.yml",
+                    defaults=True, quiet=True, skip_tasks=True,
+                )
             workflows = sorted((destination / ".github/workflows").glob("*.yml"))
             if not workflows:
                 raise ValueError(f"{scenario.name}: no workflows rendered")

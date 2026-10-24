@@ -466,7 +466,7 @@ class AllureHistoryTransportTests(TestCase):
         self.assertEqual(output, '')
 
     def test_template_config_and_caller_share_one_history_path(self) -> None:
-        config = (ROOT / 'template/.github/allure/allurerc.mjs.jinja').read_text()
+        config = (ROOT / 'modules/allure/template/.github/allure/allurerc.mjs.jinja').read_text()
         self.assertIn('historyPath: "./allure-history/history.jsonl",', config)
         self.assertIn('historyLimit: 20,', config)
         self.assertNotIn('appendHistory', config)
@@ -489,8 +489,8 @@ class AllureConcurrencyTests(TestCase):
                   'github.event.workflow_run.head_branch': branch,
                   'inputs.source-workflow-path': source_path}
         caller = jinja2.Environment().from_string(
-            (ROOT / 'template/.github/workflows/allure-report.yml.jinja').read_text()).render(
-            toolkit_version='v99.0.0', components=[], allure_external_workflow_name='Run tests',
+            (ROOT / 'modules/allure/template/.github/workflows/allure-report.yml.jinja').read_text()).render(
+            toolkit_version='v99.0.0', allure_mode='external', allure_external_workflow_name='Run tests',
             allure_external_workflow_path='.github/workflows/test.yml', allure_external_artifact_prefix='allure-results-',
             allure_external_artifact_min_count=1, allure_external_artifact_max_count=7, allure_categories_file='',
             allure_publish_pages=False, allure_pages_url='')
@@ -518,13 +518,13 @@ class AllureConcurrencyTests(TestCase):
 
 class AllureCallerContracts(TestCase):
     def test_generated_variants_delegate_exact_inputs_and_no_broad_token(self) -> None:
-        template = jinja2.Environment().from_string((ROOT / 'template/.github/workflows/allure-report.yml.jinja').read_text())
+        template = jinja2.Environment().from_string((ROOT / 'modules/allure/template/.github/workflows/allure-report.yml.jinja').read_text())
         with tempfile.TemporaryDirectory(prefix='allure-callers-') as directory:
-            for has_components, component in [(False, False), (True, True), (True, False)]:
+            for component in [False, True]:
                 for pages in [False, True]:
                     for name in ['Validate', 'Run tests', 'CI: build', 'A "quoted" name', 'Workflow with spaces']:
                         for category in ['', '.github/allure/categories.json']:
-                            text = template.render(toolkit_version='v99.0.0', components=[{'id': 'current-id'}] if has_components else [],
+                            text = template.render(toolkit_version='v99.0.0',
                                 allure_mode='component' if component else 'external',
                                 allure_external_workflow_name=name, allure_external_workflow_path='.github/workflows/test.yml',
                                 allure_external_artifact_prefix='external-allure-', allure_external_artifact_min_count=2,
@@ -553,33 +553,29 @@ class AllureCallerContracts(TestCase):
                             self.assertIsNotNone(shutil.which('actionlint'), 'actionlint is required for rendered callers')
                             subprocess.run(['actionlint', str(path)], capture_output=True, text=True, timeout=15, check=True)
 
-    def test_components_with_external_source_report_from_the_external_workflow(self) -> None:
+    def test_external_source_reports_from_the_external_workflow(self) -> None:
         copier = shutil.which('copier')
         self.assertIsNotNone(copier, 'Copier is required for generated workflow regression coverage')
         answers = {
-            'project_name': 'fixture-mixed', 'toolkit_version': 'v1.0.0', 'docker': False, 'release_please': False,
-            'renovate': False, 'codeql': False,
-            'components': [{'type': 'python', 'path': '.', 'id': 'app-python', 'name': 'App Python'},
-                           {'type': 'java', 'path': '.', 'id': 'app-java', 'name': 'App Java'}],
-            'allure_report': True, 'allure_source': 'external', 'allure_external_workflow_name': 'Run tests',
+            'module': 'allure', 'project_name': 'fixture-mixed', 'toolkit_version': 'v1.0.0',
+            'allure_source': 'external', 'allure_external_workflow_name': 'Run tests',
             'allure_external_workflow_path': '.github/workflows/test.yml', 'allure_external_artifact_prefix': 'allure-results-',
             'allure_external_artifact_min_count': 2, 'allure_external_artifact_max_count': 9,
         }
-        with tempfile.TemporaryDirectory(prefix='allure-mixed-') as directory:
+        with tempfile.TemporaryDirectory(prefix='allure-external-') as directory:
             source = Path(directory) / 'template-source'
             shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns('.git', '.worktrees', '__pycache__'))
             data = Path(directory) / 'answers.yml'
             data.write_text(yaml.safe_dump(answers))
             destination = Path(directory) / 'consumer'
-            subprocess.run([copier, 'copy', '--trust', '--defaults', '--data-file', str(data), str(source), str(destination)],
+            subprocess.run([copier, 'copy', '--defaults', '--data-file', str(data), str(source), str(destination)],
                            check=True, capture_output=True, text=True)
             report = yaml.safe_load((destination / '.github/workflows/allure-report.yml').read_text())['jobs']['report']['with']
             self.assertEqual((report['source-workflow'], report['source-workflow-path'], report['artifact-mode']),
                              ('Run tests', '.github/workflows/test.yml', 'external'))
             self.assertEqual((report['minimum-artifacts'], report['maximum-artifacts']), (2, 9))
-            recorded = yaml.safe_load((destination / '.copier-answers.yml').read_text())
+            recorded = yaml.safe_load((destination / '.copier-answers.allure.yml').read_text())
             self.assertEqual(recorded['allure_source'], 'external')
-            self.assertIn('The project-owned `Run tests` workflow', (destination / 'README.md').read_text())
 
     def test_core_permissions_token_and_legacy_api_pages_layout_are_preserved(self) -> None:
         self.assertTrue(all('write' not in job['permissions'].values() or job == CORE['jobs']['comment'] for job in CORE['jobs'].values()))
@@ -620,12 +616,11 @@ class AllureCallerContracts(TestCase):
             git(['init', '--quiet']); git(['add', '.']); git(['commit', '-qm', 'fixture']); git(['tag', 'v9.1.0'])
             for explicit in [False, True]:
                 target = Path(directory) / ('explicit' if explicit else 'automatic')
-                command = [copier, 'copy', '--trust', '--defaults', '--data', 'allure_report=true',
-                           '--data', 'release_please=false', '--data', 'renovate=false']
+                command = [copier, 'copy', '--defaults', '--data', 'module=allure']
                 if explicit:
                     command += ['--vcs-ref', 'v9.1.0']
                 subprocess.run([*command, str(source), str(target)], check=True, capture_output=True, text=True, timeout=30)
-                answers = yaml.safe_load((target / '.copier-answers.yml').read_text())
+                answers = yaml.safe_load((target / '.copier-answers.allure.yml').read_text())
                 self.assertEqual(answers['_commit'], 'v9.1.0')
                 self.assertEqual(answers['toolkit_version'], 'v9.1.0')
                 self.assertIn('allure-publisher-core.yml@v9.1.0', (target / '.github/workflows/allure-report.yml').read_text())
@@ -633,68 +628,12 @@ class AllureCallerContracts(TestCase):
             git(['init', '--quiet'], cwd=target); git(['add', '.'], cwd=target); git(['commit', '-qm', 'consumer'], cwd=target)
             (source / 'README.md').write_text((source / 'README.md').read_text() + '\nFixture second release.\n')
             git(['add', '.']); git(['commit', '-qm', 'second release']); git(['tag', 'v9.2.0'])
-            subprocess.run([copier, 'update', '--trust', '--defaults', '--vcs-ref', 'v9.2.0', '--data', 'toolkit_version=v9.2.0'],
+            subprocess.run([copier, 'update', '--defaults', '-a', '.copier-answers.allure.yml', '--vcs-ref', 'v9.2.0',
+                            '--data', 'toolkit_version=v9.2.0'],
                            cwd=target, check=True, capture_output=True, text=True, timeout=30)
-            answers = yaml.safe_load((target / '.copier-answers.yml').read_text())
+            answers = yaml.safe_load((target / '.copier-answers.allure.yml').read_text())
             self.assertEqual(answers['_commit'], 'v9.2.0')
             self.assertEqual(answers['toolkit_version'], 'v9.2.0')
-
-    def test_legacy_allure_update_rejects_retained_pin_before_writes(self) -> None:
-        copier = shutil.which('copier')
-        self.assertIsNotNone(copier, 'Copier is a required release migration test dependency')
-        with tempfile.TemporaryDirectory(prefix='allure-legacy-update-') as directory:
-            source = Path(directory) / 'source'
-            shutil.copytree(ROOT, source, ignore=shutil.ignore_patterns('.git', '__pycache__'))
-            def git(args, cwd=source):
-                return subprocess.run(['git', '-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', *args],
-                                      cwd=cwd, capture_output=True, text=True, check=True, timeout=30)
-            # Actual released questions and inline workflow, with no new endpoints.
-            legacy_template = source / 'templates/project/template'
-            legacy_template.parent.mkdir(parents=True)
-            (source / 'template').rename(legacy_template)
-            for path in ['copier.yml', 'templates/project/template/.github/workflows/allure-report.yml.jinja']:
-                original = git(['show', 'v2.23.5:' + path], cwd=ROOT).stdout
-                (source / path).write_text(original)
-            for path in ['allure-publisher-core.yml', 'allure-pages.yml']:
-                (source / '.github/workflows' / path).unlink()
-            git(['init', '--quiet']); git(['add', '.']); git(['commit', '-qm', 'legacy release']); git(['tag', 'v2.23.5'])
-            for enabled in [True, False]:
-                target = Path(directory) / ('allure' if enabled else 'ordinary')
-                subprocess.run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'v2.23.5',
-                                '--data', 'allure_report=' + str(enabled).lower(), '--data', 'toolkit_version=v2.23.5', '--data', 'release_please=false',
-                                '--data', 'renovate=false', str(source), str(target)],
-                               check=True, capture_output=True, text=True, timeout=30)
-                git(['init', '--quiet'], cwd=target); git(['add', '.'], cwd=target); git(['commit', '-qm', 'consumer'], cwd=target)
-            shutil.rmtree(source / 'templates')
-            shutil.copytree(ROOT, source, dirs_exist_ok=True, ignore=shutil.ignore_patterns('.git', '__pycache__'))
-            git(['add', '-A']); git(['commit', '-qm', 'shared Allure release']); git(['tag', 'v9.3.0'])
-            fresh = Path(directory) / 'invalid-fresh'
-            fresh.mkdir()
-            failed_copy = subprocess.run([copier, 'copy', '--trust', '--defaults', '--vcs-ref', 'v9.3.0',
-                                          '--data', 'allure_report=true', '--data', 'toolkit_version=v2.23.5',
-                                          str(source), str(fresh)], capture_output=True, text=True, timeout=30)
-            self.assertNotEqual(failed_copy.returncode, 0)
-            self.assertIn('--data toolkit_version=v9.3.0', failed_copy.stdout + failed_copy.stderr)
-            self.assertEqual(list(fresh.iterdir()), [])
-            target = Path(directory) / 'allure'
-            before = {str(path.relative_to(target)): path.read_bytes() for path in target.rglob('*')
-                      if path.is_file() and '.git' not in path.relative_to(target).parts}
-            # v2.23.5 answers predate handed_off; without it the update is refused with CIK-LEGACY-006.
-            command = [copier, 'update', '--trust', '--defaults', '--vcs-ref', 'v9.3.0', '--data', 'handed_off=[validate]']
-            failed = subprocess.run(command, cwd=target, capture_output=True, text=True, timeout=30)
-            self.assertNotEqual(failed.returncode, 0)
-            self.assertIn('--data toolkit_version=v9.3.0', failed.stdout + failed.stderr)
-            after = {str(path.relative_to(target)): path.read_bytes() for path in target.rglob('*')
-                     if path.is_file() and '.git' not in path.relative_to(target).parts}
-            self.assertEqual(after, before)
-            subprocess.run([*command, '--data', 'toolkit_version=v9.3.0'], cwd=target,
-                           check=True, capture_output=True, text=True, timeout=30)
-            self.assertIn('allure-publisher-core.yml@v9.3.0', (target / '.github/workflows/allure-report.yml').read_text())
-            ordinary = Path(directory) / 'ordinary'
-            subprocess.run(command, cwd=ordinary, check=True, capture_output=True, text=True, timeout=30)
-            answers = yaml.safe_load((ordinary / '.copier-answers.yml').read_text())
-            self.assertEqual(answers['toolkit_version'], 'v2.23.5')
-            self.assertFalse(answers['allure_report'])
 
     def test_validator_contracts_retain_executable_negative_probes(self) -> None:
         tree = ast.parse((ROOT / 'scripts/validate.py').read_text())

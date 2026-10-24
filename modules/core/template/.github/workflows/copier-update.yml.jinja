@@ -112,9 +112,8 @@ jobs:
           # ci-kit update commits every module it updates; the commits are squashed
           # back into the single update commit below.
           base="$(git rev-parse HEAD)"
-          update_args=(--repo . --to "$ref")
           python -m pip install "git+https://github.com/quokkify/ci-kit@${ref}"
-          ci-kit update "${update_args[@]}"
+          ci-kit update --repo . --to "$ref"
           git reset --soft "$base"
 
           # Copier deliberately preserves files with local edits, even when the

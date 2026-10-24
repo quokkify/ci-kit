@@ -31,7 +31,6 @@ PR_SHA = "b" * 40
 class API:
     def __init__(self):
         self.applied = "v2.0.0"
-        self.legacy_missing = False
         self.rule_checks = [{"context": "Validate", "integration_id": 7}]
         self.classic = {"checks": []}
         self.pulls = []
@@ -59,12 +58,7 @@ class API:
         if endpoint == "repos/acme/demo/commits/main":
             self.commit_calls += 1
             return {"sha": PR_SHA if self.default_stale and self.commit_calls > 1 else DEFAULT_SHA}
-        if "/contents/.copier-answers.yml?ref=" in endpoint and self.legacy_missing:
-            return None
         if "/contents/.copier-answers.core.yml?ref=" in endpoint:
-            assert f"ref={DEFAULT_SHA}" in endpoint
-            return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
-        if "/contents/.copier-answers.yml?ref=" in endpoint:
             assert f"ref={DEFAULT_SHA}" in endpoint
             return {"encoding": "base64", "content": base64.b64encode(f"_commit: {self.applied}\n".encode()).decode()}
         if "/rules/branches/" in endpoint:
@@ -102,24 +96,31 @@ class HealthTests(TestCase):
         self.assertIsNone(result["pull_request"])
         self.assertEqual(result["pull_request_observation"]["status"], "observed")
 
-    def test_health_reads_core_answers_without_legacy(self):
+    def test_health_reads_core_answers(self):
         api = API()
-        api.legacy_missing = True
         result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", api, now=NOW)
         self.assertEqual(result["applied_template_version"], "v2.0.0")
         self.assertEqual(result["adoption"], "current")
 
-    def test_non_404_legacy_error_does_not_fall_back_to_core(self):
+    def test_unreadable_core_answers_leave_the_version_unknown(self):
         api = API()
-        api.legacy_missing = True
         original = api.__call__
-        def fail_legacy(endpoint):
-            if "/contents/.copier-answers.yml?ref=" in endpoint:
-                raise RuntimeError("HTTP 502")
-            return original(endpoint)
-        result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", fail_legacy, now=NOW)
-        self.assertIsNone(result["applied_template_version"])
-        self.assertEqual(result["adoption"], "unknown")
+        for failure in (RuntimeError("HTTP 502"), None):
+            def fail_core(endpoint):
+                if "/contents/.copier-answers.core.yml?ref=" in endpoint:
+                    if failure is None:
+                        return None
+                    raise failure
+                return original(endpoint)
+            with self.subTest(failure=failure):
+                result = health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", fail_core, now=NOW)
+                self.assertIsNone(result["applied_template_version"])
+                self.assertEqual(result["adoption"], "unknown")
+
+    def test_legacy_answers_are_never_read(self):
+        api = API()
+        health.collect_health("acme/demo", "main", "v2.0.0", "automation/copier-template-update", api, now=NOW)
+        self.assertFalse(any("/contents/.copier-answers.yml?" in endpoint for endpoint in api.calls))
 
     def test_open_pr_is_not_adoption(self):
         api = API()

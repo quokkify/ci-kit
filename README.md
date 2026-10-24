@@ -37,18 +37,14 @@ You need `git`, [`gh`](https://cli.github.com/) (authenticated), and [Copier](ht
 ```bash
 export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq .tagName)"
 copier copy https://github.com/quokkify/ci-kit.git my-project \
-  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust
-copier copy https://github.com/quokkify/ci-kit.git my-project \
-  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" --trust \
-  -a .copier-answers.core.yml -d module=core
+  --vcs-ref "$TOOLKIT_REF" --data "toolkit_version=$TOOLKIT_REF" -d module=core
 ```
 
-Run the same commands with `.` instead of `my-project` from the root of an existing repository. A new repository is `core` plus any of the `security`, `release`, `allure` and `renovate` modules plus one language module per stack, each added the same way (`-a .copier-answers.python.yml -d module=python`; see [modules](docs/modules.md)). The first command applies the legacy template, which is transitional until v4.0.0; it hands `validate` to `core`, and `ci-kit migrate-legacy` hands the remaining areas to modules. Together they write:
+Run the same commands with `.` instead of `my-project` from the root of an existing repository. A new repository is `core` plus any of the `security`, `release`, `allure` and `renovate` modules plus one language module per stack, each added the same way (`-d module=python`; see [modules](docs/modules.md)). `module` defaults to `core`, and each module writes its answers to `.copier-answers.<module>.yml`. Together they write:
 
 ```text
 my-project/
-├── .copier-answers.yml          # commit it; copier update needs it
-├── .copier-answers.core.yml     # core module answers
+├── .copier-answers.core.yml     # core module answers; commit every answers file
 ├── .ci/modules/core.yml         # core module declaration
 ├── README.md                    # written once, then yours
 ├── docs/ci-kit.md      # installed modules, doctor check, update steps
@@ -66,8 +62,6 @@ my-project/
         ├── allure-report.yml    # if the allure module is installed
         └── release.yml          # if the release module is installed
 ```
-
-Until v4.0.0, files of an area legacy still owns follow its flags (`codeql`, `gitleaks`, `release_please`, `allure_report`, `renovate`) until `ci-kit migrate-legacy` hands the area to its module.
 
 Open `docs/ci-kit.md` in the generated project and read the installed modules, the `ci-kit doctor` check and the update steps. The [human guide](docs/human-guide.md) covers updates and fleet rollout.
 
@@ -97,12 +91,12 @@ Use the independent [`Python`](examples/python-ci.yml), [`Node.js`](examples/nod
 - **[Human guide: create, update, extend, and roll out projects](docs/human-guide.md)**
 - [Architecture and researched constraints](docs/architecture.md)
 - [Detailed usage, Copier, Release Please, and Renovate](docs/usage.md)
-- [Modules and migration](docs/modules.md)
+- [Modules](docs/modules.md)
 - [Versioning](docs/versioning.md)
 - [Security model](docs/security.md)
 - [Contributing](CONTRIBUTING.md)
 
-The root [`copier.yml`](copier.yml) points at `template/`. Keeping the Copier entry point at the Git root is required for reliable VCS-aware `copier update` operations.
+The root [`copier.yml`](copier.yml) points at `modules/<module>/template`. Keeping the Copier entry point at the Git root is required for reliable VCS-aware `copier update` operations.
 
 Submodules are intentionally absent: consumers need a stable job API and upgrade PRs, not a second Git history embedded in every project. Production references use exact released versions, never `@main`. Update generated project files with `copier update`; Renovate updates workflow versions in examples and documentation as well as in workflows.
 

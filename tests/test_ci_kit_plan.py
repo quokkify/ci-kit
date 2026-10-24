@@ -179,14 +179,6 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(plan.findings[0].module, "java")
         self.assertIn("_commit", plan.findings[0].message)
 
-    def test_core_012_includes_legacy_answers(self):
-        repo = rendered_repo("core")
-        (repo / ".copier-answers.yml").write_text(
-            "_commit: v98.0.0\n_src_path: gh:quokkify/ci-kit\nhanded_off: [validate]\ntoolkit_version: v98.0.0\n"
-        )
-        found = [f for f in build_plan(repo, drift=False).findings if f.code == "CIK-CORE-012"]
-        self.assertEqual([(f.module, f.path) for f in found], [("legacy", ".copier-answers.yml")] * 2)
-
     def test_core_030_when_area_not_handed_off(self):
         repo = rendered_repo("core")
         for handed_off, expected in (

@@ -31,14 +31,6 @@ class CodeRegistryTests(unittest.TestCase):
                 with self.subTest(code=code, heading=heading):
                     self.assertIn(heading, text)
 
-    def test_legacy_006_runbook_names_the_last_legacy_validate_release(self):
-        # The release step edits both; they must not drift apart.
-        from ci_kit.legacy import LAST_LEGACY_VALIDATE
-
-        text = (ROOT / "docs/errors/CIK-LEGACY-006.md").read_text()
-        self.assertIn(f"still renders `validate.yml`: {LAST_LEGACY_VALIDATE}", text)
-        self.assertIn(f"ci-kit@{LAST_LEGACY_VALIDATE}", text)
-
 
 if __name__ == "__main__":
     unittest.main()
