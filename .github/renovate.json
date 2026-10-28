@@ -51,19 +51,29 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Update Python runtime versions in workflows.",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
-      "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\""],
+      "description": "Update Python runtime versions in workflows and the workflow inputs snapshot.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^tools/ci_kit/workflow_inputs\\.json$/"
+      ],
+      "matchStrings": [
+        "python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\"",
+        "\"python-version\": \\{\\s*\"default\": \"(?<currentValue>3\\.\\d+)\""
+      ],
       "depNameTemplate": "python",
       "datasourceTemplate": "python-version",
       "versioningTemplate": "python"
     },
     {
       "customType": "regex",
-      "description": "Update the pip version installed by the Python CI workflow.",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "description": "Update the pip version installed by the Python CI workflow and recorded in the workflow inputs snapshot.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^tools/ci_kit/workflow_inputs\\.json$/"
+      ],
       "matchStrings": [
-        "pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""
+        "pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\"",
+        "\"pip-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
       ],
       "depNameTemplate": "pip",
       "datasourceTemplate": "pypi",
@@ -203,13 +213,15 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the corepack setup pin aligned in the composite action and reusable workflow.",
+      "description": "Keep the corepack setup pin aligned in the composite action, the reusable workflow and the workflow inputs snapshot.",
       "managerFilePatterns": [
         "/^actions/setup-node/action\\.yml$/",
-        "/^\\.github/workflows/node-ci\\.yml$/"
+        "/^\\.github/workflows/node-ci\\.yml$/",
+        "/^tools/ci_kit/workflow_inputs\\.json$/"
       ],
       "matchStrings": [
-        "corepack-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+        "corepack-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "\"corepack-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
       ],
       "depNameTemplate": "corepack",
       "datasourceTemplate": "npm",
@@ -217,13 +229,15 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the uv setup pin aligned in the composite action and reusable workflow.",
+      "description": "Keep the uv setup pin aligned in the composite action, the reusable workflow and the workflow inputs snapshot.",
       "managerFilePatterns": [
         "/^actions/setup-python/action\\.yml$/",
-        "/^\\.github/workflows/python-ci\\.yml$/"
+        "/^\\.github/workflows/python-ci\\.yml$/",
+        "/^tools/ci_kit/workflow_inputs\\.json$/"
       ],
       "matchStrings": [
-        "uv-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+        "uv-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "\"uv-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
       ],
       "depNameTemplate": "uv",
       "datasourceTemplate": "pypi",
@@ -231,13 +245,15 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the poetry setup pin aligned in the composite action and reusable workflow.",
+      "description": "Keep the poetry setup pin aligned in the composite action, the reusable workflow and the workflow inputs snapshot.",
       "managerFilePatterns": [
         "/^actions/setup-python/action\\.yml$/",
-        "/^\\.github/workflows/python-ci\\.yml$/"
+        "/^\\.github/workflows/python-ci\\.yml$/",
+        "/^tools/ci_kit/workflow_inputs\\.json$/"
       ],
       "matchStrings": [
-        "poetry-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+        "poetry-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
+        "\"poetry-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
       ],
       "depNameTemplate": "poetry",
       "datasourceTemplate": "pypi",
