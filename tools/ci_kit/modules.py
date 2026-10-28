@@ -20,4 +20,5 @@ MODULES: dict[str, ModuleInfo] = {
     "release": ModuleInfo(("core",)),
     "allure": ModuleInfo(("core",)),
     "renovate": ModuleInfo(("core",)),
+    "labels": ModuleInfo(("core",)),
 }

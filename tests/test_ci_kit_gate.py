@@ -176,6 +176,11 @@ class GateTests(unittest.TestCase):
         found = failed_java("a | b")
         self.assertIn("a \\| b", render_summary(found))
 
+    def test_jobless_module_is_not_evaluated(self):
+        ok, rows = evaluate(["core", "labels"], needs(java="skipped"), None, REF)
+        self.assertTrue(ok)
+        self.assertEqual([item.module for item in rows], ["core"])
+
 
 class GateJobNameTests(unittest.TestCase):
     def test_gate_matches_language_job_name(self):
