@@ -26,7 +26,7 @@ on:
       pip-version:
         description: Exact pip version used for pip-managed installs.
         type: string
-        default: "26.2.1"
+        default: "26.2.2"
       requirements-file:
         description: Requirements file relative to working-directory; auto-detected when empty.
         type: string
