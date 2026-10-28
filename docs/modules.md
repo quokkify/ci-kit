@@ -15,6 +15,7 @@ ci-kit is a set of Copier modules. Each module is a Copier template under `modul
 | `release` | `.ci/modules/release.yml` | `release_mode` |
 | `allure` | `.ci/modules/allure.yml` | `allure_*` |
 | `renovate` | `.ci/modules/renovate.yml` | `renovate_config_repository`, `renovate_presets` |
+| `labels` | `.ci/modules/labels.yml` | `toolkit_version` |
 
 The repository options `gitleaks_job_name`, `gitleaks_scan`, `gitleaks_aggregate`, `codeql_aggregate` and `allure_group_by` (an `allure_*` answer) are described in [usage](usage.md#repository-options).
 
@@ -91,3 +92,13 @@ The `core` caller keeps `name: Validate`. Allure external-mode `workflow_run` tr
 ## Updating modules
 
 `ci-kit update` refuses a repository with legacy answers that still render files (`CIK-CORE-030`) before it changes anything, then updates `core` first and the other modules in a fixed order, with one commit per answers file. The fleet `update` mode and the consumer's `copier-update.yml` first drop empty legacy answers (see above), then run `ci-kit update --repo . --to <ref>`. A `.rej` file or Copier failure stops the run with `CIK-UPDATE-001` ([runbook](errors/CIK-UPDATE-001.md)).
+
+## Adding a module
+
+`ci-kit add --module <m> --repo <path> --to <ref> [--template-src <src>] [--json <file>]` installs one module into a repository that already runs `core` at `<ref>`:
+
+```bash
+ci-kit add --module labels --repo . --to v4.1.0
+```
+
+It refuses to start on a dirty tree (`CIK-ADD-001`), an unknown module (`CIK-ADD-002`), a required module that is missing, at another ref, or from an untrusted source (`CIK-ADD-003`), or a file the module would render that already exists (`CIK-ADD-004`). A module whose answers file is already present is reported as installed and left alone (exit 0). Otherwise it runs `copier copy` with the module's answers file and commits `chore(ci-kit): add <m> module`. When Copier fails or the plan check reports findings, it resets to the starting `HEAD`, removes only the files it created, and reports `CIK-ADD-005`. The template source is `_src_path` from `.copier-answers.core.yml` unless `--template-src` is given. `--json` writes `module`, `ref`, `installed`, `commits`, and `findings` (each `{code, module, message, path}`); the command exits 1 when there are findings.

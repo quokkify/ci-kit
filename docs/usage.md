@@ -66,6 +66,7 @@ ci-kit update --repo . --to <release>
 - `validate.yml`, owned by the `core` module, runs the Python, Node.js, Java, and Docker jobs declared by the language modules;
 - `codeql.yml` analyzes GitHub Actions plus the languages of the installed language modules (or `codeql_languages`) when the `security` module is installed with `codeql`;
 - `gitleaks.yml` scans both Git history and the current tree with a checksum-verified binary when the `security` module is installed with `gitleaks`;
+- `labels.yml` (present when the `labels` module is installed with `ci-kit add --module labels`) syncs the organization label manifest and an optional project `.github/labels.yml` on label edits, weekly, and on demand, without deleting unlisted labels (aliases still merge old labels into their target); a project `.github/labels.yml` must be a non-empty list and must not reuse a manifest name or alias;
 - `release.yml` uses the shared Release Please workflow when the `release` module is installed;
 - `allure-report.yml` securely consumes source-run `allure-results-*` artifacts and comments an Allure 3 report when the `allure` module is installed;
 - `.github/renovate.json` extends the selected organization presets when the `renovate` module is installed.
@@ -86,6 +87,12 @@ gh workflow run copier-fleet-auto-update.yml --repo quokkify/ci-kit -f dry-run=t
 ```
 
 The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v4.0.1`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
+
+**Install a new module across the fleet.** `--add-module MODULE` (for example `labels`) adds a module to every managed repository instead of running a template update. Each repository must already be on the target release (`--template-ref`, default the latest tag); a repository whose `core` answers are at another ref is reported as `needs-update-first`. The updater runs `ci-kit add` in a clone and opens a pull request from the `ci-kit/add-MODULE` branch titled `chore(ci-kit): add MODULE module`; an open pull request on that branch is reused and its branch refreshed. Statuses: `up-to-date` (already installed), `needs-update-first`, `would-add` (`--dry-run`), `add-rejected` (detail lists the `CIK-ADD-*` codes) and `pull-request`. The flag cannot be combined with `--auto-merge` or `--merge-ready`; `rollout_copier_fleet.py --add-module MODULE` forwards it to the pilot and fanout stages.
+
+```console
+python scripts/update_copier_fleet.py --org quokkify --public-only --add-module labels --dry-run
+```
 
 Across both paths, existing project changes are preserved by Copier's update algorithm; `.rej` conflicts fail that repository loudly instead of opening a partial pull request. The deterministic `automation/copier-template-update` branch is automation-owned and may be force-updated with an exact lease, so maintainers should not add manual commits to it. Normal updates follow the latest release tag rather than unreleased `main`.
 

@@ -31,7 +31,7 @@ _skip_if_exists:
 module:
   type: str
   help: Template module to apply.
-  choices: [core, java, python, node, docker, security, release, allure, renovate]
+  choices: [core, java, python, node, docker, security, release, allure, renovate, labels]
   default: core
 
 project_name:
@@ -41,7 +41,7 @@ project_name:
   default: my-project
 
 toolkit_version:
-  when: "{{ module in ['core', 'security', 'release', 'allure'] }}"
+  when: "{{ module in ['core', 'security', 'release', 'allure', 'labels'] }}"
   type: str
   help: Immutable ci-kit SemVer tag used by generated workflows.
   # Fresh copies use the selected immutable template tag, including Copier's
