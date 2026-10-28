@@ -282,6 +282,19 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaisesRegex(gate.GateError, "is not on v2.0.0"):
                 gate.verify_pilot("quokkify/skills", 7, "v2.0.0", 0)
 
+    def test_regression_pilot_on_an_add_branch_checks_that_branch_throughout(self):
+        """Regression guard: verify_pilot must pass the add branch to every PR identity check."""
+        snapshot = (SHA, OTHER, SHA)
+        with patch.object(gate, "current_snapshot", autospec=True, return_value=snapshot) as current, \
+             patch.object(gate, "api", side_effect=module_only_api()), \
+             patch.object(gate, "wait_until", side_effect=lambda check, timeout: check()), \
+             patch.object(gate, "pilot_ready", autospec=True, return_value=True) as ready:
+            gate.verify_pilot("quokkify/skills", 7, "v1.2.3", 0, branch="ci-kit/add-labels")
+        self.assertTrue(current.call_args_list)
+        for call in current.call_args_list:
+            self.assertEqual(call.kwargs.get("branch"), "ci-kit/add-labels")
+        self.assertEqual(ready.call_args.kwargs.get("branch"), "ci-kit/add-labels")
+
     def test_pilot_after_dropping_empty_legacy_answers_passes_on_the_target(self):
         # The v4 fleet run drops a fully handed-off .copier-answers.yml and updates the modules on the
         # same branch, so the PR head has no legacy answers and core answers on the target.
@@ -373,6 +386,18 @@ class PilotGateTests(unittest.TestCase):
         with patch.object(gate, "api", side_effect=[metadata, pull, {"sha": OTHER}]):
             self.assertEqual(gate.current_snapshot(REPO, 9), (SHA, OTHER, "c" * 40))
 
+    def test_regression_snapshot_accepts_a_pilot_pr_from_the_given_branch(self):
+        """Regression guard: v4.1.0 add-module rollout crashed because current_snapshot lost its branch argument."""
+        metadata = {"private": False, "visibility": "public", "default_branch": "main"}
+        pull = {"state": "open", "base": {"ref": "main", "sha": OTHER},
+                "head": {"ref": "ci-kit/add-labels", "sha": SHA, "repo": {"full_name": REPO}},
+                "merge_commit_sha": "c" * 40}
+        with patch.object(gate, "api", side_effect=[metadata, pull, {"sha": OTHER}]):
+            self.assertEqual(gate.current_snapshot(REPO, 9, branch="ci-kit/add-labels"), (SHA, OTHER, "c" * 40))
+        with patch.object(gate, "api", side_effect=[metadata, pull]):
+            with self.assertRaisesRegex(gate.GateError, "Unexpected pilot PR identity"):
+                gate.current_snapshot(REPO, 9)
+
     def test_current_head_base_check_and_codeql_association_pass(self):
         snapshot = (SHA, OTHER, "c" * 40)
         association = {"number": 9, "head": {"sha": SHA}, "base": {"sha": OTHER}}
@@ -458,8 +483,8 @@ class RolloutTests(unittest.TestCase):
              patch.object(rollout.fleet, "resolve_template_commit", return_value=SHA), \
              patch.object(rollout, "wait_until"), \
              patch.object(rollout, "run_update", side_effect=update), \
-             patch.object(rollout, "verify_pilot", side_effect=verify), \
-             patch.object(rollout, "current_snapshot", side_effect=snapshot), \
+             patch.object(rollout, "verify_pilot", autospec=True, side_effect=verify), \
+             patch.object(rollout, "current_snapshot", autospec=True, side_effect=snapshot), \
              patch.dict(rollout.os.environ, dict.fromkeys(GITHUB_RUN_VARIABLES, "")):
             rollout.rollout(["--write", "--public-only", "--add-module", "labels",
                              "--json-report", str(Path(temporary) / "report.json")])
