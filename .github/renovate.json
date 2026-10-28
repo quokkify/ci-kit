@@ -51,28 +51,23 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Update Python runtime versions in workflows and the workflow inputs snapshot.",
-      "managerFilePatterns": [
-        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
-        "/^tools/ci_kit/workflow_inputs\\.json$/"
-      ],
-      "matchStrings": [
-        "python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\"",
-        "\"python-version\": \\{\\s*\"default\": \"(?<currentValue>3\\.\\d+)\""
-      ],
+      "description": "Update Python runtime versions in workflows.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\""],
       "depNameTemplate": "python",
       "datasourceTemplate": "python-version",
       "versioningTemplate": "python"
     },
     {
       "customType": "regex",
-      "description": "Update the pip version installed by the Python CI workflow and recorded in the workflow inputs snapshot.",
+      "description": "Keep the pip setup pin aligned in the composite action, the reusable workflow and the workflow inputs snapshot.",
       "managerFilePatterns": [
-        "/^\\.github/workflows/[^/]+\\.ya?ml$/",
+        "/^actions/setup-python/action\\.yml$/",
+        "/^\\.github/workflows/python-ci\\.yml$/",
         "/^tools/ci_kit/workflow_inputs\\.json$/"
       ],
       "matchStrings": [
-        "pip-version:\\s*\\\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\"",
+        "pip-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
         "\"pip-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
       ],
       "depNameTemplate": "pip",

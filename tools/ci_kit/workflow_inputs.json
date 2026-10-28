@@ -211,7 +211,7 @@
       "type": "string"
     },
     "pip-version": {
-      "default": "26.2.1",
+      "default": "26.2.2",
       "type": "string"
     },
     "poetry-version": {
