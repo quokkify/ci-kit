@@ -59,9 +59,9 @@ For Maven, `module` is the `-pl` selector, for example `module: engine/core` or 
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Matches `^[A-Za-z_][A-Za-z0-9_-]*$`; names the job and the artifact suffix. Unique within the component. |
-| `module` | yes | Gradle project path (`:core`) or Maven `-pl` selector. No line breaks. |
-| `test_command` | no | Trusted command that replaces the default test command. |
-| `results` | no | Allure results directory relative to the component `path` (no `..`, no glob). When set, the module's results are uploaded. |
+| `module` | yes | Gradle project path (`:core`) or Maven `-pl` selector. No whitespace. |
+| `test_command` | no | Trusted single-line command (no line breaks) that replaces the default test command. |
+| `results` | no | Allure results directory relative to the component `path` (single line, no `..`, no glob). When set, the module's results are uploaded. |
 
 Next to `test_modules`, the component-level `test_command`, `upload_test_artifacts`, `test_artifact_name` and `test_artifact_path` are rejected (`CIK-CORE-004`). `run_tests: false` disables all module jobs.
 

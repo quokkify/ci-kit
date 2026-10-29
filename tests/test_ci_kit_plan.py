@@ -112,11 +112,20 @@ class PlanTests(unittest.TestCase):
 
     def test_test_modules_schema_rejects_bad_items(self):
         cases = ([], [{"id": "1x", "module": ":a"}], [{"id": "a"}], [{"id": "a", "module": "a b"}],
-                 [{"id": "a", "module": ":a", "results": "../x"}], [{"id": "a", "module": ":a", "extra": 1}])
+                 [{"id": "a", "module": ":a", "results": "../x"}], [{"id": "a", "module": ":a", "extra": 1}],
+                 [{"id": "a", "module": ":m\n"}], [{"id": "a", "module": ":a", "results": "r\n/etc"}],
+                 [{"id": "a", "module": ":a", "test_command": "./gradlew x\necho y"}],
+                 [{"id": "a", "module": ":a", "test_command": "./gradlew x\r"}])
         for bad in cases:
             with self.subTest(bad=bad):
                 repo = modules_repo({"java": [{**JAVA_BASE, "test_modules": bad}]})
                 self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
+    def test_test_modules_schema_accepts_single_line_fields(self):
+        good = [{"id": "a", "module": ":core", "results": "engine/core/build/allure-results",
+                 "test_command": "./gradlew :core:test --console=plain"}]
+        repo = modules_repo({"java": [{**JAVA_BASE, "test_modules": good}]})
+        self.assertEqual(codes(build_plan(repo, drift=False)), [])
 
     def test_duplicate_test_module_id_is_core_005(self):
         modules = [{"id": "core", "module": ":a"}, {"id": "core", "module": ":b"}]
