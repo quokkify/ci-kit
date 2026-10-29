@@ -132,7 +132,7 @@ def _test_module_findings(loaded: dict[str, dict]) -> list[Finding]:
                 if item["id"] in module_ids:
                     findings.append(Finding("CIK-CORE-005", module, f"test module id {item['id']} is declared more than once in component {component['id']}", path))
                 module_ids.add(item["id"])
-            for name in component_artifacts(component):
+            for name in component_artifacts(component, module):
                 names.append(name)
                 if len(name) > MAX_ARTIFACT_NAME:
                     findings.append(Finding("CIK-CORE-013", module, f"artifact name {name} is {len(name)} characters, over the {MAX_ARTIFACT_NAME} limit", path))

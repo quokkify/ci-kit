@@ -27,13 +27,13 @@ def encode_test_modules(component: dict) -> str:
     ], separators=(",", ":"))
 
 
-def component_artifacts(component: dict) -> list[str]:
+def component_artifacts(component: dict, module: str = "java") -> list[str]:
     if component.get("test_modules"):
         return [artifact_name(component["id"], module["id"]) for module in component["test_modules"] if module.get("results")]
     if not component.get("upload_test_artifacts"):
         return []
     if component.get("test_artifact_name"):
         return [component["test_artifact_name"]]
-    from .inputs import load_inputs
+    from .inputs import WORKFLOWS, load_inputs
 
-    return [load_inputs()["java-ci"]["test-artifact-name"]["default"]]
+    return [load_inputs()[WORKFLOWS[module]]["test-artifact-name"]["default"]]

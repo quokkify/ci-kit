@@ -130,6 +130,16 @@ class PlanTests(unittest.TestCase):
         plan = build_plan(modules_repo({"java": [java], "python": [py]}), drift=False)
         self.assertEqual(codes(plan), ["CIK-CORE-005"])
 
+    def test_default_artifact_names_differ_per_language(self):
+        # regression guard: java and python defaults must not be treated as the same name
+        java = {**JAVA_BASE, "upload_test_artifacts": True}
+        py = {"id": "py", "name": "Py", "path": ".", "upload_test_artifacts": True}
+        self.assertEqual(build_plan(modules_repo({"java": [java], "python": [py]}), drift=False).findings, [])
+
+    def test_two_python_components_with_default_artifact_name_is_core_005(self):
+        py = [{"id": f"p{i}", "name": f"P{i}", "path": ".", "upload_test_artifacts": True} for i in (1, 2)]
+        self.assertEqual(codes(build_plan(modules_repo({"python": py}), drift=False)), ["CIK-CORE-005"])
+
     def test_overlong_module_artifact_is_core_013(self):
         java = {**JAVA_BASE, "id": "c" * 64, "test_modules": [{"id": "m" * 64, "module": ":m", "results": "r"}]}
         self.assertEqual(codes(build_plan(modules_repo({"java": [java]}), drift=False)), ["CIK-CORE-013"])
