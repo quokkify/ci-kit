@@ -21,7 +21,7 @@ export TOOLKIT_REF="$(gh release view --repo quokkify/ci-kit --json tagName --jq
 echo "$TOOLKIT_REF"
 ```
 
-Always use a released tag such as `v4.0.1`. Do not generate production files from `main` or `HEAD`.
+Always use a released tag such as `v4.1.0`. Do not generate production files from `main` or `HEAD`.
 
 ## 1. Create a new project from the template
 
