@@ -259,7 +259,7 @@
       "type": "boolean"
     },
     "uv-version": {
-      "default": "0.13.5",
+      "default": "0.13.6",
       "type": "string"
     },
     "working-directory": {
