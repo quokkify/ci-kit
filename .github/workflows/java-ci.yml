@@ -79,6 +79,7 @@ permissions:
 
 jobs:
   ci:
+    if: ${{ inputs.test-modules == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
     defaults:
@@ -134,6 +135,7 @@ jobs:
           TEST_COMMAND: ${{ inputs.test-command }}
           BUILD_COMMAND: ${{ inputs.build-command }}
         run: |
+          PREPARE_COMMAND=""
           case "$GRADLE_CONSOLE" in
             plain|rich) ;;
             *) echo "Unsupported gradle-console: $GRADLE_CONSOLE (expected plain or rich)" >&2; exit 2 ;;
@@ -150,17 +152,34 @@ jobs:
               if [[ -f ./gradlew ]]; then chmod +x ./gradlew; runner=./gradlew; else runner=gradle; fi
               [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test --console=$GRADLE_CONSOLE"
               [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test --console=$GRADLE_CONSOLE"
-              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner build --console=$GRADLE_CONSOLE"
+              if [[ -z "$BUILD_COMMAND" ]]; then
+                if [[ "${SPLIT_TESTS:-}" == true ]]; then BUILD_COMMAND="$runner build -x test --console=$GRADLE_CONSOLE"
+                else BUILD_COMMAND="$runner build --console=$GRADLE_CONSOLE"
+                fi
+              fi
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else TEST_COMMAND="$runner $(printf %q "$MODULE"):test --console=$GRADLE_CONSOLE"
+                fi
+              fi
               ;;
             maven)
               if [[ -f ./mvnw ]]; then chmod +x ./mvnw; runner=./mvnw; else runner=mvn; fi
               [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner --batch-mode --no-transfer-progress validate"
               [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner --batch-mode --no-transfer-progress test"
               [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner --batch-mode --no-transfer-progress package -DskipTests"
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else
+                  quoted="$(printf %q "$MODULE")"
+                  PREPARE_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted -am install -DskipTests"
+                  TEST_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted test"
+                fi
+              fi
               ;;
             *) echo "Unsupported build-tool: $tool" >&2; exit 2 ;;
           esac
-          printf 'lint=%s\ntest=%s\nbuild=%s\n' "$LINT_COMMAND" "$TEST_COMMAND" "$BUILD_COMMAND" >> "$GITHUB_OUTPUT"
+          printf 'lint=%s\ntest=%s\nbuild=%s\nprepare=%s\n' "$LINT_COMMAND" "$TEST_COMMAND" "$BUILD_COMMAND" "$PREPARE_COMMAND" >> "$GITHUB_OUTPUT"
       - name: Project setup
         if: ${{ inputs.install-command != '' }}
         env:
@@ -206,3 +225,286 @@ jobs:
           name: ${{ inputs.test-artifact-name }}
           path: ${{ format('{0}/{1}', inputs.working-directory, inputs.test-artifact-path) }}
           if-no-files-found: error
+
+  checks:
+    if: ${{ inputs.test-modules != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out toolkit actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
+      - name: Resolve build tool for dependency cache
+        id: cache
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+        run: |
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          [[ "$tool" == gradle || "$tool" == maven ]] || { echo "Unsupported build-tool: $tool" >&2; exit 2; }
+          echo "tool=$tool" >> "$GITHUB_OUTPUT"
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.distribution }}
+          cache: ${{ inputs.cache-dependencies && steps.cache.outputs.tool || '' }}
+          cache-jdk: ${{ inputs.cache-jdk }}
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/**/gradle-wrapper.properties
+            ${{ inputs.working-directory }}/**/*.gradle*
+            ${{ inputs.working-directory }}/**/gradle.properties
+            ${{ inputs.working-directory }}/**/*.versions.toml
+            ${{ inputs.working-directory }}/**/pom.xml
+            ${{ inputs.working-directory }}/**/.mvn/extensions.xml
+      - name: Resolve build tool and commands
+        id: commands
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          GRADLE_CONSOLE: ${{ inputs.gradle-console }}
+          LINT_COMMAND: ${{ inputs.lint-command }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          SPLIT_TESTS: "true"
+        run: |
+          PREPARE_COMMAND=""
+          case "$GRADLE_CONSOLE" in
+            plain|rich) ;;
+            *) echo "Unsupported gradle-console: $GRADLE_CONSOLE (expected plain or rich)" >&2; exit 2 ;;
+          esac
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          case "$tool" in
+            gradle)
+              if [[ -f ./gradlew ]]; then chmod +x ./gradlew; runner=./gradlew; else runner=gradle; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test --console=$GRADLE_CONSOLE"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test --console=$GRADLE_CONSOLE"
+              if [[ -z "$BUILD_COMMAND" ]]; then
+                if [[ "${SPLIT_TESTS:-}" == true ]]; then BUILD_COMMAND="$runner build -x test --console=$GRADLE_CONSOLE"
+                else BUILD_COMMAND="$runner build --console=$GRADLE_CONSOLE"
+                fi
+              fi
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else TEST_COMMAND="$runner $(printf %q "$MODULE"):test --console=$GRADLE_CONSOLE"
+                fi
+              fi
+              ;;
+            maven)
+              if [[ -f ./mvnw ]]; then chmod +x ./mvnw; runner=./mvnw; else runner=mvn; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner --batch-mode --no-transfer-progress validate"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner --batch-mode --no-transfer-progress test"
+              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner --batch-mode --no-transfer-progress package -DskipTests"
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else
+                  quoted="$(printf %q "$MODULE")"
+                  PREPARE_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted -am install -DskipTests"
+                  TEST_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted test"
+                fi
+              fi
+              ;;
+            *) echo "Unsupported build-tool: $tool" >&2; exit 2 ;;
+          esac
+          printf 'lint=%s\ntest=%s\nbuild=%s\nprepare=%s\n' "$LINT_COMMAND" "$TEST_COMMAND" "$BUILD_COMMAND" "$PREPARE_COMMAND" >> "$GITHUB_OUTPUT"
+      - name: Project setup
+        if: ${{ inputs.install-command != '' }}
+        env:
+          COMMAND: ${{ inputs.install-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Gradle lint or check with bounded recovery
+        if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          command: ${{ steps.commands.outputs.lint }}
+      - name: Maven lint or check
+        if: ${{ inputs.run-lint && steps.cache.outputs.tool == 'maven' }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.lint }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Gradle build with bounded recovery
+        if: ${{ inputs.run-build && steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          command: ${{ steps.commands.outputs.build }}
+      - name: Maven build
+        if: ${{ inputs.run-build && steps.cache.outputs.tool == 'maven' }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.build }}
+        run: bash -euo pipefail -c "$COMMAND"
+
+  test:
+    if: ${{ inputs.test-modules != '' && inputs.run-tests }}
+    name: test (${{ matrix.module.id }})
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(inputs.test-modules) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      MODULE_PATH: ${{ matrix.module.module }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out toolkit actions
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .toolkit
+          persist-credentials: false
+      - name: Resolve build tool for dependency cache
+        id: cache
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+        run: |
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          [[ "$tool" == gradle || "$tool" == maven ]] || { echo "Unsupported build-tool: $tool" >&2; exit 2; }
+          echo "tool=$tool" >> "$GITHUB_OUTPUT"
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: ${{ inputs.distribution }}
+          cache: ${{ inputs.cache-dependencies && steps.cache.outputs.tool || '' }}
+          cache-jdk: ${{ inputs.cache-jdk }}
+          cache-dependency-path: |
+            ${{ inputs.working-directory }}/**/gradle-wrapper.properties
+            ${{ inputs.working-directory }}/**/*.gradle*
+            ${{ inputs.working-directory }}/**/gradle.properties
+            ${{ inputs.working-directory }}/**/*.versions.toml
+            ${{ inputs.working-directory }}/**/pom.xml
+            ${{ inputs.working-directory }}/**/.mvn/extensions.xml
+      - name: Resolve build tool and commands
+        id: commands
+        env:
+          BUILD_TOOL: ${{ inputs.build-tool }}
+          GRADLE_CONSOLE: ${{ inputs.gradle-console }}
+          LINT_COMMAND: ${{ inputs.lint-command }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          SPLIT_TESTS: "true"
+          MODULE: ${{ matrix.module.module }}
+          MODULE_TEST_COMMAND: ${{ matrix.module.test_command }}
+        run: |
+          PREPARE_COMMAND=""
+          case "$GRADLE_CONSOLE" in
+            plain|rich) ;;
+            *) echo "Unsupported gradle-console: $GRADLE_CONSOLE (expected plain or rich)" >&2; exit 2 ;;
+          esac
+          tool="$BUILD_TOOL"
+          if [[ "$tool" == auto ]]; then
+            if [[ -x ./gradlew || -f build.gradle || -f build.gradle.kts ]]; then tool=gradle
+            elif [[ -f pom.xml ]]; then tool=maven
+            else echo "Could not detect Gradle or Maven" >&2; exit 2
+            fi
+          fi
+          case "$tool" in
+            gradle)
+              if [[ -f ./gradlew ]]; then chmod +x ./gradlew; runner=./gradlew; else runner=gradle; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner check -x test --console=$GRADLE_CONSOLE"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner test --console=$GRADLE_CONSOLE"
+              if [[ -z "$BUILD_COMMAND" ]]; then
+                if [[ "${SPLIT_TESTS:-}" == true ]]; then BUILD_COMMAND="$runner build -x test --console=$GRADLE_CONSOLE"
+                else BUILD_COMMAND="$runner build --console=$GRADLE_CONSOLE"
+                fi
+              fi
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else TEST_COMMAND="$runner $(printf %q "$MODULE"):test --console=$GRADLE_CONSOLE"
+                fi
+              fi
+              ;;
+            maven)
+              if [[ -f ./mvnw ]]; then chmod +x ./mvnw; runner=./mvnw; else runner=mvn; fi
+              [[ -n "$LINT_COMMAND" ]] || LINT_COMMAND="$runner --batch-mode --no-transfer-progress validate"
+              [[ -n "$TEST_COMMAND" ]] || TEST_COMMAND="$runner --batch-mode --no-transfer-progress test"
+              [[ -n "$BUILD_COMMAND" ]] || BUILD_COMMAND="$runner --batch-mode --no-transfer-progress package -DskipTests"
+              if [[ -n "${MODULE:-}" ]]; then
+                if [[ -n "${MODULE_TEST_COMMAND:-}" ]]; then TEST_COMMAND="$MODULE_TEST_COMMAND"
+                else
+                  quoted="$(printf %q "$MODULE")"
+                  PREPARE_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted -am install -DskipTests"
+                  TEST_COMMAND="$runner --batch-mode --no-transfer-progress -pl $quoted test"
+                fi
+              fi
+              ;;
+            *) echo "Unsupported build-tool: $tool" >&2; exit 2 ;;
+          esac
+          printf 'lint=%s\ntest=%s\nbuild=%s\nprepare=%s\n' "$LINT_COMMAND" "$TEST_COMMAND" "$BUILD_COMMAND" "$PREPARE_COMMAND" >> "$GITHUB_OUTPUT"
+      - name: Project setup
+        if: ${{ inputs.install-command != '' }}
+        env:
+          COMMAND: ${{ inputs.install-command }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Gradle module test with bounded recovery
+        if: ${{ steps.cache.outputs.tool == 'gradle' }}
+        uses: ./.toolkit/actions/gradle-retry
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          command: ${{ steps.commands.outputs.test }}
+      - name: Maven module dependencies
+        if: ${{ steps.cache.outputs.tool == 'maven' && steps.commands.outputs.prepare != '' }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.prepare }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Maven module test
+        if: ${{ steps.cache.outputs.tool == 'maven' }}
+        env:
+          COMMAND: ${{ steps.commands.outputs.test }}
+        run: bash -euo pipefail -c "$COMMAND"
+      - name: Check module Allure results
+        if: ${{ always() && matrix.module.results != '' }}
+        env:
+          RESULTS: ${{ matrix.module.results }}
+        run: |
+          for file in environment.properties executor.json categories.json; do
+            if [[ -d "$RESULTS" && -n "$(find "$RESULTS" -type f -name "$file" -print -quit)" ]]; then
+              echo "$file in $RESULTS collides between build modules in one Allure report; remove it from module results and set categories through the allure module's allure_categories_file." >&2
+              exit 1
+            fi
+          done
+      - name: Upload test artifacts
+        if: ${{ always() && matrix.module.artifact != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ matrix.module.artifact }}
+          path: ${{ format('{0}/{1}', inputs.working-directory, matrix.module.results) }}
+          if-no-files-found: warn
