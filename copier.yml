@@ -56,7 +56,7 @@ java_components:
   default: >-
     {% if _commit is defined and java_components is defined %}{{ java_components }}{% else %}[{id: app-java, name: Application Java, path: ., java_version: "21"}]{% endif %}
   validator: >-
-    {% set allowed_keys = ['build_command', 'build_tool', 'cache_dependencies', 'cache_jdk', 'distribution', 'gradle_console', 'id', 'install_command', 'java_version', 'lint_command', 'name', 'path', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'timeout_minutes', 'upload_test_artifacts'] %}
+    {% set allowed_keys = ['build_command', 'build_tool', 'cache_dependencies', 'cache_jdk', 'distribution', 'gradle_console', 'id', 'install_command', 'java_version', 'lint_command', 'name', 'path', 'run_build', 'run_lint', 'run_tests', 'test_artifact_name', 'test_artifact_path', 'test_command', 'test_modules', 'timeout_minutes', 'upload_test_artifacts'] %}
     {% if java_components is string or java_components is mapping or java_components is not sequence or not java_components %}java_components must be a non-empty YAML list of mappings.{% else %}
     {% set java_state = namespace(ids=[], names=[]) %}
     {% for component in java_components %}
@@ -71,7 +71,7 @@ java_components:
     {% if component.path is not string or not (component.path | trim) %}Every component requires a non-empty string path.{% elif '..' in component.path.split('/') or (component.path | regex_search('[*?\\[]')) %}Component path must not contain .. segments or glob characters.{% endif %}
     {% if (component.java_version | string) not in ['17', '21', '25'] %}java_version must be one of 17, 21, 25.{% endif %}
     {% for key, value in component.items() %}
-    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key.endswith('_version') and key != 'java_version' and value is not string %}{{ key }} must be a string such as "24".{% endif %}
+    {% if key not in allowed_keys %}Unsupported component key: {{ key }}.{% elif key == 'test_modules' and (value is string or value is mapping or value is not sequence or not value or (value | reject('mapping') | list)) %}test_modules must be a non-empty YAML list of mappings.{% elif key.endswith('_version') and key != 'java_version' and value is not string %}{{ key }} must be a string such as "24".{% endif %}
     {% endfor %}
     {% endif %}
     {% endfor %}

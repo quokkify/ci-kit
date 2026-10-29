@@ -104,6 +104,7 @@ jobs:
       test-artifact-name: ${{ matrix.component.test_artifact_name }}
       test-artifact-path: ${{ matrix.component.test_artifact_path }}
       test-command: ${{ matrix.component.test_command }}
+      test-modules: ${{ matrix.component.test_modules }}
       timeout-minutes: ${{ matrix.component.timeout_minutes }}
       upload-test-artifacts: ${{ matrix.component.upload_test_artifacts }}
 

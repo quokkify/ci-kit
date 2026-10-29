@@ -76,6 +76,25 @@ class GateTests(unittest.TestCase):
     def test_failed_gradle_test_is_project(self):
         self.assertEqual(row(failed_java("Gradle test with bounded recovery"), "java").category, "project")
 
+    def test_failed_module_test_job_fails_java_as_project(self):
+        jobs = [{"name": "java (GW) / test (core)", "conclusion": "failure", "steps": [
+            {"name": "Set up Java", "conclusion": "success", "number": 3},
+            {"name": "Gradle module test with bounded recovery", "conclusion": "failure", "number": 7},
+        ]}]
+        ok, rows = evaluate(["core", "java"], needs(java="failure"), jobs, REF)
+        found = row(rows, "java")
+        self.assertFalse(ok)
+        self.assertEqual((found.category, found.failing_step), ("project", "Gradle module test with bounded recovery"))
+
+    def test_failed_module_setup_is_toolkit(self):
+        jobs = [{"name": "java (GW) / test (core)", "conclusion": "failure", "steps": [
+            {"name": "Set up Java", "conclusion": "failure", "number": 3},
+        ]}]
+        ok, rows = evaluate(["core", "java"], needs(java="failure"), jobs, REF)
+        found = row(rows, "java")
+        self.assertFalse(ok)
+        self.assertEqual((found.category, found.failing_step), ("toolkit", "Set up Java"))
+
     def test_language_module_failures_are_categorized(self):
         cases = (
             ("python", "Set up Python", "toolkit"), ("python", "Prepare Python package manager", "toolkit"),

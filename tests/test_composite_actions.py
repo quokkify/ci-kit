@@ -1389,37 +1389,47 @@ class GradleRetryExternalConsumerTests(unittest.TestCase):
             self.assertIn("runtime-success", result.stdout)
 
 
-class GradleConsoleModeTests(unittest.TestCase):
-    @staticmethod
-    def _resolve_step() -> str:
-        workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
-        return next(step["run"] for step in workflow["jobs"]["ci"]["steps"] if step.get("id") == "commands")
+def _java_workflow() -> dict:
+    return yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
 
+
+def _java_step(job: str, name: str) -> dict:
+    return next(step for step in _java_workflow()["jobs"][job]["steps"] if step.get("name") == name)
+
+
+def resolve_java_commands(env: dict[str, str], tool_file: str = "gradlew") -> tuple[subprocess.CompletedProcess[str], str]:
+    run = next(step["run"] for step in _java_workflow()["jobs"]["ci"]["steps"] if step.get("id") == "commands")
+    with tempfile.TemporaryDirectory(prefix="java-ci-console-") as temporary:
+        root = Path(temporary)
+        if tool_file == "pom.xml":
+            (root / "pom.xml").write_text("<project/>")
+            wrapper = root / "mvnw"
+        else:
+            wrapper = root / tool_file
+        wrapper.write_text("#!/usr/bin/env bash\nexit 0\n")
+        wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
+        output = root / "output"
+        result = subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", run],
+            cwd=root,
+            env={**os.environ, "LINT_COMMAND": "", "TEST_COMMAND": "", "BUILD_COMMAND": "",
+                 "BUILD_TOOL": "gradle" if tool_file != "pom.xml" else "maven",
+                 "GRADLE_CONSOLE": "plain", **env, "GITHUB_OUTPUT": str(output)},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return result, output.read_text() if output.exists() else ""
+
+
+class GradleConsoleModeTests(unittest.TestCase):
     def _resolve(self, console: str = "plain", **commands: str) -> tuple[subprocess.CompletedProcess[str], str]:
-        with tempfile.TemporaryDirectory(prefix="java-ci-console-") as temporary:
-            root = Path(temporary)
-            wrapper = root / "gradlew"
-            wrapper.write_text("#!/usr/bin/env bash\nexit 0\n")
-            wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
-            output = root / "output"
-            env = {
-                **os.environ,
-                "BUILD_TOOL": "gradle",
-                "GRADLE_CONSOLE": console,
-                "LINT_COMMAND": commands.get("lint", ""),
-                "TEST_COMMAND": commands.get("test", ""),
-                "BUILD_COMMAND": commands.get("build", ""),
-                "GITHUB_OUTPUT": str(output),
-            }
-            result = subprocess.run(
-                ["bash", "-euo", "pipefail", "-c", self._resolve_step()],
-                cwd=root,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            return result, output.read_text() if output.exists() else ""
+        return resolve_java_commands({
+            "GRADLE_CONSOLE": console,
+            "LINT_COMMAND": commands.get("lint", ""),
+            "TEST_COMMAND": commands.get("test", ""),
+            "BUILD_COMMAND": commands.get("build", ""),
+        })
 
     def test_default_plain_and_explicit_rich_are_applied_to_generated_commands(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/java-ci.yml").read_text())
@@ -1443,6 +1453,135 @@ class GradleConsoleModeTests(unittest.TestCase):
         self.assertIn("lint=./lint.sh", output)
         self.assertIn("test=./test.sh", output)
         self.assertIn("build=./build.sh", output)
+
+
+
+CI_JOB_STEP_NAMES = [
+    "Check out repository",
+    "Check out toolkit actions",
+    "Resolve build tool for dependency cache",
+    "Set up Java",
+    "Resolve build tool and commands",
+    "Project setup",
+    "Gradle lint or check with bounded recovery",
+    "Maven lint or check",
+    "Gradle test with bounded recovery",
+    "Maven test",
+    "Gradle build with bounded recovery",
+    "Maven build",
+    "Upload test artifacts",
+]
+
+
+class JavaTestModulesWorkflowTests(unittest.TestCase):
+    SETUP_STEPS = (
+        "Check out repository",
+        "Check out toolkit actions",
+        "Resolve build tool for dependency cache",
+        "Set up Java",
+        "Resolve build tool and commands",
+        "Project setup",
+    )
+
+    def test_ci_job_keeps_its_steps(self) -> None:
+        ci = _java_workflow()["jobs"]["ci"]
+        self.assertEqual(ci["if"], "${{ inputs.test-modules == '' }}")
+        self.assertEqual([step["name"] for step in ci["steps"]], CI_JOB_STEP_NAMES)
+
+    def test_split_jobs_run_only_with_modules(self) -> None:
+        jobs = _java_workflow()["jobs"]
+        self.assertEqual(jobs["checks"]["if"], "${{ inputs.test-modules != '' }}")
+        self.assertEqual(jobs["test"]["if"], "${{ inputs.test-modules != '' && inputs.run-tests }}")
+        self.assertIs(jobs["test"]["strategy"]["fail-fast"], False)
+        self.assertEqual(jobs["test"]["strategy"]["matrix"]["module"], "${{ fromJSON(inputs.test-modules) }}")
+        self.assertEqual(jobs["test"]["name"], "test (${{ matrix.module.id }})")
+
+    def test_setup_steps_match_ci_by_name_and_body(self) -> None:
+        for name in self.SETUP_STEPS:
+            reference = _java_step("ci", name)
+            for job in ("checks", "test"):
+                step = dict(_java_step(job, name))
+                expected = dict(reference)
+                if name == "Resolve build tool and commands":
+                    step.pop("env")
+                    expected.pop("env")
+                self.assertEqual(step, expected, f"{job}: {name}")
+
+    def test_checks_job_has_no_test_steps(self) -> None:
+        names = [step["name"] for step in _java_workflow()["jobs"]["checks"]["steps"]]
+        self.assertEqual([n for n in names if "test" in n.lower().replace("toolkit", "")], [])
+        self.assertTrue(all("Upload" not in n for n in names))
+        env = _java_step("checks", "Resolve build tool and commands")["env"]
+        self.assertEqual(env["SPLIT_TESTS"], "true")
+
+    def test_module_values_reach_run_only_through_env(self) -> None:
+        for job in ("checks", "test"):
+            for step in _java_workflow()["jobs"][job]["steps"]:
+                self.assertNotIn("${{", step.get("run", ""), f"{job}: {step['name']}")
+
+    def test_gradle_module_test_command(self) -> None:
+        result, output = resolve_java_commands({"SPLIT_TESTS": "true", "MODULE": ":core"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("test=./gradlew :core:test --console=plain\n", output)
+        self.assertIn("build=./gradlew build -x test --console=plain\n", output)
+        self.assertIn("prepare=\n", output)
+
+    def test_gradle_build_without_split_tests_is_unchanged(self) -> None:
+        result, output = resolve_java_commands({})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("build=./gradlew build --console=plain\n", output)
+        self.assertIn("test=./gradlew test --console=plain\n", output)
+
+    def test_maven_module_commands(self) -> None:
+        result, output = resolve_java_commands({"SPLIT_TESTS": "true", "MODULE": "core"}, "pom.xml")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("prepare=./mvnw --batch-mode --no-transfer-progress -pl core -am install -DskipTests\n", output)
+        self.assertIn("test=./mvnw --batch-mode --no-transfer-progress -pl core test\n", output)
+
+    def test_module_test_command_overrides_generated_one(self) -> None:
+        result, output = resolve_java_commands(
+            {"SPLIT_TESTS": "true", "MODULE": ":it", "MODULE_TEST_COMMAND": "./gradlew :it:check"}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("test=./gradlew :it:check\n", output)
+        self.assertIn("prepare=\n", output)
+
+    def test_module_value_is_shell_quoted(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="java-ci-inject-") as temporary:
+            marker = Path(temporary) / "pwned"
+            module = f"$(touch {marker})"
+            result, output = resolve_java_commands({"SPLIT_TESTS": "true", "MODULE": module})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertIn("\\$\\(touch", output)
+
+    def _preflight(self, files: list[str]) -> subprocess.CompletedProcess[str]:
+        run = _java_step("test", "Check module Allure results")["run"]
+        with tempfile.TemporaryDirectory(prefix="java-ci-results-") as temporary:
+            root = Path(temporary)
+            (root / "results").mkdir()
+            for name in files:
+                (root / "results" / name).write_text("{}")
+            return subprocess.run(
+                ["bash", "-euo", "pipefail", "-c", run],
+                cwd=root, env={**os.environ, "RESULTS": "results"},
+                text=True, capture_output=True, check=False,
+            )
+
+    def test_results_preflight_rejects_shared_files(self) -> None:
+        self.assertEqual(self._preflight(["a-result.json"]).returncode, 0)
+        for shared in ("environment.properties", "executor.json", "categories.json"):
+            result = self._preflight(["a-result.json", shared])
+            self.assertEqual(result.returncode, 1, shared)
+            self.assertIn("collides between build modules", result.stderr)
+            self.assertIn("allure_categories_file", result.stderr)
+            self.assertIn(shared, result.stderr)
+
+    def test_module_upload_contract(self) -> None:
+        step = _java_step("test", "Upload test artifacts")
+        self.assertIn("always()", step["if"])
+        self.assertEqual(step["with"]["name"], "${{ matrix.module.artifact }}")
+        self.assertEqual(step["with"]["if-no-files-found"], "warn")
 
 
 class ReusableTestArtifactContractTests(unittest.TestCase):

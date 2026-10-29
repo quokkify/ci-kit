@@ -24,19 +24,6 @@
           "java_version"
         ],
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "pattern": "^(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
-          },
           "build_command": {
             "type": "string"
           },
@@ -55,6 +42,10 @@
           "gradle_console": {
             "type": "string"
           },
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+          },
           "install_command": {
             "type": "string"
           },
@@ -67,6 +58,15 @@
           },
           "lint_command": {
             "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
           },
           "run_build": {
             "type": "boolean"
@@ -86,12 +86,72 @@
           "test_command": {
             "type": "string"
           },
+          "test_modules": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "module"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                },
+                "module": {
+                  "type": "string",
+                  "pattern": "^[^\\s]+(?![\\s\\S])"
+                },
+                "test_command": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?![\\s\\S]*[\\r\\n])"
+                },
+                "results": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?![\\s\\S]*[\\r\\n])(?!(.*/)?\\.\\.(/|$))[^*?\\[]*$"
+                }
+              }
+            }
+          },
           "timeout_minutes": {
             "type": "integer",
             "minimum": 1
           },
           "upload_test_artifacts": {
             "type": "boolean"
+          }
+        },
+        "dependentSchemas": {
+          "test_modules": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "test_command"
+                  ]
+                },
+                {
+                  "required": [
+                    "upload_test_artifacts"
+                  ]
+                },
+                {
+                  "required": [
+                    "test_artifact_name"
+                  ]
+                },
+                {
+                  "required": [
+                    "test_artifact_path"
+                  ]
+                }
+              ]
+            }
           }
         }
       }

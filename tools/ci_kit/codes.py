@@ -14,6 +14,7 @@ CODES: dict[str, str] = {
     "CIK-CORE-010": "Module declaration drifted from its rendered template",
     "CIK-CORE-011": "Module-owned file drifted from its rendered template",
     "CIK-CORE-012": "toolkit_version or _commit differs between answers files",
+    "CIK-CORE-013": "Build-module test artifacts exceed a report limit",
     "CIK-CORE-020": "Gate found a failing or missing module job",
     "CIK-CORE-030": "Legacy answers still render files",
     "CIK-UPDATE-001": "Module update failed or left conflicts",
