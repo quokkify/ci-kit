@@ -33,6 +33,50 @@ components:
   - {"id": "backend-python", "name": "Backend Python", "path": "backend", "python_version": "3.12", "run_lint": false}
 ```
 
+### Build modules (`test_modules`)
+
+A `java` component can run its tests as one job per build module instead of one job for the whole build. Add `test_modules` to the component:
+
+```yaml
+schema_version: 1
+components:
+  - id: archgate-java
+    name: ArchGate Java
+    path: .
+    java_version: "21"
+    test_modules:
+      - id: core
+        module: ":core"
+        results: engine/core/build/allure-results
+      - id: testing
+        module: ":testing"
+        test_command: ./gradlew :testing:check --console=plain
+        results: testing/build/allure-results
+```
+
+For Maven, `module` is the `-pl` selector, for example `module: engine/core` or `module: ":artifactId"`.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Matches `^[A-Za-z_][A-Za-z0-9_-]*$`; names the job and the artifact suffix. Unique within the component. |
+| `module` | yes | Gradle project path (`:core`) or Maven `-pl` selector. No line breaks. |
+| `test_command` | no | Trusted command that replaces the default test command. |
+| `results` | no | Allure results directory relative to the component `path` (no `..`, no glob). When set, the module's results are uploaded. |
+
+Next to `test_modules`, the component-level `test_command`, `upload_test_artifacts`, `test_artifact_name` and `test_artifact_path` are rejected (`CIK-CORE-004`). `run_tests: false` disables all module jobs.
+
+A component with `test_modules` runs a `checks` job (setup, lint and build, no tests) and one `test (<id>)` job per module, shown in GitHub as `java (<component name>) / test (<id>)`. A failing module job fails the component, so the `Validate` gate stays red. The default build in `checks` is `build -x test` for Gradle and `package -DskipTests` for Maven. Components without `test_modules` keep the single `ci` job.
+
+Default module commands:
+
+- Gradle: `<runner> <module>:test --console=<mode>`, with bounded recovery.
+- Maven, two steps: `<runner> --batch-mode --no-transfer-progress -pl <module> -am install -DskipTests` installs the upstream modules, then `<runner> --batch-mode --no-transfer-progress -pl <module> test` runs only that module's tests.
+- A module `test_command` replaces these commands, and the Maven prepare step is skipped.
+
+Each module job exports `MODULE_PATH=<module>`. The Allure label for the module is not set by the template; read `MODULE_PATH` in the project's own test listener if you need one.
+
+When `results` is set, the job uploads `allure-results-<component id>-<module id>` (`if-no-files-found: warn`). In the `merged` layout of the Allure report the per-module bundles are flattened into one directory, so three files that every module could write would collide: a preflight step fails the job if `environment.properties`, `executor.json` or `categories.json` is found under `results`. Set categories with `allure_categories_file` of the `allure` module instead. `ci-kit plan` reports a duplicate module `id` or a duplicate uploaded artifact name across components (`CIK-CORE-005`), and an artifact name longer than 128 characters or more than 50 `allure-results-*` artifacts when the `allure` module is installed (`CIK-CORE-013`, see [the error page](errors/CIK-CORE-013.md)).
+
 ## States
 
 The fleet inventory classifies every repository by its answers files:
