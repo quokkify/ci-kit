@@ -48,6 +48,7 @@ q4j обходит это собственным workflow «Run tests» и `allu
 | Где разворачивать матрицу | Внутри `java-ci.yml` (подход A); планировщик и gate не меняются |
 | Команда модуля | Дефолт по build tool, переопределяется `test_command` модуля |
 | Allure | Компонентный режим без изменений; preflight в test-job |
+| Setup в новых jobs | Дубли шагов с теми же именами (не composite action), см. 5.3 |
 
 Отклонённые варианты:
 
@@ -104,14 +105,7 @@ components:
 
 ### 4.3 Матрица
 
-`fill()` передаёт `test_modules` как список; если модуля нет, используется значение по умолчанию из `workflow_inputs.json`. `validate.yml` пробрасывает:
-
-```yaml
-component-id: ${{ matrix.component.id }}
-test-modules: ${{ toJSON(matrix.component.test_modules) }}
-```
-
-`java-ci.yml` считает пустыми значения `""`, `"[]"` и `"null"`.
+`fill()` кодирует `test_modules` в компактную JSON-строку. Для каждого модуля в ней уже посчитано `artifact` (`allure-results-<component>-<module>` при непустом `results`, иначе `""`); отсутствующие `test_command`/`results` становятся `""`. Если `test_modules` нет, значение — `""`. `validate.yml` передаёт поле как есть, как и остальные поля: `test-modules: ${{ matrix.component.test_modules }}`. Пустая строка означает режим одной job.
 
 ## 5. `java-ci.yml`
 
@@ -119,8 +113,9 @@ test-modules: ${{ toJSON(matrix.component.test_modules) }}
 
 | Input | Тип | По умолчанию | Смысл |
 |---|---|---|---|
-| `component-id` | string | `java` | Префикс имён модульных артефактов |
-| `test-modules` | string | `""` | JSON-массив модулей из декларации |
+| `test-modules` | string | `""` | JSON-массив модулей из `ci-kit plan` с готовыми именами артефактов |
+
+Отдельный input `component-id` не нужен: имя артефакта считает планировщик.
 
 ### 5.2 Jobs
 
@@ -131,13 +126,13 @@ test-modules: ${{ toJSON(matrix.component.test_modules) }}
   - пользовательские `lint_command` и `build_command` используются как есть.
 - **`test`** — `if: <test-modules не пуст> && inputs.run-tests`; `name: test (${{ matrix.module.id }})`; `strategy: {fail-fast: false, matrix: {module: ${{ fromJSON(inputs.test-modules) }}}}`. Шаги:
   1. setup (общий, см. 5.3);
-  2. env: `MODULE_PATH=${{ matrix.module.module }}`, `ALLURE_LABEL_MODULE=${{ matrix.module.id }}` (см. 6.2);
+  2. env: `MODULE_PATH=${{ matrix.module.module }}` (см. 6.2);
   3. команда:
      - `matrix.module.test_command`, если задана;
      - Gradle: `<runner> <module>:test --console=<mode>` через `actions/gradle-retry`;
      - Maven, два шага: `<runner> --batch-mode --no-transfer-progress -pl <module> -am install -DskipTests`, затем `<runner> --batch-mode --no-transfer-progress -pl <module> test`. Вариант `-am test` не подходит: он запускает и тесты upstream-модулей;
   4. preflight results (см. 6.1), `if: always() && matrix.module.results`;
-  5. `actions/upload-artifact`, `if: always() && matrix.module.results`: `name: allure-results-<component-id>-<id>`, `path: <working-directory>/<results>`, `if-no-files-found: warn`. При ошибке компиляции results нет, и предупреждение не маскирует первичную ошибку; job остаётся красной из-за шага 3.
+  5. `actions/upload-artifact`, `if: always() && matrix.module.artifact`: `name: ${{ matrix.module.artifact }}`, `path: <working-directory>/<results>`, `if-no-files-found: warn`. При ошибке компиляции results нет, и предупреждение не маскирует первичную ошибку; job остаётся красной из-за шага 3.
 
 Значения модуля (`module`, `test_command`) передаются в шаги только через `env`, никогда не интерполируются в `run:`. Так сделано и для существующих команд.
 
@@ -145,7 +140,9 @@ test-modules: ${{ toJSON(matrix.component.test_modules) }}
 
 ### 5.3 Общий setup
 
-Checkout репозитория и тулкита, разрешение build tool, `setup-java`, разрешение команд и `install-command` сейчас инлайном лежат в `ci`. Они выносятся в локальный composite action `actions/setup-java-ci` и вызываются из `ci`, `checks` и `test`. Сначала, на этапе плана, нужно проверить, можно ли переиспользовать или расширить существующий `actions/setup-java-gradle`. Если вынос меняет шаги `ci`, это регрессия, и тест 8.4 её ловит.
+Setup-шаги (checkout репозитория и тулкита, разрешение build tool, `setup-java`, разрешение команд, `install-command`) **дублируются** в `checks` и `test` с теми же именами, что в `ci`. Composite action отклонён: `ci-kit gate` относит падение к `toolkit` или `project` по именам шагов job (`TOOLKIT_STEPS` в `tools/ci_kit/gate.py`), а шаги внутри composite action jobs API не показывает. Дрейф копий ловит тест: шаги с одинаковыми именами и скрипт `commands` совпадают во всех трёх jobs.
+
+Скрипт `commands` один на все jobs. Режим выбирается через env: `SPLIT_TESTS=true` (Gradle-build по умолчанию с `-x test`), `MODULE` и `MODULE_TEST_COMMAND` (команда модуля, дополнительный вывод `prepare` для Maven). В `ci` эти переменные не заданы, поэтому выводы совпадают с текущими.
 
 ### 5.4 Gate
 
@@ -162,11 +159,11 @@ Checkout репозитория и тулкита, разрешение build to
 ### 6.2 Идентичность модуля
 
 - `MODULE_PATH` — контракт из #530. Его читает `SuiteListener` в q4j (Allure `subSuite`).
-- `ALLURE_LABEL_MODULE` нужен, чтобы `module-environment-label: module` в `actions/allure-report` разложил отчёт на окружения по модулям без кода в проекте. **Не проверено**: поддержку env `ALLURE_LABEL_*` в allure-java (и что label попадает в результаты Allure 3) нужно подтвердить по исходникам на первом шаге плана. Если не подтвердится, переменная не добавляется, и в доке остаётся только `MODULE_PATH`.
+- `ALLURE_LABEL_MODULE` **не добавляется**. Проверка по исходникам allure-java показала, что env `ALLURE_LABEL_*` не читается: метки по умолчанию берутся только из system properties `allure.label.*` и `allure.properties` (`ResultsUtils.getProvidedLabels` → `PropertiesUtils.loadAllureProperties`). Задать метку модуля без кода в проекте можно было бы через `JAVA_TOOL_OPTIONS=-Dallure.label.module=<id>`, но это затрагивает каждую JVM в job и чужой `JAVA_TOOL_OPTIONS`; вынесено в возможную отдельную задачу.
 
 ## 7. Документация
 
-- `docs/modules.md`: раздел о multi-module сборке — пример для Gradle и Maven, правила полей, ограничения Allure (6.1), что делают `MODULE_PATH` и `ALLURE_LABEL_MODULE`.
+- `docs/modules.md`: раздел о multi-module сборке — пример для Gradle и Maven, правила полей, ограничения Allure (6.1), что делает `MODULE_PATH`.
 - `docs/usage.md`, раздел Allure: в компонентном режиме компонент может загрузить по одному артефакту на модуль.
 - `docs/errors/CIK-CORE-013.md`.
 
@@ -176,9 +173,9 @@ Checkout репозитория и тулкита, разрешение build to
    - схема принимает `test_modules` и per-module `test_command`;
    - схема отвергает `test_command`, `upload_test_artifacts`, `test_artifact_name` и `test_artifact_path` рядом с `test_modules`;
    - ловятся дубли `id` модулей, коллизия имён артефактов, длина больше 128 и лимит 50 при включённом `allure`;
-   - `fill()` передаёт список.
+   - `fill()` кодирует список в JSON-строку с именами артефактов.
 2. `tests/test_modules_render.py` и новый сценарий `tests/scenarios/modules/core-java-modules.yml`: рендер декларации с `test_modules`.
-3. `tests/test_modular_validate_workflow.py`: `validate.yml` передаёт `component-id` и `test-modules`; `workflow_inputs.json` синхронен.
+3. `tests/test_modular_validate_workflow.py`: `validate.yml` передаёт `test-modules`; `workflow_inputs.json` синхронен.
 4. Структурные тесты `java-ci.yml`:
    - при пустом `test-modules` шаги `ci` не изменились (регрессионная защита);
    - при непустом есть `checks` без тестов (`-x test`) и матрица `test` с `fail-fast: false`;
@@ -186,7 +183,7 @@ Checkout репозитория и тулкита, разрешение build to
    - Gradle- и Maven-команды по умолчанию, включая двухшаговый Maven;
    - значения модуля передаются только через `env`;
    - есть preflight-шаг.
-5. `tests/test_composite_actions.py`: новый setup action.
+5. `tests/test_composite_actions.py`: setup-шаги и скрипт `commands` в `ci`, `checks` и `test` совпадают.
 6. Проверка gate: failure модульной job → `java` failure → gate красный.
 
 ## 9. Раскатка
