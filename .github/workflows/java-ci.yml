@@ -34,6 +34,10 @@ on:
         description: Optional trusted test command. Auto-selects a tool command when empty.
         type: string
         default: ""
+      test-modules:
+        description: JSON list of build modules from ci-kit plan; empty runs the single ci job.
+        type: string
+        default: ""
       build-command:
         description: Optional trusted build command. Auto-selects a tool command when empty.
         type: string

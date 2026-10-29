@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from .test_modules import encode_test_modules
+
 WORKFLOWS: dict[str, str] = {"java": "java-ci", "python": "python-ci", "node": "node-ci", "docker": "docker-build"}
 
 _EMPTY_DEFAULTS = {"string": "", "boolean": False}
@@ -54,4 +56,6 @@ def fill(module: str, component: dict) -> dict:
         entry["path"] = component["path"]
     for name in module_fields(module):
         entry[name] = component[name] if name in component else table[input_name(name)]["default"]
+    if module == "java":
+        entry["test_modules"] = encode_test_modules(component)
     return entry

@@ -212,6 +212,11 @@ class ModuleRenderTests(unittest.TestCase):
                     jsonschema.validate(yaml.safe_load((dest / f".ci/modules/{module}.yml").read_text()), self.load_schema(module, 1))
                 self.assertEqual(build_plan(dest, drift=False).findings, [])
 
+    def test_java_test_modules_render_and_plan_cleanly(self) -> None:
+        plan = build_plan(self.render_scenario("core-java-modules"), drift=False)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual([item["id"] for item in json.loads(plan.matrices["java"][0]["test_modules"])], ["core", "it"])
+
     def test_core_java_unchanged(self) -> None:
         text = self.decl("java")
         self.assertEqual(

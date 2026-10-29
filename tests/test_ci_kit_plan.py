@@ -21,6 +21,9 @@ from module_test_support import modules_repo, rendered_repo, shared_template_rep
 SCHEMAS = Path(__file__).resolve().parents[1] / "tools" / "ci_kit" / "schemas"
 
 
+JAVA_BASE = {"id": "gw", "name": "GW", "path": ".", "java_version": "21"}
+
+
 def codes(plan) -> list[str]:
     return [finding.code for finding in plan.findings]
 
@@ -87,6 +90,57 @@ class PlanTests(unittest.TestCase):
                     base["java_version"] = "21"
                 repo = modules_repo({module: [{**base, **bad}]})
                 self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
+    def test_java_test_modules_are_encoded_with_artifact_names(self):
+        modules = [{"id": "core", "module": ":core", "results": "core/build/allure-results"}, {"id": "it", "module": ":it", "test_command": "./gradlew :it:check"}]
+        plan = build_plan(modules_repo({"java": [{**JAVA_BASE, "test_modules": modules}]}), drift=False)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual(json.loads(plan.matrices["java"][0]["test_modules"]), [
+            {"id": "core", "module": ":core", "test_command": "", "results": "core/build/allure-results", "artifact": "allure-results-gw-core"},
+            {"id": "it", "module": ":it", "test_command": "./gradlew :it:check", "results": "", "artifact": ""},
+        ])
+
+    def test_java_without_test_modules_encodes_empty_string(self):
+        plan = build_plan(modules_repo({"java": [JAVA_BASE]}), drift=False)
+        self.assertEqual(plan.matrices["java"][0]["test_modules"], "")
+
+    def test_test_modules_forbid_component_test_fields(self):
+        for key, value in (("test_command", "x"), ("upload_test_artifacts", True), ("test_artifact_name", "x"), ("test_artifact_path", "x")):
+            with self.subTest(key=key):
+                component = {**JAVA_BASE, "test_modules": [{"id": "core", "module": ":core"}], key: value}
+                self.assertEqual(codes(build_plan(modules_repo({"java": [component]}), drift=False)), ["CIK-CORE-004"])
+
+    def test_test_modules_schema_rejects_bad_items(self):
+        cases = ([], [{"id": "1x", "module": ":a"}], [{"id": "a"}], [{"id": "a", "module": "a b"}],
+                 [{"id": "a", "module": ":a", "results": "../x"}], [{"id": "a", "module": ":a", "extra": 1}])
+        for bad in cases:
+            with self.subTest(bad=bad):
+                repo = modules_repo({"java": [{**JAVA_BASE, "test_modules": bad}]})
+                self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-004"])
+
+    def test_duplicate_test_module_id_is_core_005(self):
+        modules = [{"id": "core", "module": ":a"}, {"id": "core", "module": ":b"}]
+        plan = build_plan(modules_repo({"java": [{**JAVA_BASE, "test_modules": modules}]}), drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-005"])
+        self.assertIn("test module id core", plan.findings[0].message)
+
+    def test_module_artifact_colliding_with_other_component_is_core_005(self):
+        java = {**JAVA_BASE, "test_modules": [{"id": "core", "module": ":core", "results": "r"}]}
+        py = {"id": "py", "name": "Py", "path": ".", "upload_test_artifacts": True, "test_artifact_name": "allure-results-gw-core"}
+        plan = build_plan(modules_repo({"java": [java], "python": [py]}), drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-005"])
+
+    def test_overlong_module_artifact_is_core_013(self):
+        java = {**JAVA_BASE, "id": "c" * 64, "test_modules": [{"id": "m" * 64, "module": ":m", "results": "r"}]}
+        self.assertEqual(codes(build_plan(modules_repo({"java": [java]}), drift=False)), ["CIK-CORE-013"])
+
+    def test_more_than_50_allure_artifacts_is_core_013_only_with_allure(self):
+        java = {**JAVA_BASE, "test_modules": [{"id": f"m{i}", "module": f":m{i}", "results": "r"} for i in range(51)]}
+        self.assertEqual(build_plan(modules_repo({"java": [java]}), drift=False).findings, [])
+        repo = modules_repo({"java": [java]})
+        (repo / ".copier-answers.allure.yml").write_text("module: allure\n")
+        (repo / ".ci/modules/allure.yml").write_text("schema_version: 1\n")
+        self.assertEqual(codes(build_plan(repo, drift=False)), ["CIK-CORE-013"])
 
     def test_numeric_version_is_core_004(self):
         repo = modules_repo({"node": [{"id": "web", "name": "Web", "path": ".", "node_version": 24}]})

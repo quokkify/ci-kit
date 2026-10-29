@@ -11,6 +11,7 @@ import yaml
 
 from .inputs import WORKFLOWS, fill
 from .modules import MODULES
+from .test_modules import ARTIFACT_PREFIX, MAX_ALLURE_ARTIFACTS, MAX_ARTIFACT_NAME, component_artifacts
 
 ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
 # ci-kit v4 has no legacy template. Legacy answers are dropped once every area the legacy
@@ -117,6 +118,34 @@ def legacy_answers_findings(repo: Path) -> list[Finding]:
     )]
 
 
+def _test_module_findings(loaded: dict[str, dict]) -> list[Finding]:
+    findings: list[Finding] = []
+    owners: dict[str, str] = {}
+    names: list[str] = []
+    for module in sorted(loaded):
+        if not MODULES[module].language:
+            continue
+        path = f".ci/modules/{module}.yml"
+        for component in loaded[module].get("components", []):
+            module_ids: set[str] = set()
+            for item in component.get("test_modules", []):
+                if item["id"] in module_ids:
+                    findings.append(Finding("CIK-CORE-005", module, f"test module id {item['id']} is declared more than once in component {component['id']}", path))
+                module_ids.add(item["id"])
+            for name in component_artifacts(component):
+                names.append(name)
+                if len(name) > MAX_ARTIFACT_NAME:
+                    findings.append(Finding("CIK-CORE-013", module, f"artifact name {name} is {len(name)} characters, over the {MAX_ARTIFACT_NAME} limit", path))
+                owner = owners.setdefault(name, component["id"])
+                if owner != component["id"]:
+                    findings.append(Finding("CIK-CORE-005", module, f"artifact name {name} of component {component['id']} is already used by component {owner}", path))
+    if "allure" in loaded:
+        count = sum(name.startswith(ARTIFACT_PREFIX) for name in names)
+        if count > MAX_ALLURE_ARTIFACTS:
+            findings.append(Finding("CIK-CORE-013", "allure", f"{count} allure result artifacts exceed the {MAX_ALLURE_ARTIFACTS} limit", ".ci/modules/allure.yml"))
+    return findings
+
+
 def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = None) -> Plan:
     repo = Path(repo)
     answers, declarations = discover(repo)
@@ -183,6 +212,7 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
                 findings.append(Finding("CIK-CORE-005", module, f"component name {name} is used by more than one component in module {module}", f".ci/modules/{module}.yml"))
             module_names.add(name)
 
+    findings.extend(_test_module_findings(loaded))
     findings.extend(_version_findings(repo, answers))
     findings.extend(legacy_answers_findings(repo))
 

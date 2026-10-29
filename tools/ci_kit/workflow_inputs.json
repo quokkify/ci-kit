@@ -110,6 +110,10 @@
       "default": "",
       "type": "string"
     },
+    "test-modules": {
+      "default": "",
+      "type": "string"
+    },
     "timeout-minutes": {
       "default": 30,
       "type": "number"
