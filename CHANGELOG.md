@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.2.0](https://github.com/quokkify/ci-kit/compare/v4.1.0...v4.2.0) (2026-10-29)
+
+
+### ✨ Features
+
+* **java:** run tests as one job per build module ([#531](https://github.com/quokkify/ci-kit/issues/531)) ([b9f9844](https://github.com/quokkify/ci-kit/commit/b9f984422345cc17de60178badc4c79ab0091eb6))
+
+
+### 🐛 Bug Fixes
+
+* **fleet:** gate add-module pilots on their branch again ([#522](https://github.com/quokkify/ci-kit/issues/522)) ([503ce55](https://github.com/quokkify/ci-kit/commit/503ce55db33cd449e37a254ee65f845c18c71d7d))
+
+
+### 📦 Dependencies
+
+* **github-actions:** update github actions non-major updates ([#526](https://github.com/quokkify/ci-kit/issues/526)) ([9d37b0e](https://github.com/quokkify/ci-kit/commit/9d37b0e547a9bdb407b1fa38122b90f9016868ce))
+* **renovate:** update renovate to v44.190.1 ([#525](https://github.com/quokkify/ci-kit/issues/525)) ([a79eb59](https://github.com/quokkify/ci-kit/commit/a79eb5993e441cf63af46d0a9773b4357c9ab9a4))
+* **renovate:** update renovate to v44.190.2 ([#528](https://github.com/quokkify/ci-kit/issues/528)) ([954cf88](https://github.com/quokkify/ci-kit/commit/954cf8857eb6a9e6a8709a20b321d9a46a4d820e))
+* **uv:** update uv to v0.13.6 ([#527](https://github.com/quokkify/ci-kit/issues/527)) ([dea4752](https://github.com/quokkify/ci-kit/commit/dea475284f78f9e2b14b52b1b51803956f0fdfd5))
+
 ## [4.1.0](https://github.com/quokkify/ci-kit/compare/v4.0.1...v4.1.0) (2026-10-28)
 
 
