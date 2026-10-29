@@ -7,7 +7,7 @@ Copy a small caller workflow from [`examples/`](../examples/) and replace comman
 ```yaml
 jobs:
   backend:
-    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v4.1.0
+    uses: quokkify/ci-kit/.github/workflows/python-ci.yml@v4.2.0
     with:
       working-directory: backend
       install-command: python -m pip install -e .[test]
@@ -54,8 +54,8 @@ The caller must grant `packages: write` when its registry requires it. Never pas
 ## Copier
 
 ```console
-copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v4.1.0 -d module=core
-copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v4.1.0 -d module=python
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v4.2.0 -d module=core
+copier copy https://github.com/quokkify/ci-kit.git my-project --vcs-ref v4.2.0 -d module=python
 cd my-project
 python -m pip install "git+https://github.com/quokkify/ci-kit@<release>"
 ci-kit update --repo . --to <release>
@@ -86,7 +86,7 @@ GH_TOKEN="$(gh auth token)" python scripts/update_copier_fleet.py --org quokkify
 gh workflow run copier-fleet-auto-update.yml --repo quokkify/ci-kit -f dry-run=true
 ```
 
-The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v4.1.0`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
+The first command creates or refreshes pull requests using the caller's token without copying it into repository or organization secrets. The second command starts the read-only audit and refreshes the badge. Use `--repo owner/repository` to target one consumer and `--template-ref REF` to test an explicit released template tag such as `v4.2.0`; arbitrary branches and commit SHAs are rejected by the generated self-service workflow. Omit `--public-only` locally when a private consumer is the target.
 
 **Install a new module across the fleet.** `--add-module MODULE` (for example `labels`) adds a module to every managed repository instead of running a template update. Each repository must already be on the target release (`--template-ref`, default the latest tag); a repository whose `core` answers are at another ref is reported as `needs-update-first`. The updater runs `ci-kit add` in a clone and opens a pull request from the `ci-kit/add-MODULE` branch titled `chore(ci-kit): add MODULE module`; an open pull request on that branch is reused and its branch refreshed. Statuses: `up-to-date` (already installed), `needs-update-first`, `would-add` (`--dry-run`), `add-rejected` (detail lists the `CIK-ADD-*` codes) and `pull-request`. The flag cannot be combined with `--auto-merge` or `--merge-ready`; `rollout_copier_fleet.py --add-module MODULE` forwards it to the pilot and fanout stages.
 
