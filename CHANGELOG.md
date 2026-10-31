@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.2.1](https://github.com/quokkify/ci-kit/compare/v4.2.0...v4.2.1) (2026-10-31)
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.192.2 ([#532](https://github.com/quokkify/ci-kit/issues/532)) ([8949981](https://github.com/quokkify/ci-kit/commit/894998122345b159fed86644381f68dc897905e0))
+* **renovate:** update renovate to v44.198.0 ([#535](https://github.com/quokkify/ci-kit/issues/535)) ([139362b](https://github.com/quokkify/ci-kit/commit/139362bb102f5b3ef27b18e121a483aa742ce633))
+
 ## [4.2.0](https://github.com/quokkify/ci-kit/compare/v4.1.0...v4.2.0) (2026-10-29)
 
 
