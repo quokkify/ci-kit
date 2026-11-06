@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_composite_actions as composite  # noqa: E402
 
 action = composite.action
+GRADLE_RETRY_SCRIPT = composite.ROOT / "actions/gradle-retry/gradle-retry.sh"
 
 
 class JUnitStepSummaryCommandEscapingTests(unittest.TestCase):
@@ -102,6 +103,18 @@ class ComposeActionCommandEscapingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("\n::", "\n" + result.stdout + result.stderr)
         self.assertIn("x%0A::error::pwned 100%25", result.stderr)
+
+
+class GradleRetryCommandEscapingTests(unittest.TestCase):
+    def test_invalid_inputs_cannot_inject_workflow_commands(self) -> None:
+        # Regression guard: invalid input values were echoed without workflow-command escaping.
+        for name in ("GRADLE_RETRY_MAX_ATTEMPTS", "GRADLE_RETRY_INITIAL_DELAY_SECONDS"):
+            with self.subTest(name=name):
+                env = {**os.environ, "GRADLE_RETRY_COMMAND": "true", name: "x\n::error::pwned 100%"}
+                result = subprocess.run(["bash", str(GRADLE_RETRY_SCRIPT)], env=env, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn("\n::", "\n" + result.stdout + result.stderr)
+                self.assertIn("x%0A::error::pwned 100%25", result.stderr)
 
 
 if __name__ == "__main__":
