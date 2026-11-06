@@ -212,6 +212,38 @@ class ModuleRenderTests(unittest.TestCase):
                     jsonschema.validate(yaml.safe_load((dest / f".ci/modules/{module}.yml").read_text()), self.load_schema(module, 1))
                 self.assertEqual(build_plan(dest, drift=False).findings, [])
 
+    def render_modules(self, modules: dict[str, dict]) -> Path:
+        type(self).counter += 1
+        dest = self.tmp / f"modules-{self.counter}"
+        dest.mkdir()
+        for module, answers in modules.items():
+            args = ["copier", "copy", "--trust", "--defaults", "--vcs-ref", "HEAD", "-a", f".copier-answers.{module}.yml", "-d", f"module={module}"]
+            for key, value in answers.items():
+                args += ["-d", f"{key}={json.dumps(value) if isinstance(value, (list, dict)) else value}"]
+            result = subprocess.run([*args, str(self.repo), str(dest)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        return dest
+
+    def test_allure_component_mode_defaults_uploads_and_keeps_explicit_settings(self) -> None:
+        explicit = {"id": "explicit", "name": "Explicit", "path": ".", "upload_test_artifacts": True,
+                    "test_artifact_name": "allure-results-custom", "test_artifact_path": "out/allure"}
+        components = [{"id": "app-python", "name": "Application Python", "path": "."}, explicit]
+        for source, expected in (
+            ("component", (True, "allure-results-app-python", "allure-results")),
+            ("external", (False, "python-test-artifacts", "test-results")),
+        ):
+            with self.subTest(source=source):
+                dest = self.render_modules({
+                    "core": {"toolkit_version": "v99.0.0"},
+                    "python": {"python_components": components},
+                    "allure": {"allure_source": source, "toolkit_version": "v99.0.0"},
+                })
+                self.assertEqual(yaml.safe_load((dest / ".ci/modules/python.yml").read_text())["components"], components)
+                plan = build_plan(dest, drift=False)
+                self.assertEqual(plan.findings, [])
+                fields = [(e["upload_test_artifacts"], e["test_artifact_name"], e["test_artifact_path"]) for e in plan.matrices["python"]]
+                self.assertEqual(fields, [expected, (True, "allure-results-custom", "out/allure")])
+
     def test_java_test_modules_render_and_plan_cleanly(self) -> None:
         plan = build_plan(self.render_scenario("core-java-modules"), drift=False)
         self.assertEqual(plan.findings, [])

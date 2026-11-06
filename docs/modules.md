@@ -33,6 +33,10 @@ components:
   - {"id": "backend-python", "name": "Backend Python", "path": "backend", "python_version": "3.12", "run_lint": false}
 ```
 
+### Default Allure upload in component mode
+
+When the `allure` module is installed with `allure_source: component`, `ci-kit plan` turns the Allure upload on for every `java`, `python` and `node` component that does not set `upload_test_artifacts`. Such a component uploads `allure-results-<id>`, and its `test_artifact_path` defaults to `allure-results` for `python` and `node`, `build/allure-results` for Gradle and `target/allure-results` for Maven (with `build_tool: auto`, the tool is detected the way `java-ci` detects it). A `test_artifact_name` or `test_artifact_path` set in the declaration is kept. No default upload is added to a component that sets `upload_test_artifacts` (true or false), has `test_modules`, or sets `run_tests: false`; set `upload_test_artifacts: false` for a component that writes no Allure results, because the upload fails when the directory is missing. Repositories without the `allure` module and repositories in external mode keep the workflow defaults. The defaults are applied at plan time, so the rendered declarations do not change.
+
 ### Build modules (`test_modules`)
 
 A `java` component can run its tests as one job per build module instead of one job for the whole build. Add `test_modules` to the component:

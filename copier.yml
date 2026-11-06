@@ -216,7 +216,7 @@ gitleaks_aggregate:
 
 allure_source:
   type: str
-  help: "Where Allure results come from: component uses the generated component jobs in Validate; external uses a project-owned workflow, so generated component jobs upload no Allure results."
+  help: "Where Allure results come from: component reads the allure-results-<id> artifacts that the java, python and node module declarations (.ci/modules/<language>.yml) upload from Validate, and a component that leaves upload_test_artifacts unset uploads its Allure results by default; external reads the artifacts of a project-owned workflow, and module declarations need no Allure upload."
   choices:
     - component
     - external
