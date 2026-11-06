@@ -47,6 +47,16 @@ class GradleRetryTests(unittest.TestCase):
             leftovers = list(root.glob("gradle-retry.*"))
             return result, int(count.read_text()), leftovers
 
+    def test_invalid_inputs_cannot_inject_workflow_commands(self) -> None:
+        # Regression guard: invalid input values were echoed without workflow-command escaping.
+        for name in ("GRADLE_RETRY_MAX_ATTEMPTS", "GRADLE_RETRY_INITIAL_DELAY_SECONDS"):
+            with self.subTest(name=name):
+                env = {**os.environ, "GRADLE_RETRY_COMMAND": "true", name: "x\n::error::pwned 100%"}
+                result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode, 2)
+                self.assertNotIn("\n::", "\n" + result.stdout + result.stderr)
+                self.assertIn("x%0A::error::pwned 100%25", result.stderr)
+
     def test_successful_run_does_not_refresh(self) -> None:
         result, calls, leftovers = self.run_case("success")
         self.assertEqual(result.returncode, 0)

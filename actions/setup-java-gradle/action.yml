@@ -46,16 +46,21 @@ runs:
         VALIDATE_WRAPPERS: ${{ inputs.validate-wrappers }}
       run: |
         set -euo pipefail
+        command_text() {
+          local value="${1//"%"/%25}"
+          value="${value//$'\r'/%0D}"
+          printf '%s' "${value//$'\n'/%0A}"
+        }
         if [[ "$CACHE_DEPENDENCIES" != "true" && "$CACHE_DEPENDENCIES" != "false" ]]; then
-          echo "cache-dependencies must be 'true' or 'false': $CACHE_DEPENDENCIES" >&2
+          echo "cache-dependencies must be 'true' or 'false': $(command_text "$CACHE_DEPENDENCIES")" >&2
           exit 2
         fi
         if [[ "$CACHE_JDK" != "true" && "$CACHE_JDK" != "false" ]]; then
-          echo "cache-jdk must be 'true' or 'false': $CACHE_JDK" >&2
+          echo "cache-jdk must be 'true' or 'false': $(command_text "$CACHE_JDK")" >&2
           exit 2
         fi
         if [[ "$VALIDATE_WRAPPERS" != "true" && "$VALIDATE_WRAPPERS" != "false" ]]; then
-          echo "validate-wrappers must be 'true' or 'false': $VALIDATE_WRAPPERS" >&2
+          echo "validate-wrappers must be 'true' or 'false': $(command_text "$VALIDATE_WRAPPERS")" >&2
           exit 2
         fi
     - name: Validate Gradle wrappers

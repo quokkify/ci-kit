@@ -4,6 +4,12 @@
 # not-found gets one refresh.
 set -uo pipefail
 
+command_text() {
+  local value="${1//"%"/%25}"
+  value="${value//$'\r'/%0D}"
+  printf '%s' "${value//$'\n'/%0A}"
+}
+
 command_string="${GRADLE_RETRY_COMMAND:-}"
 max_attempts="${GRADLE_RETRY_MAX_ATTEMPTS:-3}"
 delay="${GRADLE_RETRY_INITIAL_DELAY_SECONDS:-30}"
@@ -13,11 +19,11 @@ if [[ -z "$command_string" ]]; then
   exit 2
 fi
 if ! [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
-  echo "gradle-retry.sh: GRADLE_RETRY_MAX_ATTEMPTS must be a positive integer, got '${max_attempts}'" >&2
+  echo "gradle-retry.sh: GRADLE_RETRY_MAX_ATTEMPTS must be a positive integer, got '$(command_text "$max_attempts")'" >&2
   exit 2
 fi
 if ! [[ "$delay" =~ ^[0-9]+$ ]]; then
-  echo "gradle-retry.sh: GRADLE_RETRY_INITIAL_DELAY_SECONDS must be a non-negative integer, got '${delay}'" >&2
+  echo "gradle-retry.sh: GRADLE_RETRY_INITIAL_DELAY_SECONDS must be a non-negative integer, got '$(command_text "$delay")'" >&2
   exit 2
 fi
 
