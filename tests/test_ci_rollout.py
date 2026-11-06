@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import ExitStack
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -344,6 +345,44 @@ class PilotGateTests(unittest.TestCase):
             with self.assertRaisesRegex(gate.GateError, r"repos/a/b.*HTTP 502"):
                 gate.api("repos/a/b")
             self.assertEqual(run.call_count, len(gate.API_RETRY_DELAYS) + 1)
+
+    def test_non_transient_client_errors_fail_fast_without_retry(self):
+        for stderr in ("gh: Validation Failed (HTTP 422)", "gh: Bad credentials (HTTP 401)",
+                       "gh: Resource not accessible by integration (HTTP 403)"):
+            error = subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+            with self.subTest(stderr=stderr), patch.object(gate.time, "sleep") as sleep, \
+                 patch.object(gate.subprocess, "run", side_effect=error) as run:
+                with self.assertRaisesRegex(gate.GateError, re.escape(stderr)):
+                    gate.api("repos/a/b")
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+        ok = subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
+        for stderr in ("gh: API rate limit exceeded for installation (HTTP 403)",
+                       "gh: Too Many Requests (HTTP 429)", "gh: Request Timeout (HTTP 408)",
+                       "gh: Service Unavailable (HTTP 503)"):
+            error = subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+            with self.subTest(stderr=stderr), patch.object(gate.time, "sleep"), \
+                 patch.object(gate.subprocess, "run", side_effect=[error, ok]) as run:
+                self.assertEqual(gate.api("repos/a/b"), {})
+                self.assertEqual(run.call_count, 2)
+
+    def test_retry_requires_headroom_before_the_read_deadline(self):
+        error = subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad Gateway (HTTP 502)")
+        first_delay = gate.API_RETRY_DELAYS[0]
+        # Just enough time for the sleep but not the headroom: fail now rather than run a near-zero read.
+        tight = gate.time.monotonic() + first_delay + gate.API_RETRY_HEADROOM - 1
+        with patch.object(gate, "API_DEADLINE", tight), patch.object(gate.time, "sleep") as sleep, \
+             patch.object(gate.subprocess, "run", side_effect=error) as run:
+            with self.assertRaisesRegex(gate.GateError, "HTTP 502"):
+                gate.api("repos/a/b")
+            self.assertEqual(run.call_count, 1)
+            sleep.assert_not_called()
+        ok = subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
+        roomy = gate.time.monotonic() + first_delay + gate.API_RETRY_HEADROOM + 30
+        with patch.object(gate, "API_DEADLINE", roomy), patch.object(gate.time, "sleep"), \
+             patch.object(gate.subprocess, "run", side_effect=[error, ok]) as run:
+            self.assertEqual(gate.api("repos/a/b"), {})
+            self.assertEqual(run.call_count, 2)
 
     def test_confirmed_404_with_missing_ok_and_expired_deadline_are_not_retried(self):
         missing = subprocess.CalledProcessError(1, ["gh"], stderr="gh: Not Found (HTTP 404)")

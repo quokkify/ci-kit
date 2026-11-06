@@ -18,6 +18,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 API_DEADLINE: float | None = None
 # A single failed read used to abort a whole gated rollout; retry it a bounded number of times.
 API_RETRY_DELAYS = (5, 15)
+# A retry is skipped unless the read deadline leaves this much time after the backoff sleep.
+API_RETRY_HEADROOM = 5.0
+# 4xx statuses that can clear on a retry: 404 is included because a pull request read seconds after
+# its creation can briefly 404 (eventual consistency); missing_ok callers still get a confirmed 404.
+RETRYABLE_CLIENT_STATUSES = frozenset({404, 408, 429})
 
 
 class GateError(RuntimeError):
@@ -32,11 +37,25 @@ def _failure_detail(exc: BaseException) -> str:
     return lines[-1][:200] if lines else type(exc).__name__
 
 
+def _is_transient(exc: BaseException) -> bool:
+    """Timeouts, 5xx, rate limits and unclassified gh failures are transient; other 4xx are not."""
+    if not isinstance(exc, subprocess.CalledProcessError):
+        return True
+    stderr = exc.stderr or ""
+    match = re.search(r"\(HTTP (\d{3})\)", stderr)
+    if not match:
+        return True
+    status = int(match[1])
+    if status == 403:
+        return "rate limit" in stderr.lower()
+    return not 400 <= status < 500 or status in RETRYABLE_CLIENT_STATUSES
+
+
 def api(endpoint: str, *, missing_ok: bool = False) -> object:
     """Use the current gh credential; never write or silently ignore API errors.
 
-    With missing_ok only a confirmed HTTP 404 returns None; every other failure is retried
-    within the read deadline and then raises."""
+    With missing_ok only a confirmed HTTP 404 returns None; transient failures are retried
+    within the read deadline, and every failure that remains raises."""
     for attempt in range(len(API_RETRY_DELAYS) + 1):
         timeout = 45.0 if API_DEADLINE is None else min(45.0, API_DEADLINE - time.monotonic())
         if timeout <= 0:
@@ -52,10 +71,11 @@ def api(endpoint: str, *, missing_ok: bool = False) -> object:
             failure = exc
         except (subprocess.SubprocessError, ValueError) as exc:
             failure = exc
-        if attempt == len(API_RETRY_DELAYS):
+        if attempt == len(API_RETRY_DELAYS) or not _is_transient(failure):
             break
         delay = API_RETRY_DELAYS[attempt]
-        if API_DEADLINE is not None and time.monotonic() + delay >= API_DEADLINE:
+        # Without headroom the next read would get a near-zero subprocess timeout and a spurious "timed out".
+        if API_DEADLINE is not None and time.monotonic() + delay + API_RETRY_HEADROOM > API_DEADLINE:
             break
         time.sleep(delay)
     raise GateError(f"GitHub read failed for {endpoint}: {_failure_detail(failure)}") from failure
