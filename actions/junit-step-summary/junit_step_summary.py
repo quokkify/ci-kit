@@ -29,6 +29,7 @@ class RejectingTreeBuilder(ET.TreeBuilder):
 MAX_DURATION_SECONDS = Decimal("315576000")  # Ten years per report is already nonsensical.
 MAX_GLOB_PATTERNS = 64
 MAX_GLOB_LENGTH = 1024
+MAX_GLOBSTARS = 4
 MAX_SUITE_DEPTH = 128
 DEFAULT_JUNIT_PATHS = "test-results/**/*.xml"
 LEGACY_VARIANTS = {
@@ -198,6 +199,15 @@ def compile_glob(pattern: str) -> Pattern[str]:
     parts = validate_relative_path(pattern, "junit-paths entry")
     if any("**" in part and part != "**" for part in parts):
         raise SummaryError("junit-paths supports ** only as a complete path segment")
+    parts = tuple(
+        part
+        for index, part in enumerate(parts)
+        if part != "**" or index == 0 or parts[index - 1] != "**"
+    )
+    if parts.count("**") > MAX_GLOBSTARS:
+        raise SummaryError(
+            f"junit-paths entries must not contain more than {MAX_GLOBSTARS} ** segments"
+        )
     pattern = "/".join(parts)
     if any(character in pattern for character in "[]{}"):
         raise SummaryError("junit-paths supports only literal characters, *, ?, and ** wildcards")

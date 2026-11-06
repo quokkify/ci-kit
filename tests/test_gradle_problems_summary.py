@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -282,6 +283,74 @@ class GradleProblemsSummaryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("\n::error::", "\n" + result.stdout)
             self.assertIn("evil%0A::error::pwned", result.stdout)
+
+    def test_repeated_markers_are_scanned_in_linear_time(self) -> None:
+        # Regression guard: a backtracking data-block regex took minutes on repeated markers.
+        with tempfile.TemporaryDirectory(prefix="gradle-problems-markers-") as tmp:
+            workspace = Path(tmp)
+            begins = "// begin-report-data\n" * 50000
+            ends = "// begin-report-data\n" + "x\n// end-report-dataX" * 50000
+            self.write(workspace, f"begins/{DEFAULT_REPORT}", begins)
+            self.write(workspace, f"ends/{DEFAULT_REPORT}", ends)
+            self.write(workspace, f"crlf/{DEFAULT_REPORT}", report_html(report_data([])).replace("\n", "\r\n"))
+            started = time.perf_counter()
+            result, summary, output = self.run_summary(workspace, report_paths=f"*/{DEFAULT_REPORT}")
+            self.assertLess(time.perf_counter() - started, 10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count("no embedded report-data block"), 2, result.stdout)
+            self.assertIn("reports=1\n", output)
+
+            self.write(workspace, f"first-line/{DEFAULT_REPORT}", "// begin-report-data\n{}\n// end-report-data")
+            result, _, _ = self.run_summary(workspace, report_paths=f"first-line/{DEFAULT_REPORT}")
+            self.assertIn("no problemsReport section", result.stdout)
+
+    def test_large_problem_lists_are_joined_linearly_and_capped(self) -> None:
+        # Regression guard: summaries were matched to diagnostics by scanning every group.
+        with tempfile.TemporaryDirectory(prefix="gradle-problems-join-") as tmp:
+            workspace = Path(tmp)
+            ids = 20000
+            diagnostics = [{"problemId": [{"name": f"i{index}"}]} for index in range(ids)]
+            summaries = [{"problemId": [{"name": f"i{index}"}], "count": 2} for index in range(ids)]
+            self.write(workspace, f"many/{DEFAULT_REPORT}", report_html(report_data(diagnostics, summaries)))
+            self.write(
+                workspace,
+                f"capped/{DEFAULT_REPORT}",
+                report_html(report_data([{}] * 100010, [{"problemId": [], "count": 10**12}] * 2)),
+            )
+            started = time.perf_counter()
+            result, summary, output = self.run_summary(workspace, report_paths=f"*/{DEFAULT_REPORT}")
+            self.assertLess(time.perf_counter() - started, 20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("10 malformed report entries were ignored", summary)
+            self.assertIn("| 1000000000 |", summary)
+            self.assertIn("| 3 |", summary)
+            self.assertIn(f"problems={1000000000 + 3 * ids}\n", output)
+
+    def test_urls_are_not_rendered_as_autolinks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gradle-problems-autolink-") as tmp:
+            workspace = Path(tmp)
+            label = "see https://evil.example/x and WWW.evil.example or ftp://host"
+            self.write(workspace, DEFAULT_REPORT, report_html(report_data([diagnostic("u", label)])))
+            result, summary, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("://", summary.replace("\\:", ":"))
+            self.assertNotIn("www.", summary.replace("\\.", ".").lower())
+            self.assertEqual(summary.count("\u200b"), 3)
+
+    def test_globstar_segments_are_collapsed_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gradle-problems-globstar-") as tmp:
+            workspace = Path(tmp)
+            self.fixture(workspace, "a/" * 40 + DEFAULT_REPORT)
+            started = time.perf_counter()
+            result, _, output = self.run_summary(
+                workspace, report_paths="**/" * 30 + "problems-report.html"
+            )
+            self.assertLess(time.perf_counter() - started, 30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("reports=1\n", output)
+            result, _, _ = self.run_summary(workspace, report_paths="**/a/" * 5 + "problems-report.html")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("more than 4 ** segments", result.stderr)
 
     def test_input_bounds_are_validated(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gradle-problems-inputs-") as tmp:

@@ -29,16 +29,21 @@ class ReportError(ValueError):
 
 MAX_GLOB_PATTERNS = 64
 MAX_GLOB_LENGTH = 1024
+MAX_GLOBSTARS = 4
 MAX_FIELD_CHARS = 200
 MAX_LOCATION_CHARS = 160
 MAX_COUNT = 1_000_000_000
 DEFAULT_REPORT_PATHS = "build/reports/problems/problems-report.html"
-DATA_BLOCK = re.compile(
-    r"^// begin-report-data\r?\n(.*?)\r?\n// end-report-data\r?$",
-    re.MULTILINE | re.DOTALL,
-)
+MAX_ENTRIES = 100_000
+BEGIN_MARKER = "// begin-report-data\n"
+END_MARKER = "\n// end-report-data"
 # Every ASCII punctuation character that can start Markdown, GFM, or math syntax.
 MARKDOWN_SPECIALS = re.compile(r"([\\`*_{}\[\]()#+\-.!|~$^=:])")
+# Zero-width spaces keep GFM from turning untrusted URLs into autolinks.
+AUTOLINK_BREAKS = (
+    (re.compile(re.escape("://")), ":\u200b//"),
+    (re.compile(re.escape("www."), re.IGNORECASE), "www\u200b."),
+)
 STRIPPED_CATEGORIES = {"Cc", "Cf", "Co", "Cs", "Zl", "Zp"}
 SEVERITY_ORDER = {"ERROR": 0, "WARNING": 1, "ADVICE": 2}
 TRUNCATION_RESERVE = 256
@@ -75,6 +80,15 @@ def compile_glob(pattern: str) -> Pattern[str]:
     parts = validate_relative_path(pattern, "report-paths entry")
     if any("**" in part and part != "**" for part in parts):
         raise SummaryError("report-paths supports ** only as a complete path segment")
+    parts = tuple(
+        part
+        for index, part in enumerate(parts)
+        if part != "**" or index == 0 or parts[index - 1] != "**"
+    )
+    if parts.count("**") > MAX_GLOBSTARS:
+        raise SummaryError(
+            f"report-paths entries must not contain more than {MAX_GLOBSTARS} ** segments"
+        )
     pattern = "/".join(parts)
     if any(character in pattern for character in "[]{}"):
         raise SummaryError("report-paths supports only literal characters, *, ?, and ** wildcards")
@@ -272,6 +286,8 @@ def markdown_text(value: object, limit: int = MAX_FIELD_CHARS) -> str:
     text = " ".join(text.split())
     if len(text) > limit:
         text = text[: limit - 1].rstrip() + "…"
+    for unsafe, broken in AUTOLINK_BREAKS:
+        text = unsafe.sub(broken, text)
     return html.escape(MARKDOWN_SPECIALS.sub(r"\\\1", text), quote=True)
 
 
@@ -356,17 +372,38 @@ class Report:
     ignored_entries: int
 
 
+def find_data_block(text: str) -> Optional[str]:
+    """Return the text between the first begin-marker line and the next end-marker line.
+
+    Only forward str.find scans are used, so repeated hostile markers stay linear.
+    """
+    if text.startswith(BEGIN_MARKER):
+        start = len(BEGIN_MARKER)
+    else:
+        begin = text.find("\n" + BEGIN_MARKER)
+        if begin < 0:
+            return None
+        start = begin + 1 + len(BEGIN_MARKER)
+    end = text.find(END_MARKER, start - 1)
+    while end >= 0:
+        after = end + len(END_MARKER)
+        if after == len(text) or text[after] == "\n":
+            return text[start:end] if end >= start else ""
+        end = text.find(END_MARKER, after)
+    return None
+
+
 def extract_data(raw: bytes) -> Dict[str, object]:
     """Locate and decode the JSON data block embedded in the report HTML."""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ReportError("report is not valid UTF-8") from exc
-    match = DATA_BLOCK.search(text)
-    if not match:
+    data_text = find_data_block(text.replace("\r\n", "\n"))
+    if data_text is None:
         raise ReportError("unsupported report format: no embedded report-data block")
     try:
-        data = json.loads(match.group(1))
+        data = json.loads(data_text)
     except RecursionError as exc:
         raise ReportError("report data is nested too deeply") from exc
     except ValueError as exc:
@@ -390,9 +427,10 @@ def parse_report(raw: bytes, source: str, workspaces: Sequence[str]) -> Report:
     diagnostics = data["diagnostics"]
     assert isinstance(diagnostics, list)
     groups: Dict[Tuple[Tuple[str, ...], str], ProblemGroup] = {}
-    ignored = 0
+    first_by_names: Dict[Tuple[str, ...], ProblemGroup] = {}
+    ignored = max(len(diagnostics) - MAX_ENTRIES, 0)
     problems = 0
-    for entry in diagnostics:
+    for entry in diagnostics[:MAX_ENTRIES]:
         if not isinstance(entry, dict):
             ignored += 1
             continue
@@ -401,7 +439,8 @@ def parse_report(raw: bytes, source: str, workspaces: Sequence[str]) -> Report:
         severity = severity.upper()[:16] if isinstance(severity, str) and severity else "UNKNOWN"
         names = tuple(name for name, _ in key)
         group = groups.setdefault((names, severity), ProblemGroup(key=key, severity=severity))
-        group.count += 1
+        first_by_names.setdefault(names, group)
+        group.count = min(group.count + 1, MAX_COUNT)
         problems += 1
         label = entry.get("contextualLabel")
         if not group.message and isinstance(label, str):
@@ -411,18 +450,20 @@ def parse_report(raw: bytes, source: str, workspaces: Sequence[str]) -> Report:
             group.locations.setdefault(location[: MAX_LOCATION_CHARS * 4], None)
 
     summaries = metadata.get("summaries")
-    for entry in summaries if isinstance(summaries, list) else []:
+    summaries = summaries if isinstance(summaries, list) else []
+    ignored += max(len(summaries) - MAX_ENTRIES, 0)
+    for entry in summaries[:MAX_ENTRIES]:
         if not isinstance(entry, dict):
             ignored += 1
             continue
         skipped = bounded_count(entry.get("count"))
         key = problem_key(entry.get("problemId"))
         names = tuple(name for name, _ in key)
-        matches = [group for (group_names, _), group in groups.items() if group_names == names]
-        group = matches[0] if matches else groups.setdefault(
-            (names, "UNKNOWN"), ProblemGroup(key=key, severity="UNKNOWN")
-        )
-        group.count += skipped
+        group = first_by_names.get(names)
+        if group is None:
+            group = groups.setdefault((names, "UNKNOWN"), ProblemGroup(key=key, severity="UNKNOWN"))
+            first_by_names[names] = group
+        group.count = min(group.count + skipped, MAX_COUNT)
         problems += skipped
 
     build_name = metadata.get("buildName")
