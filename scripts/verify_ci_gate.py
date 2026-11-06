@@ -16,30 +16,49 @@ from urllib.parse import quote
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 API_DEADLINE: float | None = None
+# A single failed read used to abort a whole gated rollout; retry it a bounded number of times.
+API_RETRY_DELAYS = (5, 15)
 
 
 class GateError(RuntimeError):
     """A gate cannot establish that the exact revision is healthy."""
 
 
+def _failure_detail(exc: BaseException) -> str:
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "timed out"
+    stderr = getattr(exc, "stderr", None)
+    lines = [line.strip() for line in (stderr or "").splitlines() if line.strip()]
+    return lines[-1][:200] if lines else type(exc).__name__
+
+
 def api(endpoint: str, *, missing_ok: bool = False) -> object:
     """Use the current gh credential; never write or silently ignore API errors.
 
-    With missing_ok only a confirmed HTTP 404 returns None; every other failure still raises."""
-    try:
+    With missing_ok only a confirmed HTTP 404 returns None; every other failure is retried
+    within the read deadline and then raises."""
+    for attempt in range(len(API_RETRY_DELAYS) + 1):
         timeout = 45.0 if API_DEADLINE is None else min(45.0, API_DEADLINE - time.monotonic())
         if timeout <= 0:
             raise GateError("CI read deadline expired")
-        result = subprocess.run(
-            ["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=timeout
-        )
-        return json.loads(result.stdout)
-    except subprocess.CalledProcessError as exc:
-        if missing_ok and "HTTP 404" in (exc.stderr or ""):
-            return None
-        raise GateError(f"GitHub read failed for {endpoint}") from exc
-    except (subprocess.SubprocessError, ValueError) as exc:
-        raise GateError(f"GitHub read failed for {endpoint}") from exc
+        try:
+            result = subprocess.run(
+                ["gh", "api", endpoint], check=True, capture_output=True, text=True, timeout=timeout
+            )
+            return json.loads(result.stdout)
+        except subprocess.CalledProcessError as exc:
+            if missing_ok and "HTTP 404" in (exc.stderr or ""):
+                return None
+            failure = exc
+        except (subprocess.SubprocessError, ValueError) as exc:
+            failure = exc
+        if attempt == len(API_RETRY_DELAYS):
+            break
+        delay = API_RETRY_DELAYS[attempt]
+        if API_DEADLINE is not None and time.monotonic() + delay >= API_DEADLINE:
+            break
+        time.sleep(delay)
+    raise GateError(f"GitHub read failed for {endpoint}: {_failure_detail(failure)}") from failure
 
 
 def pages(endpoint: str, key: str | None = None) -> list[dict]:
