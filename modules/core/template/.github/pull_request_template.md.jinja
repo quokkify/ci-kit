@@ -2,13 +2,6 @@
 
 <!-- What changed and why? Most PRs stop here: the PR title becomes the changelog bullet. -->
 
-## Checklist
-
-- [ ] The title follows [Conventional Commits](https://github.com/quokkify/ci-kit/blob/main/CONTRIBUTING.md#branch-and-pr-title-rules) with an allowed type
-- [ ] Breaking changes are marked with `!` in the title and a `BREAKING CHANGE:` footer
-- [ ] Tests and docs are updated
-- [ ] No secrets or credentials are included
-
 <!--
 The sections below are optional and are published at the top of the release notes.
 Fill one only for a change users should notice. Otherwise leave the comment as is
@@ -31,3 +24,10 @@ inside a section; use a **bold** lead-in instead.
 ## Migration
 
 <!-- Only steps users must take when upgrading. Opt-in changes that keep the current default need no migration; put caveats in Highlight. -->
+
+## Checklist
+
+- [ ] The PR title follows [Conventional Commits](https://github.com/quokkify/ci-kit/blob/main/CONTRIBUTING.md#branch-and-pr-title-rules) as `type(scope): summary` (scope required), with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`, or `deps` (dependency updates)
+- [ ] Breaking changes are marked with `!` in the title and a `BREAKING CHANGE:` footer
+- [ ] Tests and docs are updated
+- [ ] No secrets or credentials are included

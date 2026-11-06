@@ -15,15 +15,16 @@ git diff --check
 
 ## Branch and PR title rules
 
-Never commit to `main`; open a PR from a dedicated branch named `<type>/<short-kebab-slug>`
-(for example `docs/branch-and-title-rules`). Bots use their own prefixes: `renovate/`,
-`release-please--`, `automation/` and `ci-kit/`.
+Never commit to `main`; open a PR from a dedicated branch named `<type>/<short-kebab-slug>`,
+for example `feat/gradle-problems-summary`, `fix/allure-component-defaults` or
+`chore/bump-pinned-actions`. Bots use their own prefixes: `renovate/`, `release-please--`,
+`automation/` and `ci-kit/`.
 
-PR titles follow Conventional Commits, `type(scope): summary`, with `!` before the colon
-for a breaking change (plus a `BREAKING CHANGE:` footer). The title becomes the changelog
-entry, and the `PR Title` check rejects any other type. Allowed types: `feat`, `fix`,
-`perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`. Branch types
-use the same list; Renovate additionally uses `deps(<manager>)` titles.
+PR titles must match `type(scope): summary`, with a required scope and `!` before the colon
+for a breaking change (plus a `BREAKING CHANGE:` footer). Allowed types: `feat`, `fix`,
+`perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`, and `deps`
+(dependency updates). Branch types use the same list. Repositories with a PR-title check
+enforce this format; the title becomes the changelog entry either way.
 
 New third-party Actions must be pinned to a full commit SHA and covered by Renovate. Add a composite action only with evidence of repeated step-level logic. Do not create or move release tags from feature work.
 

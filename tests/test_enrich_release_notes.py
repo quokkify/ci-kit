@@ -169,6 +169,11 @@ class RichNotesTests(TestCase):
         for heading in ("Highlight", "Usage example", "Migration"):
             self.assertIn(f"## {heading}\n", body)
         self.assertEqual(notes.extract_rich_sections(body), {})
+        self.assertIn("\n## Checklist\n", body)
+        # Regression guard: the trailing checklist must never leak into release notes.
+        filled = body.replace("## Migration\n", "## Migration\nUpgrade steps.\n")
+        self.assertNotIn("Checklist", notes.extract_rich_sections(filled)["migration"])
+        self.assertNotIn("[ ]", notes.extract_rich_sections(filled)["migration"])
         self.assertIn('Do not write "None"', body)
         placeholder = notes.extract_rich_sections(body.replace("## Migration\n", "## Migration\nNone.\n"))
         self.assertTrue(placeholder["migration"].startswith("None."))
