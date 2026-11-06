@@ -505,12 +505,14 @@ jobs:
         categories-file: ${{ inputs.categories-file }}
         comment-file: allure-pr-comment.md
         pr-number: ''
+        # Provenance is derived, not defaulted: the generate job runs only after the resolver
+        # verified this workflow_run's id and head SHA against the current PR head.
         pyramid-enabled: ${{ inputs.pyramid-enabled }}
         pyramid-markdown-file: ${{ inputs.pyramid-markdown-file }}
         pyramid-json-file: ${{ inputs.pyramid-json-file }}
         pyramid-gates-json-file: ${{ inputs.pyramid-gates-json-file }}
-        pyramid-source-run-id: ${{ inputs.pyramid-source-run-id }}
-        pyramid-head-sha: ${{ inputs.pyramid-head-sha }}
+        pyramid-source-run-id: ${{ inputs.pyramid-source-run-id || github.event.workflow_run.id }}
+        pyramid-head-sha: ${{ inputs.pyramid-head-sha || github.event.workflow_run.head_sha }}
         pyramid-policy-path: ${{ inputs.pyramid-policy-path }}
         pyramid-artifact-name: ${{ inputs.pyramid-artifact-name }}
         pyramid-retention-days: ${{ inputs.pyramid-retention-days }}

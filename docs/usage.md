@@ -191,17 +191,9 @@ Both source modes use thin generated callers. These core/Pages endpoints must ex
 
 ### Test-pyramid advisory output
 
-`allure-publisher.yml` and `allure-publisher-core.yml` forward the standalone `allure-report-action` test-pyramid inputs under the same names: `pyramid-enabled`, `pyramid-markdown-file`, `pyramid-json-file`, `pyramid-gates-json-file`, `pyramid-source-run-id`, `pyramid-head-sha`, `pyramid-policy-path`, `pyramid-artifact-name`, and `pyramid-retention-days`. The feature is opt-in: `pyramid-enabled` defaults to `false`, and every other input defaults to the action's own default, so callers that omit them behave exactly as before. When enabled, the action writes the snapshot and advisory gate files and uploads them as the `pyramid-snapshot` artifact; the gates are advisory and never fail the job. Pass `pyramid-source-run-id` and `pyramid-head-sha` to embed the source run and commit in the snapshot, and `pyramid-policy-path` to link a caller-repository policy file. No permissions beyond the existing report contract are added.
+`allure-publisher.yml` and `allure-publisher-core.yml` forward the standalone `allure-report-action` test-pyramid inputs under the same names: `pyramid-enabled`, `pyramid-markdown-file`, `pyramid-json-file`, `pyramid-gates-json-file`, `pyramid-source-run-id`, `pyramid-head-sha`, `pyramid-policy-path`, `pyramid-artifact-name`, and `pyramid-retention-days`. The feature is opt-in: `pyramid-enabled` defaults to `false` and the other inputs default to the action's own defaults, so callers that omit them behave exactly as before.
 
-```yaml
-jobs:
-  report:
-    uses: quokkify/ci-kit/.github/workflows/allure-publisher.yml@v1
-    with:
-      # ...existing inputs...
-      pyramid-enabled: true
-      pyramid-policy-path: docs/testing/test-pyramid.md
-```
+When enabled, the action (v0.5.3) writes the pyramid snapshot and advisory gate files, emits a `Test pyramid (advisory)` warning annotation per tripped gate, appends the gate table to the job summary, and uploads the files as the `pyramid-snapshot` artifact. The gate check always exits zero, so it never fails the job. `pyramid-source-run-id` and `pyramid-head-sha` are derived from the verified source workflow run when left empty; set them only to override. `pyramid-policy-path` links a caller-repository policy file. No permissions beyond the existing report contract are added. See `examples/allure-pyramid.yml`.
 
 ## Release Please
 

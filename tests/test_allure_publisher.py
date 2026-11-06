@@ -592,8 +592,11 @@ class AllureCallerContracts(TestCase):
                 self.assertEqual(str(inputs[name]['default']).lower(), str(expected).lower(), name)
                 self.assertFalse(inputs[name]['required'])
         self.assertIs(CORE[True]['workflow_call']['inputs']['pyramid-enabled']['default'], False)
+        derived = {'pyramid-source-run-id': 'github.event.workflow_run.id',
+                   'pyramid-head-sha': 'github.event.workflow_run.head_sha'}
         for name in names:
-            self.assertEqual(builder['with'][name], f'${{{{ inputs.{name} }}}}')
+            expected = f'${{{{ inputs.{name} || {derived[name]} }}}}' if name in derived else f'${{{{ inputs.{name} }}}}'
+            self.assertEqual(builder['with'][name], expected)
             self.assertEqual(legacy['jobs']['report']['with'][name], f'${{{{ inputs.{name} }}}}')
 
     def test_core_permissions_token_and_legacy_api_pages_layout_are_preserved(self) -> None:
