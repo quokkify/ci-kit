@@ -12,7 +12,7 @@ SCRIPT = ROOT / "actions/gradle-retry/gradle-retry.sh"
 
 
 class GradleRetryTests(unittest.TestCase):
-    def run_case(self, mode: str, *, max_attempts: str = "3", persistent: bool = False) -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
+    def run_case(self, mode: str, *, max_attempts: str = "3", persistent: bool = False, delay: str = "0") -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
         with tempfile.TemporaryDirectory(prefix="gradle-retry-test-") as temporary:
             root = Path(temporary)
             fake = root / "fake-gradle"
@@ -28,6 +28,7 @@ class GradleRetryTests(unittest.TestCase):
                 "  server-error) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 500 from server: Internal Server Error\"; exit 13;;\n"
                 "  not-found) if [[ \"$*\" == *--refresh-dependencies* ]]; then [[ \"${PERSISTENT:-0}\" == 1 ]] && { echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7; }; echo success; exit 0; fi; echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7;;\n"
                 "  rate-limit) [[ $n -lt 2 ]] && { echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 429 from server: Too Many Requests\"; exit 8; }; echo success; exit 0;;\n"
+                "  persistent-rate-limit) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 429 from server: Too Many Requests\"; exit $((20 + n));;\n"
                 "  access-denied) [[ $n -lt 2 ]] && { echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 14; }; echo success; exit 0;;\n"
                 "  persistent-access-denied) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 15;;\n"
                 "esac\n"
@@ -37,7 +38,7 @@ class GradleRetryTests(unittest.TestCase):
                 **os.environ,
                 "COUNT_FILE": str(count),
                 "GRADLE_RETRY_COMMAND": f"{fake} --task test",
-                "GRADLE_RETRY_INITIAL_DELAY_SECONDS": "0",
+                "GRADLE_RETRY_INITIAL_DELAY_SECONDS": delay,
                 "GRADLE_RETRY_MAX_ATTEMPTS": max_attempts,
                 "MODE": mode,
             }
@@ -45,7 +46,7 @@ class GradleRetryTests(unittest.TestCase):
                 env["PERSISTENT"] = "1"
             result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False)
             leftovers = list(root.glob("gradle-retry.*"))
-            return result, int(count.read_text()), leftovers
+            return result, int(count.read_text()) if count.exists() else 0, leftovers
 
     def test_successful_run_does_not_refresh(self) -> None:
         result, calls, leftovers = self.run_case("success")
@@ -93,6 +94,19 @@ class GradleRetryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 15)
         self.assertEqual(calls, 3)
         self.assertIn("retry budget exhausted after 3/3 attempts", result.stdout)
+
+    def test_persistent_429_fails_with_last_exit_code(self) -> None:
+        result, calls, _ = self.run_case("persistent-rate-limit", max_attempts="3")
+        self.assertEqual(calls, 3)
+        self.assertEqual(result.returncode, 23)
+        self.assertIn("retry budget exhausted after 3/3 attempts", result.stdout)
+
+    def test_malformed_inputs_are_rejected_before_running_command(self) -> None:
+        for max_attempts, delay in (("0", "0"), ("abc", "0"), ("-1", "0"), ("2.5", "0"), ("3", "-1"), ("3", "x")):
+            with self.subTest(max_attempts=max_attempts, delay=delay):
+                result, calls, _ = self.run_case("ordinary", max_attempts=max_attempts, delay=delay)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertEqual(calls, 0)
 
     def test_unrelated_forbidden_is_not_retried(self) -> None:
         result, calls, _ = self.run_case("forbidden")
