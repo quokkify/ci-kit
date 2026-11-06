@@ -356,6 +356,17 @@ def main() -> None:
                 fail(f"artifact entry conflicts with another extracted path: {artifact_name}/{info.filename}: {error}")
             if written != info.file_size:
                 fail(f"artifact entry size mismatch: {artifact_name}/{info.filename}")
+        if (
+            materialize_root is not None
+            and layout == "merged"
+            and not any(len(relative.parts) == 1 and relative.name.endswith("-result.json") for _, _, _, relative in entries)
+        ):
+            nested = sorted({relative.parent.as_posix() for _, _, _, relative in entries if relative.name.endswith("-result.json")})
+            fail(
+                "component artifacts contain no *-result.json directly at the artifact root, so the report would be empty"
+                + (f"; results found only under: {', '.join(nested[:5])}" if nested else "")
+                + ". Set test_artifact_path to one results directory."
+            )
         if materialize_root is not None:
             prepare_workspace_directory(materialize_root)
             for _, _, _, relative in entries:

@@ -267,6 +267,32 @@ class SafeExtractTest(TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.materialized_files(), {"a-result.json"})
 
+    def test_merged_layout_rejects_results_nested_below_the_artifact_root(self) -> None:
+        # Regression guard for quokkify/ci-kit#529: the report reads only files directly inside the
+        # results directory, so nested results published a silent 0-test report.
+        self.write_archive(
+            "allure-results-app-java",
+            [("module-a/build/allure-results/a-result.json", "{}"), ("module-b/build/allure-results/b-result.json", "{}")],
+        )
+
+        for layout in (None, "merged"):
+            with self.subTest(layout=layout):
+                result = self.extract(["allure-results-app-java"], layout)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("no *-result.json directly at the artifact root", result.stderr)
+                self.assertIn("module-a/build/allure-results", result.stderr)
+                self.assertIn("test_artifact_path", result.stderr)
+                self.assertFalse(self.materialized.exists())
+
+    def test_merged_layout_accepts_results_at_the_root_of_any_artifact(self) -> None:
+        self.write_archive("allure-results-a", [("nested/x.txt", "x")])
+        self.write_archive("allure-results-b", [("b-result.json", "{}")])
+
+        result = self.extract(["allure-results-a", "allure-results-b"], "merged")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_unknown_layout_fails_closed(self) -> None:
         self.write_archive("allure-results-backend", [("b-result.json", "{}")])
 
