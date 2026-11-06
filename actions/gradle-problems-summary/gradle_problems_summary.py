@@ -39,10 +39,11 @@ BEGIN_MARKER = "// begin-report-data\n"
 END_MARKER = "\n// end-report-data"
 # Every ASCII punctuation character that can start Markdown, GFM, or math syntax.
 MARKDOWN_SPECIALS = re.compile(r"([\\`*_{}\[\]()#+\-.!|~$^=:])")
-# Zero-width spaces keep GFM from turning untrusted URLs into autolinks.
+# Zero-width spaces keep GFM from turning untrusted URLs and email addresses into autolinks.
 AUTOLINK_BREAKS = (
     (re.compile(re.escape("://")), ":\u200b//"),
     (re.compile(re.escape("www."), re.IGNORECASE), "www\u200b."),
+    (re.compile(re.escape("@")), "@\u200b"),
 )
 STRIPPED_CATEGORIES = {"Cc", "Cf", "Co", "Cs", "Zl", "Zp"}
 SEVERITY_ORDER = {"ERROR": 0, "WARNING": 1, "ADVICE": 2}

@@ -337,6 +337,16 @@ class GradleProblemsSummaryTests(unittest.TestCase):
             self.assertNotIn("www.", summary.replace("\\.", ".").lower())
             self.assertEqual(summary.count("\u200b"), 3)
 
+    def test_email_addresses_are_not_rendered_as_autolinks(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gradle-problems-email-") as tmp:
+            workspace = Path(tmp)
+            label = "mail a@b.com, mailto:x@evil.example or xmpp:y@evil.example"
+            self.write(workspace, DEFAULT_REPORT, report_html(report_data([diagnostic("m", label)])))
+            result, summary, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIsNone(re.search(r"@(?!\u200b)", summary))
+            self.assertEqual(summary.count("@\u200b"), 3)
+
     def test_globstar_segments_are_collapsed_and_bounded(self) -> None:
         with tempfile.TemporaryDirectory(prefix="gradle-problems-globstar-") as tmp:
             workspace = Path(tmp)
