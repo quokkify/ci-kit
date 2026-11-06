@@ -337,6 +337,16 @@ class AllureComponentDefaultTests(unittest.TestCase):
                 repo = allure_repo({"python": [{"id": "py", "name": "Py", "path": ".", **extra}]}, "component")
                 self.assertEqual(upload_fields(build_plan(repo, drift=False).matrices["python"][0]), expected)
 
+    def test_non_allure_artifact_name_is_left_untouched(self):
+        cases = (
+            ({"test_artifact_name": "junit-py"}, (False, "junit-py", "test-results")),
+            ({"test_artifact_name": "allure-results-py-unit"}, (True, "allure-results-py-unit", "allure-results")),
+        )
+        for extra, expected in cases:
+            with self.subTest(extra=extra):
+                repo = allure_repo({"python": [{"id": "py", "name": "Py", "path": ".", **extra}]}, "component")
+                self.assertEqual(upload_fields(build_plan(repo, drift=False).matrices["python"][0]), expected)
+
     def test_no_default_upload_when_tests_disabled_or_test_modules(self):
         repo = allure_repo({
             "python": [{"id": "py", "name": "Py", "path": ".", "run_tests": False}],

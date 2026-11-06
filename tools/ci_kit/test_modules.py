@@ -25,9 +25,12 @@ def _java_build_tool(component_dir: Path) -> str:
 def allure_component_defaults(repo: Path, module: str, component: dict) -> dict:
     """Upload allure-results-<id> when the allure module runs in component mode.
 
-    Applies only when the declaration leaves upload_test_artifacts unset; explicit settings win.
+    Applies only when the declaration leaves upload_test_artifacts unset and test_artifact_name is unset
+    or an allure-results- name; explicit settings win.
     """
     if "upload_test_artifacts" in component or component.get("test_modules") or component.get("run_tests") is False:
+        return component
+    if not str(component.get("test_artifact_name", ARTIFACT_PREFIX)).startswith(ARTIFACT_PREFIX):
         return component
     path = "allure-results"
     if module == "java":
