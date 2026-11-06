@@ -234,7 +234,7 @@ class SafeExtractTest(TestCase):
 
     def test_file_and_directory_conflicts_fail_cleanly_in_both_layouts(self) -> None:
         cases = {
-            None: [("notes", "x"), ("notes/a.txt", "y")],
+            None: [("a-result.json", "{}"), ("notes", "x"), ("notes/a.txt", "y")],
             "per-artifact": [("allure-results/a-result.json", "{}"), ("notes", "x"), ("notes/a.txt", "y")],
         }
         for layout, members in cases.items():
@@ -280,7 +280,7 @@ class SafeExtractTest(TestCase):
                 result = self.extract(["allure-results-app-java"], layout)
 
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("no *-result.json directly at the artifact root", result.stderr)
+                self.assertIn("below the artifact root", result.stderr)
                 self.assertIn("module-a/build/allure-results", result.stderr)
                 self.assertIn("test_artifact_path", result.stderr)
                 self.assertFalse(self.materialized.exists())
@@ -292,6 +292,59 @@ class SafeExtractTest(TestCase):
         result = self.extract(["allure-results-a", "allure-results-b"], "merged")
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_merged_layout_rejects_a_flat_and_nested_mix_so_no_component_is_dropped(self) -> None:
+        # Regression guard for quokkify/ci-kit#529: one flat artifact must not hide a nested one.
+        self.write_archive("allure-results-a", [("a-result.json", "{}")])
+        self.write_archive("allure-results-b", [("module/build/allure-results/b-result.json", "{}")])
+
+        result = self.extract(["allure-results-a", "allure-results-b"], "merged")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("module/build/allure-results", result.stderr)
+        self.assertFalse(self.materialized.exists())
+
+    def test_merged_layout_without_any_result_fails_with_a_hint(self) -> None:
+        self.write_archive("allure-results-a", [("x-attachment.txt", "x"), ("x-container.json", "{}")])
+
+        result = self.extract(["allure-results-a"], "merged")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("test run produced results", result.stderr)
+
+    def test_merged_layout_accepts_artifacts_holding_only_attachments_containers_or_environment(self) -> None:
+        self.write_archive("allure-results-a", [("a-result.json", "{}")])
+        self.write_archive(
+            "allure-results-b", [("b-attachment.txt", "x"), ("b-container.json", "{}"), ("environment.properties", "k=v\n")]
+        )
+
+        result = self.extract(["allure-results-a", "allure-results-b"], "merged")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.materialized_files(), {"a-result.json", "b-attachment.txt", "b-container.json", "environment.properties"}
+        )
+
+    def test_guard_does_not_apply_without_a_materialize_root(self) -> None:
+        self.write_archive("allure-history", [("history.jsonl", "{}\n")])
+        self.materialized = self.root / "unused"
+        env = {
+            **os.environ,
+            "ARTIFACT_MANIFEST": json.dumps([{"name": "allure-history", "id": 1}]),
+            "ARTIFACT_ARCHIVE_DIR": str(self.archives),
+            "ARCHIVE_ROOT": str(self.root / "downloaded"),
+            "OUTPUT_ROOT": str(self.root / "expanded"),
+            "GITHUB_WORKSPACE": str(self.workspace),
+        }
+        env.pop("MATERIALIZE_ROOT", None)
+        env.pop("MATERIALIZE_LAYOUT", None)
+
+        result = subprocess.run(
+            [sys.executable, "-I", str(EXTRACTOR)], cwd=self.workspace, env=env, check=False, capture_output=True, text=True
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.root / "expanded/history.jsonl").is_file())
 
     def test_unknown_layout_fails_closed(self) -> None:
         self.write_archive("allure-results-backend", [("b-result.json", "{}")])
