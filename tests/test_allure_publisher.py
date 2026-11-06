@@ -577,6 +577,25 @@ class AllureCallerContracts(TestCase):
             recorded = yaml.safe_load((destination / '.copier-answers.allure.yml').read_text())
             self.assertEqual(recorded['allure_source'], 'external')
 
+    def test_pyramid_inputs_are_opt_in_and_forwarded_with_the_action_contract(self) -> None:
+        wrapper = yaml.safe_load((ROOT / 'actions/allure-report/action.yml').read_text())['inputs']
+        legacy = yaml.safe_load((ROOT / '.github/workflows/allure-publisher.yml').read_text())
+        names = sorted(name for name in wrapper if name.startswith('pyramid-'))
+        self.assertIn('pyramid-enabled', names)
+        builder = next(step for step in CORE['jobs']['generate']['steps'] if step.get('name') == 'Build report without write privileges')
+        for workflow in [CORE, legacy]:
+            inputs = workflow[True]['workflow_call']['inputs']
+            self.assertEqual(sorted(name for name in inputs if name.startswith('pyramid-')), names)
+            for name in names:
+                # Defaults mirror the action; the wrapper pins a policy path the reusable workflow leaves unset.
+                expected = '' if name == 'pyramid-policy-path' else wrapper[name]['default']
+                self.assertEqual(str(inputs[name]['default']).lower(), str(expected).lower(), name)
+                self.assertFalse(inputs[name]['required'])
+        self.assertIs(CORE[True]['workflow_call']['inputs']['pyramid-enabled']['default'], False)
+        for name in names:
+            self.assertEqual(builder['with'][name], f'${{{{ inputs.{name} }}}}')
+            self.assertEqual(legacy['jobs']['report']['with'][name], f'${{{{ inputs.{name} }}}}')
+
     def test_core_permissions_token_and_legacy_api_pages_layout_are_preserved(self) -> None:
         self.assertTrue(all('write' not in job['permissions'].values() or job == CORE['jobs']['comment'] for job in CORE['jobs'].values()))
         self.assertTrue(all(job['permissions'].get('contents') != 'write' for job in CORE['jobs'].values()))

@@ -63,6 +63,51 @@ on:
         required: false
         default: ''
         type: string
+      pyramid-enabled:
+        description: Generate the Allure epic test-pyramid snapshot and advisory gate files (opt-in).
+        required: false
+        default: false
+        type: boolean
+      pyramid-markdown-file:
+        description: Test-pyramid Markdown output path.
+        required: false
+        default: 'docs/testing/pyramid-snapshot.md'
+        type: string
+      pyramid-json-file:
+        description: Test-pyramid JSON output path.
+        required: false
+        default: 'docs/testing/pyramid-snapshot.json'
+        type: string
+      pyramid-gates-json-file:
+        description: Test-pyramid advisory gate JSON output path.
+        required: false
+        default: 'docs/testing/pyramid-quality-gates.json'
+        type: string
+      pyramid-source-run-id:
+        description: Source workflow run id embedded into the test-pyramid snapshot.
+        required: false
+        default: ''
+        type: string
+      pyramid-head-sha:
+        description: Source head SHA embedded into the test-pyramid snapshot.
+        required: false
+        default: ''
+        type: string
+      pyramid-policy-path:
+        description: Optional caller-repository policy path linked from the test-pyramid snapshot.
+        required: false
+        default: ''
+        type: string
+      pyramid-artifact-name:
+        description: Uploaded test-pyramid artifact name.
+        required: false
+        default: 'pyramid-snapshot'
+        type: string
+      pyramid-retention-days:
+        description: Test-pyramid artifact retention in days.
+        required: false
+        default: '30'
+        type: string
     outputs:
       ready:
         description: Source identity and artifacts passed the resolver contract.
@@ -460,6 +505,15 @@ jobs:
         categories-file: ${{ inputs.categories-file }}
         comment-file: allure-pr-comment.md
         pr-number: ''
+        pyramid-enabled: ${{ inputs.pyramid-enabled }}
+        pyramid-markdown-file: ${{ inputs.pyramid-markdown-file }}
+        pyramid-json-file: ${{ inputs.pyramid-json-file }}
+        pyramid-gates-json-file: ${{ inputs.pyramid-gates-json-file }}
+        pyramid-source-run-id: ${{ inputs.pyramid-source-run-id }}
+        pyramid-head-sha: ${{ inputs.pyramid-head-sha }}
+        pyramid-policy-path: ${{ inputs.pyramid-policy-path }}
+        pyramid-artifact-name: ${{ inputs.pyramid-artifact-name }}
+        pyramid-retention-days: ${{ inputs.pyramid-retention-days }}
     - name: Upload generated Allure HTML
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:

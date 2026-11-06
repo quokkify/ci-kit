@@ -189,6 +189,20 @@ Report runs are serialized per triggering source workflow, head repository, and 
 
 Both source modes use thin generated callers. These core/Pages endpoints must exist in the published toolkit release selected by `toolkit_version`. Fresh copies of a released template derive that default from the exact selected tag; non-release local sources retain the documented fallback. Updates preserve existing answers; `ci-kit update` and the fleet update set `toolkit_version` to the target release. A hand-run update needs `copier update --defaults -a .copier-answers.allure.yml --vcs-ref <new-release> --data toolkit_version=<new-release>`. Do not point a new thin caller at an earlier tag that lacks these endpoints. Copier owns their source bindings, permissions, triggers, config, and local extractor copy; the consumer owns its source test workflow and dedicated uploads. The reusable downloader and Pages job obtain the bounded extractor from `job.workflow_repository` at `job.workflow_sha`, the exact called toolkit workflow commit, and check out caller report configuration at `github.sha`. A caller therefore does not need a local extractor to use the reusable API, and no PR checkout supplies executable extraction code.
 
+### Test-pyramid advisory output
+
+`allure-publisher.yml` and `allure-publisher-core.yml` forward the standalone `allure-report-action` test-pyramid inputs under the same names: `pyramid-enabled`, `pyramid-markdown-file`, `pyramid-json-file`, `pyramid-gates-json-file`, `pyramid-source-run-id`, `pyramid-head-sha`, `pyramid-policy-path`, `pyramid-artifact-name`, and `pyramid-retention-days`. The feature is opt-in: `pyramid-enabled` defaults to `false`, and every other input defaults to the action's own default, so callers that omit them behave exactly as before. When enabled, the action writes the snapshot and advisory gate files and uploads them as the `pyramid-snapshot` artifact; the gates are advisory and never fail the job. Pass `pyramid-source-run-id` and `pyramid-head-sha` to embed the source run and commit in the snapshot, and `pyramid-policy-path` to link a caller-repository policy file. No permissions beyond the existing report contract are added.
+
+```yaml
+jobs:
+  report:
+    uses: quokkify/ci-kit/.github/workflows/allure-publisher.yml@v1
+    with:
+      # ...existing inputs...
+      pyramid-enabled: true
+      pyramid-policy-path: docs/testing/test-pyramid.md
+```
+
 ## Release Please
 
 Use [`examples/release-single.yml`](../examples/release-single.yml) for one product version or [`examples/release-components.yml`](../examples/release-components.yml) with the example [component config](../examples/release-please-components-config.json) and [manifest](../examples/release-please-components-manifest.json) for independent versions. Both rely on Conventional Commits. A push to `main` runs Release Please and creates or updates a release PR for user-facing `feat`/`fix` commits; merging that release PR creates the tag and GitHub Release. Chore-only commits intentionally do not create a release.
