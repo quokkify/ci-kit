@@ -385,6 +385,11 @@ def read_regular_file(root_fd: int, parts: Sequence[str], max_file_bytes: int) -
         os.close(parent_fd)
 
 
+def command_text(value: str) -> str:
+    """Escape untrusted text so it cannot start or alter a GitHub workflow command."""
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def format_decimal(value: Decimal) -> str:
     """Render a bounded Decimal without unnecessary trailing zeros."""
     text = format(value, "f")
@@ -544,7 +549,7 @@ def main() -> int:
             )
         return 0
     except (OSError, SummaryError) as exc:
-        print(f"junit-step-summary: {exc}", file=sys.stderr)
+        print(f"junit-step-summary: {command_text(str(exc))}", file=sys.stderr)
         return 2
     finally:
         if workdir_fd >= 0:

@@ -633,6 +633,19 @@ class JUnitStepSummaryTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("complete path segment", result.stderr)
 
+    def test_untrusted_paths_cannot_inject_workflow_commands(self) -> None:
+        # Regression guard: error lines embedded attacker-created file names unescaped.
+        with tempfile.TemporaryDirectory(prefix="junit-summary-command-") as tmp:
+            workspace = Path(tmp)
+            hostile = workspace / "results" / "evil\n::error::pwned 100%"
+            hostile.mkdir(parents=True)
+            (hostile / "junit.xml").write_text("<testsuite")
+            result, _, _ = self.run_summary(workspace)
+            self.assertEqual(result.returncode, 2)
+            output = result.stdout + result.stderr
+            self.assertNotIn("\n::", "\n" + output)
+            self.assertIn("evil%0A::error::pwned 100%25", result.stderr)
+
     def test_action_metadata_is_self_contained_and_exposes_numeric_outputs(self) -> None:
         data = action("junit-step-summary")
         step = data["runs"]["steps"][0]
