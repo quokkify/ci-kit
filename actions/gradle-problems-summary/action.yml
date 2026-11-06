@@ -1,0 +1,85 @@
+name: Gradle problems summary
+description: Summarize workspace-contained Gradle Problems Reports in the GitHub job summary as escaped, bounded Markdown.
+
+inputs:
+  report-paths:
+    description: Newline-delimited Gradle Problems Report paths or glob patterns relative to working-directory.
+    required: false
+    default: build/reports/problems/problems-report.html
+  working-directory:
+    description: Repository subpath used as the root for report-paths.
+    required: false
+    default: .
+  title:
+    description: Single-line GitHub job-summary heading without Markdown heading markers.
+    required: false
+    default: Gradle problems
+  fail-on-missing:
+    description: Fail when no regular report files match report-paths.
+    required: false
+    default: "false"
+  max-rows:
+    description: Maximum problem rows rendered across all reports.
+    required: false
+    default: "50"
+  max-summary-bytes:
+    description: Maximum bytes appended to the job summary by this step.
+    required: false
+    default: "65536"
+  max-files:
+    description: Maximum number of unique report files accepted.
+    required: false
+    default: "50"
+  max-file-bytes:
+    description: Maximum size in bytes accepted for each report file.
+    required: false
+    default: "10485760"
+  max-total-bytes:
+    description: Maximum aggregate bytes accepted across all matched report files.
+    required: false
+    default: "52428800"
+  max-scan-entries:
+    description: Maximum filesystem entries inspected below working-directory.
+    required: false
+    default: "100000"
+  max-depth:
+    description: Maximum directory depth inspected below working-directory.
+    required: false
+    default: "64"
+
+outputs:
+  reports:
+    description: Number of reports summarized.
+    value: ${{ steps.summary.outputs.reports }}
+  invalid-reports:
+    description: Number of matched reports skipped as malformed or unsupported.
+    value: ${{ steps.summary.outputs.invalid-reports }}
+  problems:
+    description: Total problems across summarized reports, including occurrences Gradle did not list individually.
+    value: ${{ steps.summary.outputs.problems }}
+  has-problems:
+    description: true when problems is non-zero, otherwise false.
+    value: ${{ steps.summary.outputs.has-problems }}
+
+runs:
+  using: composite
+  steps:
+    - name: Summarize Gradle problems
+      id: summary
+      shell: bash
+      env:
+        FAIL_ON_MISSING: ${{ inputs.fail-on-missing }}
+        MAX_DEPTH: ${{ inputs.max-depth }}
+        MAX_FILE_BYTES: ${{ inputs.max-file-bytes }}
+        MAX_FILES: ${{ inputs.max-files }}
+        MAX_ROWS: ${{ inputs.max-rows }}
+        MAX_SCAN_ENTRIES: ${{ inputs.max-scan-entries }}
+        MAX_SUMMARY_BYTES: ${{ inputs.max-summary-bytes }}
+        MAX_TOTAL_BYTES: ${{ inputs.max-total-bytes }}
+        REPORT_PATHS: ${{ inputs.report-paths }}
+        TITLE: ${{ inputs.title }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        export FAIL_ON_MISSING MAX_DEPTH MAX_FILE_BYTES MAX_FILES MAX_ROWS MAX_SCAN_ENTRIES
+        export MAX_SUMMARY_BYTES MAX_TOTAL_BYTES REPORT_PATHS TITLE WORKING_DIRECTORY
+        python3 -I "${GITHUB_ACTION_PATH}/gradle_problems_summary.py"

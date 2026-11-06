@@ -1232,6 +1232,7 @@ EXPECTED_ACTIONS = {
     "allure-report",
     "compose-up",
     "deploy-gh-pages-subdir",
+    "gradle-problems-summary",
     "gradle-retry",
     "junit-step-summary",
     "setup-java-gradle",
