@@ -2,12 +2,17 @@
 
 ## [4.3.3](https://github.com/quokkify/ci-kit/compare/v4.3.2...v4.3.3) (2026-11-07)
 
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 3 internal
 
-### 📦 Dependencies
+<details><summary>Internal changes (3 PRs)</summary>
 
-* **allure-report-action:** update quokkify/allure-report-action to v0.5.4 ([#561](https://github.com/quokkify/ci-kit/issues/561)) ([e8048ba](https://github.com/quokkify/ci-kit/commit/e8048bab2b0d9caa1820244e400d9bbf94b6d41b))
-* **gh-pages-subdir-action:** update quokkify/gh-pages-subdir-action to v0.1.2 ([#563](https://github.com/quokkify/ci-kit/issues/563)) ([f459d9b](https://github.com/quokkify/ci-kit/commit/f459d9badeca335067d02e18c2e06614c82684e3))
-* **github-actions:** update quokkify/gh-pages-subdir-action action to v0.1.2 ([#564](https://github.com/quokkify/ci-kit/issues/564)) ([2bc8a57](https://github.com/quokkify/ci-kit/commit/2bc8a57c14ebce3f997d2ab0918501cf093bbd5d))
+**Dependencies**
+
+- quokkify/allure-report-action v0.5.3 → v0.5.4 ([#561](https://github.com/quokkify/ci-kit/pull/561))
+- quokkify/gh-pages-subdir-action v0.1.1 → v0.1.2 ([#563](https://github.com/quokkify/ci-kit/pull/563), [#564](https://github.com/quokkify/ci-kit/pull/564))
+
+</details>
 
 ## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
 
