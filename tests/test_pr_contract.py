@@ -115,16 +115,21 @@ class PrContractTests(TestCase):
             with self.subTest(name):
                 self.assert_contract(payload, **expected)
 
-    def test_bots_are_exempt(self):
+    def test_bot_authors_are_exempt(self):
         for payload in (
             event("update dependency x", login="renovate[bot]", user_type="Bot"),
-            event("chore(main): release 1.2.0", branch="release-please--branches--main"),
-            event("chore: bump", branch="ci-kit/update-v4.3.0"),
+            event("chore(main): release 1.2.0", login="github-actions[bot]", user_type="Bot",
+                  branch="release-please--branches--main"),
             event("chore: bump", login="dependabot[bot]"),
         ):
-            with self.subTest(payload=payload["pull_request"]["head"]["ref"]):
+            with self.subTest(login=payload["pull_request"]["user"]["login"]):
                 output = self.assert_contract(payload, notices=("PR contract",))
                 self.assertIn("Skipped", output)
+
+    def test_regression_bot_like_branch_names_do_not_exempt_a_human_or_fork(self):
+        for branch in ("renovate/x", "release-please--branches--main", "ci-kit/update", "automation/y"):
+            with self.subTest(branch=branch):
+                self.assert_contract(event("feat: add x", branch=branch), errors=("PR title",))
 
     def test_warn_mode_reports_errors_as_warnings_and_passes(self):
         code, output, summary = self.run_check(event("feat(api)!: drop v1"))

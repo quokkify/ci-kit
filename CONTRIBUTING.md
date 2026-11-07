@@ -48,8 +48,8 @@ published; everything else in the body is for reviewers.
 - Fix a published note by editing the merged PR; the release PR is regenerated.
 
 The core module's `PR contract` check (`.github/workflows/pr-contract.yml`) enforces these
-rules from the PR event alone. Bots (`renovate/`, `release-please--`, `ci-kit/`,
-`automation/` branches) are exempt.
+rules from the PR event alone. Pull requests opened by bots (GitHub Apps such as Renovate,
+Dependabot and `github-actions[bot]` for Release Please) are exempt; a branch name never is.
 
 The canonical validator automatically runs every root `tests/test_*.py` suite in
 filename order through `scripts/run_test_suites.py`. Add new suites there without

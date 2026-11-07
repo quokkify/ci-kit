@@ -2,7 +2,7 @@ name: Reusable PR contract
 
 # Checks that a pull request's title and published body sections can become
 # release notes. It reads only the pull_request event payload: no checkout, no
-# token, no API call, so it is safe for fork PRs. Bots are exempt.
+# token, no API call, so it is safe for fork PRs. Bot authors (GitHub Apps) are exempt.
 
 on:
   workflow_call:
@@ -33,7 +33,6 @@ jobs:
 
           TYPES = ("feat", "fix", "perf", "revert", "refactor", "docs", "test", "ci", "chore", "build", "style", "deps")
           TITLE = re.compile(r"(?P<type>[a-z]+)\((?P<scope>[^()\s][^()]*)\)(?P<bang>!)?: (?P<subject>\S.*)")
-          BOT_BRANCHES = ("release-please--", "renovate/", "dependabot/", "ci-kit/", "automation/")
           WAIVERS = {"release-notes: internal", "release-notes: title-only"}
           HEADINGS = {
               "release note": "release note", "highlight": "release note", "usage example": "usage example",
@@ -83,9 +82,11 @@ jobs:
               body = str(pr.get("body") or "")
               labels = {str(label.get("name", "")) for label in pr.get("labels") or [] if isinstance(label, dict)}
               user = pr.get("user") or {}
-              branch = str((pr.get("head") or {}).get("ref") or "")
-              if user.get("type") == "Bot" or str(user.get("login", "")).endswith("[bot]") or branch.startswith(BOT_BRANCHES):
-                  return [], [], [], f"bot pull request ({user.get('login') or branch})"
+              login = str(user.get("login") or "")
+              # Exempt by author identity only: anyone can name a fork branch renovate/x,
+              # but only GitHub Apps get the Bot type and a "[bot]" login.
+              if user.get("type") == "Bot" or login.endswith("[bot]"):
+                  return [], [], [], f"bot pull request ({login})"
               errors, warnings, notices = [], [], []
               match = TITLE.fullmatch(title)
               if not match or match.group("type") not in TYPES:
