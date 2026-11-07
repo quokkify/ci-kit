@@ -21,7 +21,7 @@ for example `feat/gradle-problems-summary`, `fix/allure-component-defaults` or
 `automation/` and `ci-kit/`.
 
 PR titles must match `type(scope): summary`, with a required scope and `!` before the colon
-for a breaking change (plus a `BREAKING CHANGE:` footer). Allowed types: `feat`, `fix`,
+for a breaking change (plus a `## Migration` section; a `BREAKING CHANGE:` footer is optional). Allowed types: `feat`, `fix`,
 `perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`, and `deps`
 (dependency updates). Branch types use the same list. Repositories with a PR-title check
 enforce this format; the title becomes the changelog entry either way.

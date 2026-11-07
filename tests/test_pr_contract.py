@@ -106,6 +106,22 @@ class PrContractTests(TestCase):
                 event("feat(core): add x", "## Release note\n\n" + "word " * 70 + "\n\n- list\n"),
                 {"warnings": ("Long release note",)},
             ),
+            "heading in migration": (
+                event("feat(api)!: drop v1", NOTE + "## Migration\n\n### Steps\n1. Do it.\n"),
+                {"warnings": ("Unsafe markup",)},
+            ),
+            "setext line in usage example prose": (
+                event("feat(core): add x", NOTE + "## Usage example\n\nTitle\n---\n```yaml\na: 1\n```\n"),
+                {"warnings": ("Unsafe markup",)},
+            ),
+            "fenced heading is fine": (
+                event("feat(core): add x", NOTE + "## Usage example\n\n```md\n# Title\n---\n<!-- x\n```\n"),
+                {},
+            ),
+            "unterminated comment": (
+                event("feat(core): add x", NOTE + "## Migration\n\n<!-- guidance that lost its end\n"),
+                {"warnings": ("Unsafe markup",)},
+            ),
             "unsafe markup": (
                 event("feat(core): add x", "## Release note\nSee <details><summary>x 1.2.3</summary>.\n"),
                 {"warnings": ("Unsafe markup",)},
