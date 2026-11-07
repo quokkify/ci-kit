@@ -89,6 +89,9 @@ DEFAULT_SECTION_TYPES = {
     "dependencies": "deps",
 }
 UNSAFE_HTML = re.compile(r"<(/?)(details|summary)", re.IGNORECASE)
+# str.splitlines() also breaks on these; Release Please, Git and GitHub do not. Author
+# text that kept one could otherwise start a forged `## x.y.z` changelog heading.
+LINE_SEPARATORS = re.compile("[\u2028\u2029\x85\x0b\x0c\x1c-\x1e]")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
@@ -97,6 +100,14 @@ class EnrichmentError(RuntimeError):
 
 
 # ---------------------------------------------------------------- PR bodies
+
+
+def _lines(text: str, *, keepends: bool = False) -> list[str]:
+    """Split on newline only; see LINE_SEPARATORS."""
+    parts = text.split("\n")
+    if keepends:
+        parts = [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+    return parts
 
 
 def _without_comments(lines: Iterable[str]) -> str:
@@ -147,14 +158,15 @@ def extract_rich_sections(body: str) -> dict[str, str]:
             result[current] += line + "\n"
     # Trailing spaces would fail `git diff --check` once the notes are committed.
     cleaned = {
-        key: "\n".join(line.rstrip() for line in value.strip().splitlines())
+        key: "\n".join(line.rstrip() for line in _lines(value.strip()))
         for key, value in result.items()
     }
-    return {key: value for key, value in cleaned.items() if _without_comments(value.splitlines())}
+    return {key: value for key, value in cleaned.items() if _without_comments(_lines(value))}
 
 
 def _neutralize(text: str) -> str:
     """Make author Markdown inert for Release Please and this tool, without dropping words."""
+    text = LINE_SEPARATORS.sub(" ", text)
     lines: list[str] = []
     fence: tuple[str, int] | None = None
     buffer: list[str] = []
@@ -199,7 +211,7 @@ def _one_line(text: str) -> tuple[str, str]:
 
 
 def _escape_title(title: str) -> str:
-    title = " ".join(title.split()).replace("<", "&lt;").replace(">", "&gt;")
+    title = " ".join(LINE_SEPARATORS.sub(" ", title).split()).replace("<", "&lt;").replace(">", "&gt;")
     return UNSAFE_HTML.sub(lambda match: "&lt;" + match.group(1) + match.group(2), title)
 
 
@@ -339,7 +351,7 @@ def _strip_legacy(top: str) -> str:
     output: list[str] = []
     removing = False
     fence: tuple[str, int] | None = None
-    for line in top.splitlines(keepends=True):
+    for line in _lines(top, keepends=True):
         is_fence, fence_after = _fence_step(line, fence)
         if is_fence or fence is not None:
             fence = fence_after
@@ -375,34 +387,39 @@ def parse_release_please_notes(
         + r"/(?:issues|pull)/(?P=number)\)\)(?:\s*" + commit_link + r")?\s*$"
     )
     commit_only = re.compile(r"\s*" + commit_link + r"\s*$")
-    bullets: list[tuple[str | None, bool, str]] = []
-    section: str | None = None
-    breaking_section = False
-    fence: tuple[str, int] | None = None
-    for line in lines[1:]:
-        is_fence, fence_after = _fence_step(line, fence)
-        if is_fence or fence is not None:
-            fence = fence_after
-            if bullets:
-                bullets[-1] = (bullets[-1][0], bullets[-1][1], bullets[-1][2] + "\n" + line.rstrip())
-            continue
-        header = re.match(r"^###[ \t]+(.+?)\s*$", line)
-        if header:
-            title = header.group(1)
-            breaking_section = "breaking change" in title.casefold()
-            section = None if breaking_section else types.get(_section_key(title), None)
-            if not breaking_section and section is None:
-                section = "?" + _section_key(title)
-            continue
-        bullet = re.match(r"^[*-][ \t]+(.*)$", line)
-        if bullet:
-            bullets.append((section, breaking_section, bullet.group(1).rstrip()))
-        elif line.strip() and bullets and line.startswith((" ", "\t")):
-            bullets[-1] = (bullets[-1][0], bullets[-1][1], bullets[-1][2] + "\n" + line.strip())
-        elif line.strip() and not line.startswith("<!--"):
-            bullets.append((section, breaking_section, line.strip()))
-    if fence is not None:
-        raise EnrichmentError("top changelog version contains an unterminated fence")
+    def scan(use_fences: bool) -> tuple[list[tuple[str | None, bool, str]], bool]:
+        bullets: list[tuple[str | None, bool, str]] = []
+        section: str | None = None
+        breaking_section = False
+        fence: tuple[str, int] | None = None
+        for line in lines[1:]:
+            is_fence, fence_after = _fence_step(line, fence) if use_fences else (False, None)
+            if is_fence or fence is not None:
+                fence = fence_after
+                if bullets:
+                    bullets[-1] = (bullets[-1][0], bullets[-1][1], bullets[-1][2] + "\n" + line.rstrip())
+                continue
+            header = re.match(r"^###[ \t]+(.+?)\s*$", line)
+            if header:
+                title = header.group(1)
+                breaking_section = "breaking change" in title.casefold()
+                section = None if breaking_section else types.get(_section_key(title), None)
+                if not breaking_section and section is None:
+                    section = "?" + _section_key(title)
+                continue
+            bullet = re.match(r"^[*-][ \t]+(.*)$", line)
+            if bullet:
+                bullets.append((section, breaking_section, bullet.group(1).rstrip()))
+            elif line.strip() and bullets and line.startswith((" ", "\t")):
+                bullets[-1] = (bullets[-1][0], bullets[-1][1], bullets[-1][2] + "\n" + line.strip())
+            elif line.strip() and not line.startswith("<!--"):
+                bullets.append((section, breaking_section, line.strip()))
+        return bullets, fence is not None
+
+    bullets, unterminated = scan(True)
+    if unterminated:
+        # A footer that opens a fence and never closes it is read as plain text.
+        bullets, _ = scan(False)
 
     listed: dict[int, str] = {}
     breaking: dict[int, list[str]] = {}
@@ -458,9 +475,10 @@ def build_entries(
         if not isinstance(number, int) or number in known:
             continue
         known.add(number)
-        entry = make_entry(number, commit)
-        entry.breaking = False
-        entry.labels = (*entry.labels, INTERNAL_LABEL)
+        entry = make_entry(number, {**commit, **sources.get(number, {})})
+        if not entry.breaking:
+            # Release Please hid this type, so it is not user-facing unless breaking.
+            entry.labels = (*entry.labels, INTERNAL_LABEL)
         entries.append(entry)
     return entries, leftover
 
@@ -678,21 +696,35 @@ def render_notes(
             f"- {text} ({compress_refs(numbers, link)})"
             for (_, text), numbers in sorted(merged.items(), key=lambda item: (item[0][0].lstrip("*"), item[0][0]))
         ]
-        for lines in detailed:
-            maintenance_lines.extend(lines)
         maintenance_lines.extend("- " + "\n  ".join(text.split("\n")) for text in extra["internal"])
+        authored = [line for lines in detailed for line in lines]
         total = counts["internal"]
         summary = f"<details><summary>Internal changes ({total} {'PR' if total == 1 else 'PRs'})</summary>"
-        parts = [summary]
-        if dependency:
-            parts.append("**Dependencies**\n\n" + "\n".join(dependency))
-        if maintenance_lines:
-            parts.append("**Maintenance**\n\n" + "\n".join(maintenance_lines))
-        parts.append("</details>")
-        blocks.append("\n\n".join(parts))
-        if len("\n\n".join(blocks)) > MAX_NOTES_LENGTH:
-            # GitHub caps a PR body at 65,536 characters; the visible notes win.
-            blocks[-1] = summary + "\n\nToo many to list here; see the compare link in the heading.\n\n</details>"
+
+        def internal_block(dependency: list[str], maintenance: list[str], dropped: int) -> str:
+            parts = [summary]
+            if dependency:
+                parts.append("**Dependencies**\n\n" + "\n".join(dependency))
+            tail = [f"- … and {dropped} more; see the compare link in the heading"] if dropped else []
+            if maintenance or authored or tail:
+                parts.append("**Maintenance**\n\n" + "\n".join([*maintenance, *authored, *tail]))
+            parts.append("</details>")
+            return "\n\n".join(parts)
+
+        # GitHub caps a PR body at 65,536 characters. Authored text is never cut:
+        # one-line entries are dropped from the end instead.
+        visible = "\n\n".join(blocks)
+        dropped = 0
+        while True:
+            block = internal_block(dependency, maintenance_lines, dropped)
+            if len(visible) + 2 + len(block) <= MAX_NOTES_LENGTH or not (dependency or maintenance_lines):
+                break
+            if maintenance_lines:
+                maintenance_lines = maintenance_lines[:-1]
+            else:
+                dependency = dependency[:-1]
+            dropped += 1
+        blocks.append(block)
     rendered = "\n\n".join(blocks)
     if len(rendered) > MAX_NOTES_LENGTH:
         raise EnrichmentError(f"rendered release notes exceed {MAX_NOTES_LENGTH} characters")
@@ -707,15 +739,22 @@ def pull_link(repository: str) -> Callable[[int], str]:
 
 
 def _version_ranges(changelog: str) -> list[tuple[int, int]]:
-    offsets: list[int] = []
-    offset = 0
-    fence: tuple[str, int] | None = None
-    for line in changelog.splitlines(keepends=True):
-        is_fence, fence_after = _fence_step(line, fence)
-        if not is_fence and fence is None and re.match(r"^##[ \t]+.*$", line):
-            offsets.append(offset)
-        fence = fence_after
-        offset += len(line)
+    def scan(use_fences: bool) -> tuple[list[int], bool]:
+        offsets: list[int] = []
+        offset = 0
+        fence: tuple[str, int] | None = None
+        for line in _lines(changelog, keepends=True):
+            is_fence, fence_after = _fence_step(line, fence) if use_fences else (False, None)
+            if not is_fence and fence is None and re.match(r"^##[ \t]+.*$", line):
+                offsets.append(offset)
+            fence = fence_after
+            offset += len(line)
+        return offsets, fence is not None
+
+    offsets, unterminated = scan(True)
+    if unterminated:
+        # An unclosed fence must not hide the older versions behind it.
+        offsets, _ = scan(False)
     return [(start, offsets[i + 1] if i + 1 < len(offsets) else len(changelog)) for i, start in enumerate(offsets)]
 
 
@@ -790,7 +829,7 @@ def component_blocks(body: str) -> list[tuple[str, int, int]]:
     start = 0
     component = ""
     offset = 0
-    for line in body.splitlines(keepends=True):
+    for line in _lines(body, keepends=True):
         stripped = line.strip()
         if stripped.startswith("<details"):
             if depth == 0:
@@ -993,7 +1032,7 @@ def previous_tag(heading: str, repository: str) -> str | None:
 
 
 def hidden_commits(
-    *, previous: str, base_sha: str, package: Path, listed: Iterable[int]
+    *, previous: str, base_sha: str, package: Path, listed: Iterable[int], exclude: Iterable[Path] = ()
 ) -> list[dict[str, object]]:
     """Recover merged PRs Release Please hid (docs, ci, test, ...) between two revisions."""
     if not SHA_PATTERN.fullmatch(base_sha):
@@ -1004,11 +1043,14 @@ def hidden_commits(
     if not SHA_PATTERN.fullmatch(start):
         raise EnrichmentError(f"previous tag {previous} does not resolve to a commit")
     arguments = ["log", "--format=%H%x00%s", f"{start}..{base_sha}"]
-    if package != Path("."):
-        arguments += ["--", package.as_posix()]
+    excluded = sorted({path.as_posix() for path in exclude if path != Path(".")})
+    if package != Path(".") or excluded:
+        # Release Please gives a commit to the most specific package, so nested or
+        # sibling component paths are not this package's history.
+        arguments += ["--", package.as_posix(), *(f":(exclude){path}" for path in excluded)]
     seen = set(listed)
     commits: list[dict[str, object]] = []
-    for line in _run_git(arguments).splitlines():
+    for line in _lines(_run_git(arguments)):
         _, _, subject = line.partition("\x00")
         match = re.fullmatch(r"(?P<title>.+?) \(#(?P<number>[0-9]+)\)", subject.strip())
         if not match:
@@ -1040,33 +1082,68 @@ def _validated_pull_request(payload: Any, repository: str, *, label: str) -> dic
     return payload
 
 
-def _pending_release_pr(repository: str) -> int | None:
+def _pending_release_pr(repository: str, target_branch: str) -> int | None:
     """Find the one open `autorelease: pending` PR Release Please left unchanged."""
-    payload = _gh_json([
-        "pr", "list", "--repo", repository, "--state", "open",
-        "--label", PENDING_LABEL, "--json", "number,headRefName", "--limit", "10",
-    ])
+    arguments = [
+        "pr", "list", "--repo", repository, "--state", "open", "--label", PENDING_LABEL,
+        "--json", "number,headRefName,baseRefName,isCrossRepository", "--limit", "20",
+    ]
+    if target_branch:
+        arguments += ["--base", target_branch]
+    payload = _gh_json(arguments)
     if not isinstance(payload, list):
         raise EnrichmentError("gh pr list returned a non-list")
     candidates = [
         item for item in payload
-        if isinstance(item, dict) and str(item.get("headRefName", "")).startswith(RELEASE_BRANCH_PREFIX)
+        if isinstance(item, dict)
+        and isinstance(item.get("number"), int)
+        and item.get("isCrossRepository") is False
+        and str(item.get("headRefName", "")).startswith(RELEASE_BRANCH_PREFIX)
+        and (not target_branch or item.get("baseRefName") == target_branch)
     ]
-    if len(candidates) != 1 or not isinstance(candidates[0].get("number"), int):
+    if not candidates:
+        print(f"::notice::No open '{PENDING_LABEL}' release PR; nothing to enrich")
+        return None
+    if len(candidates) > 1:
+        numbers = ", ".join(f"#{item['number']}" for item in candidates)
+        print(f"::warning::Several open '{PENDING_LABEL}' release PRs ({numbers}); not enriching any")
         return None
     return int(candidates[0]["number"])
 
 
-def _source_prs(repository: str, numbers: Iterable[int]) -> dict[int, dict[str, object]]:
+def _source_pr(repository: str, number: int) -> dict[str, Any]:
+    """Fetch one merged PR into this repository; a fork head is allowed (titles are escaped)."""
+    source = _gh_json(["api", f"repos/{repository}/pulls/{number}"])
+    if not isinstance(source, dict):
+        raise EnrichmentError(f"source PR {number} response must be a JSON object")
+    base = source.get("base")
+    base_repo = base.get("repo") if isinstance(base, dict) else None
+    if not isinstance(base_repo, dict) or base_repo.get("full_name") != repository:
+        raise EnrichmentError(f"source PR {number} repository validation failed")
+    if source.get("state") != "closed" or not source.get("merged_at"):
+        raise EnrichmentError(f"source PR {number} is not merged")
+    if source.get("number") != number:
+        raise EnrichmentError(f"source PR {number} response number does not match")
+    head = source.get("head")
+    head_repo = head.get("repo") if isinstance(head, dict) else None
+    if not isinstance(head_repo, dict) or head_repo.get("full_name") != repository:
+        print(f"::warning::source PR {number} came from a fork; rendering it from its title and body")
+    return source
+
+
+def _source_prs(
+    repository: str, numbers: Iterable[int], *, strict: bool = True
+) -> dict[int, dict[str, object]]:
     sources: dict[int, dict[str, object]] = {}
     for number in sorted(set(numbers)):
-        source = _validated_pull_request(
-            _gh_json(["api", f"repos/{repository}/pulls/{number}"]), repository, label=f"source PR {number}"
-        )
-        if source.get("state") != "closed" or not source.get("merged_at"):
-            raise EnrichmentError(f"source PR {number} is not merged")
-        if source.get("number") != number:
-            raise EnrichmentError(f"source PR {number} response number does not match")
+        try:
+            source = _source_pr(repository, number)
+        except EnrichmentError as error:
+            if strict:
+                raise
+            # A hidden commit's `(#N)` may not be a merged PR; keep its commit subject.
+            print(f"::warning::{error}; listing #{number} from its commit subject")
+            continue
         labels = source.get("labels") or []
         sources[number] = {
             "number": number,
@@ -1097,6 +1174,7 @@ def prepare_release_enrichment(
     manifest_file: Path,
     config_backed_single: bool,
     output_directory: Path,
+    target_branch: str = "",
 ) -> dict[str, Any]:
     """Check out the release PR, render its changelogs, and stage the PR body update."""
     if not REPOSITORY_PATTERN.fullmatch(repository):
@@ -1115,11 +1193,10 @@ def prepare_release_enrichment(
     else:
         # Release Please skips an open PR whose generated body did not change and
         # then reports no PR; enrich the pending one so it still gets v2 notes.
-        release_number = _pending_release_pr(repository)
+        release_number = _pending_release_pr(repository, target_branch)
         if release_number is None:
             metadata = {"skipped": True, "release_pr": 0, "body_changed": False}
             _write_outputs(output_directory, [], None, metadata)
-            print(f"::notice::No single open '{PENDING_LABEL}' release PR; nothing to enrich")
             return metadata
 
     release = _validated_pull_request(
@@ -1129,6 +1206,8 @@ def prepare_release_enrichment(
     head = release.get("head") or {}
     if not str(head.get("ref", "")).startswith(RELEASE_BRANCH_PREFIX) or release.get("state", "open") != "open":
         raise EnrichmentError(f"release PR {release_number} is not an open Release Please branch")
+    if target_branch and (release.get("base") or {}).get("ref") != target_branch:
+        raise EnrichmentError(f"release PR {release_number} does not target {target_branch}")
     base_sha = str((release.get("base") or {}).get("sha") or "")
     if not SHA_PATTERN.fullmatch(base_sha):
         raise EnrichmentError(f"release PR {release_number} has no valid base SHA")
@@ -1140,6 +1219,7 @@ def prepare_release_enrichment(
         manifest_file=manifest_file, config_backed_single=config_backed_single,
     )
     multi_component = mode == "manifest" and len(targets) > 1
+    packages = [target.package for target in targets]
     if multi_component:
         active = release_body_components(release_body)
         targets = [target for target in targets if target.component in active]
@@ -1167,11 +1247,22 @@ def prepare_release_enrichment(
                 sources = _source_prs(repository, parsed.listed)
                 all_sources.update(sources)
                 previous = previous_tag(heading, repository)
+                nested = [
+                    package for package in packages
+                    if package != target.package
+                    and target.package in package.parents
+                ]
                 hidden = (
-                    hidden_commits(previous=previous, base_sha=base_sha, package=target.package, listed=parsed.listed)
+                    hidden_commits(
+                        previous=previous, base_sha=base_sha, package=target.package,
+                        listed=parsed.listed, exclude=nested,
+                    )
                     if previous else []
                 )
                 hidden_numbers.update(int(str(commit["number"])) for commit in hidden)
+                # Hidden-type PRs can still carry a Migration or a Release note.
+                hidden_sources = _source_prs(repository, [int(str(commit["number"])) for commit in hidden], strict=False)
+                sources = {**hidden_sources, **sources}
                 updated, notes = render_changelog(original, repository, sources, section_types=types, hidden=hidden)
                 with target.changelog.open("w", encoding="utf-8", newline="\n") as handle:
                     handle.write(updated)
@@ -1220,45 +1311,51 @@ def sync_component_releases(
         raise EnrichmentError("repository must be exactly owner/name")
     if mode != "manifest":
         return []
-    targets = discover_targets(
-        mode=mode, package_path=".", config_file=config_file,
-        manifest_file=manifest_file, config_backed_single=False,
-    )
-    if len(targets) < 2:
-        return []
+    # The release is already tagged: a problem here is reported, never fatal.
     try:
+        manifest = _load_json_object(manifest_file, label="Release Please manifest")
+        if len(manifest) < 2:
+            return []
+        targets = discover_targets(
+            mode=mode, package_path=".", config_file=config_file,
+            manifest_file=manifest_file, config_backed_single=False,
+        )
         released = json.loads(str(outputs.get("paths_released") or "[]"))
-    except json.JSONDecodeError as exc:
-        raise EnrichmentError("paths_released is not JSON") from exc
-    if not isinstance(released, list):
-        raise EnrichmentError("paths_released must be a list")
+        if not isinstance(released, list):
+            raise EnrichmentError("paths_released must be a list")
+    except (EnrichmentError, json.JSONDecodeError) as error:
+        print(f"::warning::Component release notes were not synced: {error}")
+        return []
     by_package = {target.package.as_posix(): target for target in targets}
     notes_directory.mkdir(parents=True, exist_ok=True)
     synced: list[str] = []
     for path in released:
-        package = _safe_relative_path(str(path), label="released path").as_posix()
-        target = by_package.get(package)
-        if target is None:
-            raise EnrichmentError(f"released path {package!r} is not a configured package")
-        tag = str(outputs.get(f"{path}--tag_name") or "")
-        version = str(outputs.get(f"{path}--version") or "")
-        if not SAFE_REF_PATTERN.fullmatch(tag) or ".." in tag or not re.fullmatch(r"\d+\.\d+\.\d+\S*", version):
-            raise EnrichmentError(f"release outputs for {package!r} are incomplete or unsafe")
         try:
-            changelog = target.changelog.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise EnrichmentError(f"cannot read {target.changelog}: {exc}") from exc
-        _, _, top = top_section(changelog)
-        heading = top.split("\n", 1)[0]
-        if not re.match(rf"^##[ \t]+\[?{re.escape(version)}\]?", heading):
-            raise EnrichmentError(f"{target.changelog} top section is not version {version}")
-        notes = rendered_notes_of(top)
-        if notes is None:
-            continue
-        notes_file = notes_directory / f"{len(synced)}.md"
-        notes_file.write_text(top.rstrip() + "\n", encoding="utf-8")
-        _run_gh(["release", "edit", tag, "--repo", repository, "--notes-file", str(notes_file)])
-        synced.append(tag)
+            package = _safe_relative_path(str(path), label="released path").as_posix()
+            target = by_package.get(package)
+            if target is None:
+                print(f"::notice::{package} has no changelog; its release notes are left as Release Please wrote them")
+                continue
+            tag = str(outputs.get(f"{path}--tag_name") or "")
+            version = str(outputs.get(f"{path}--version") or "")
+            if not SAFE_REF_PATTERN.fullmatch(tag) or ".." in tag or not re.fullmatch(r"\d+\.\d+\.\d+\S*", version):
+                raise EnrichmentError(f"release outputs for {package!r} are incomplete or unsafe")
+            try:
+                changelog = target.changelog.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise EnrichmentError(f"cannot read {target.changelog}: {exc}") from exc
+            _, _, top = top_section(changelog)
+            heading = top.split("\n", 1)[0]
+            if not re.match(rf"^##[ \t]+\[?{re.escape(version)}\]?", heading):
+                raise EnrichmentError(f"{target.changelog} top section is not version {version}")
+            if rendered_notes_of(top) is None:
+                continue
+            notes_file = notes_directory / f"{len(synced)}.md"
+            notes_file.write_text(top.rstrip() + "\n", encoding="utf-8")
+            _run_gh(["release", "edit", tag, "--repo", repository, "--notes-file", str(notes_file)])
+            synced.append(tag)
+        except EnrichmentError as error:
+            print(f"::warning::Release notes of {path!r} were not synced: {error}")
     return synced
 
 
@@ -1274,6 +1371,7 @@ def main() -> None:
     parser.add_argument("--config-file", type=Path, default=Path(".github/release-please/config.json"))
     parser.add_argument("--manifest-file", type=Path, default=Path(".github/release-please/manifest.json"))
     parser.add_argument("--config-backed-single", action="store_true")
+    parser.add_argument("--target-branch", default="", help="release PR base branch for the pending-PR fallback")
     parser.add_argument("--output-directory", type=Path)
     parser.add_argument("--changelog", type=Path)
     parser.add_argument("--pull-requests", type=Path, help="JSON array of merged PRs for --changelog")
@@ -1290,6 +1388,7 @@ def main() -> None:
             manifest_file=args.manifest_file,
             config_backed_single=args.config_backed_single,
             output_directory=args.output_directory,
+            target_branch=args.target_branch,
         )
         return
     if args.sync_releases:
