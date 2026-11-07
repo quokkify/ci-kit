@@ -1,0 +1,183 @@
+name: Reusable PR contract
+
+# Checks that a pull request's title and published body sections can become
+# release notes. It reads only the pull_request event payload: no checkout, no
+# token, no API call, so it is safe for fork PRs. Bots are exempt.
+
+on:
+  workflow_call:
+    inputs:
+      enforce:
+        description: "Fail the check on contract errors; false reports them as warnings."
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  contract:
+    name: PR contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Check the PR title and release-note sections
+        env:
+          ENFORCE: ${{ inputs.enforce }}
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+          import sys
+
+          TYPES = ("feat", "fix", "perf", "revert", "refactor", "docs", "test", "ci", "chore", "build", "style", "deps")
+          TITLE = re.compile(r"(?P<type>[a-z]+)\((?P<scope>[^()\s][^()]*)\)(?P<bang>!)?: (?P<subject>\S.*)")
+          BOT_BRANCHES = ("release-please--", "renovate/", "dependabot/", "ci-kit/", "automation/")
+          WAIVERS = {"release-notes: internal", "release-notes: title-only"}
+          HEADINGS = {
+              "release note": "release note", "highlight": "release note", "usage example": "usage example",
+              "migration": "migration", "breaking change": "migration", "breaking changes": "migration",
+          }
+          FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+          GUIDE = "https://github.com/quokkify/ci-kit/blob/main/CONTRIBUTING.md#pull-request-titles-and-release-notes"
+
+
+          def sections(body):
+              """The published level-2 sections, the same way the release-notes helper reads them."""
+              found, seen, current, fence = {}, set(), None, None
+              for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+                  match = FENCE.match(line)
+                  if match or fence is not None:
+                      if match:
+                          marker = match.group(1)
+                          if fence is None:
+                              fence = (marker[0], len(marker))
+                          elif marker[0] == fence[0] and len(marker) >= fence[1]:
+                              fence = None
+                      if current is not None:
+                          found[current] += line + "\n"
+                      continue
+                  heading = re.match(r"^##[ \t]+([^#].*?)[ \t]*$", line)
+                  if heading:
+                      name = heading.group(1).strip().casefold()
+                      current = HEADINGS.get(name) if name not in seen else None
+                      seen.add(name)
+                      if current is not None:
+                          found[current] = found.get(current, "") + "\n"
+                      continue
+                  if current is not None:
+                      found[current] += line + "\n"
+              cleaned = {key: re.sub(r"<!--[\s\S]*?-->", "", value).strip() for key, value in found.items()}
+              return {key: value for key, value in cleaned.items() if value}
+
+
+          def escape(value):
+              return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+          def check(event):
+              """Return (errors, warnings, notices, skipped reason) for one pull_request event."""
+              pr = event.get("pull_request") or {}
+              title = " ".join(str(pr.get("title") or "").split())
+              body = str(pr.get("body") or "")
+              labels = {str(label.get("name", "")) for label in pr.get("labels") or [] if isinstance(label, dict)}
+              user = pr.get("user") or {}
+              branch = str((pr.get("head") or {}).get("ref") or "")
+              if user.get("type") == "Bot" or str(user.get("login", "")).endswith("[bot]") or branch.startswith(BOT_BRANCHES):
+                  return [], [], [], f"bot pull request ({user.get('login') or branch})"
+              errors, warnings, notices = [], [], []
+              match = TITLE.fullmatch(title)
+              if not match or match.group("type") not in TYPES:
+                  errors.append((
+                      "PR title",
+                      f"The title {title!r} is not `type(scope): summary`. Rename the PR to, for example:\n\n"
+                      "fix(allure): fail component mode instead of publishing an empty report\n\n"
+                      f"type is one of: {', '.join(TYPES)}. The scope is required; add `!` before the colon for a "
+                      "breaking change. The title is the release-note headline: say what the user notices, "
+                      "not which files changed. Editing the PR re-runs this check.",
+                  ))
+                  return errors, warnings, notices, None
+              kind, breaking = match.group("type"), bool(match.group("bang"))
+              found = sections(body)
+              waived = labels & WAIVERS
+              if (kind in ("feat", "perf") or breaking) and "release note" not in found and not waived:
+                  errors.append((
+                      "Release note missing",
+                      f"{kind}{'!' if breaking else ''} PRs are published in the release notes. Add to the PR body:\n\n"
+                      "## Release note\n\n"
+                      "<one paragraph, at most 300 characters, for users: what they can do now or what was broken, "
+                      "plus the input, flag or step to use>\n\n"
+                      "If the title already says everything, add the label \"release-notes: title-only\". If only "
+                      "maintainers notice this change, use a maintainer type (chore, ci, refactor, ...) or add the "
+                      "label \"release-notes: internal\". Editing the PR re-runs this check.",
+                  ))
+              elif kind == "fix" and "release note" not in found and not waived:
+                  notices.append((
+                      "Release note suggested",
+                      "This fix is published with its title only. To tell users what was broken and how it showed, "
+                      "add a `## Release note` paragraph to the PR body.",
+                  ))
+              if breaking and "migration" not in found:
+                  errors.append((
+                      "Migration missing",
+                      "A `!` title marks a breaking change. Add to the PR body:\n\n"
+                      "## Migration\n\n"
+                      "1. <first step users must take when upgrading>\n"
+                      "2. <next step>\n\n"
+                      "If users need to do nothing, the change is not breaking: remove the `!` from the title.",
+                  ))
+              if len(title) > 72:
+                  warnings.append(("Long title", f"The title has {len(title)} characters; keep it at most 72."))
+              subject = match.group("subject")
+              if re.search(r"\b[\w./-]+\.(?:py|ya?ml|java|kt|js|ts|md|json|gradle|sh|toml)\b|\w\(\)|\b[a-z]+_[a-z0-9_]+\b|\b[a-z]+[A-Z]\w*\b", subject):
+                  warnings.append((
+                      "Technical title",
+                      "The title names a file, function or identifier. Describe what the user notices instead.",
+                  ))
+              note = found.get("release note", "")
+              if note and (len(" ".join(note.split())) > 300 or "\n\n" in note or re.search(r"(?m)^\s*(?:[-*+]|\d+\.)\s", note)):
+                  warnings.append((
+                      "Long release note",
+                      "Keep `## Release note` to one paragraph of at most 300 characters, without lists; it is "
+                      "printed on one line next to the title.",
+                  ))
+              for key, value in found.items():
+                  outside = "\n".join(line for line in value.split("\n") if not line.startswith(("    ", "\t")))
+                  if re.search(r"<\/?(?:details|summary)", value, re.IGNORECASE) or (
+                      key == "release note" and re.search(r"(?m)^#{1,6} ", outside)
+                  ):
+                      warnings.append((
+                          "Unsafe markup",
+                          f"`## {key.capitalize()}` contains a heading or <details>/<summary> markup. The release "
+                          "notes escape it and it will look broken; use plain text or a **bold** lead-in.",
+                      ))
+              return errors, warnings, notices, None
+
+
+          def main():
+              enforce = os.environ.get("ENFORCE", "false") == "true"
+              with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
+                  event = json.load(handle)
+              errors, warnings, notices, skipped = check(event)
+              summary = ["## PR contract", ""]
+              if skipped:
+                  print(f"::notice title=PR contract::Skipped: {escape(skipped)}")
+                  summary.append(f"Skipped: {skipped}.")
+              level = "error" if enforce else "warning"
+              for kind, items in ((level, errors), ("warning", warnings), ("notice", notices)):
+                  for title, message in items:
+                      print(f"::{kind} title={escape(title)}::{escape(message)}")
+                      summary += [f"### {title}", "", message, ""]
+              if not (errors or warnings or notices or skipped):
+                  summary.append("The title and release-note sections follow the contract.")
+              if errors and not enforce:
+                  summary.append(f"Warn mode: these become failures when `enforce: true`. Guide: {GUIDE}")
+              path = os.environ.get("GITHUB_STEP_SUMMARY")
+              if path:
+                  with open(path, "a", encoding="utf-8") as handle:
+                      handle.write("\n".join(summary) + "\n")
+              return 1 if errors and enforce else 0
+
+
+          sys.exit(main())

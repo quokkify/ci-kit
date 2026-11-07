@@ -44,7 +44,7 @@
     },
     {
       "description": "Re-enable updates in ci-kit's own workflows that share a name with template-owned consumer workflows; the shared base preset disables those names for consumers.",
-      "matchFileNames": [".github/workflows/codeql.yml", ".github/workflows/release.yml", ".github/workflows/validate.yml"],
+      "matchFileNames": [".github/workflows/codeql.yml", ".github/workflows/pr-contract.yml", ".github/workflows/release.yml", ".github/workflows/validate.yml"],
       "enabled": true
     }
   ],
