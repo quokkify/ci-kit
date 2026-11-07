@@ -1,0 +1,20 @@
+name: Allure report
+on:
+  workflow_run:
+    workflows: [Run tests]
+    types: [completed]
+permissions: {}
+jobs:
+  report:
+    uses: quokkify/ci-kit/.github/workflows/allure-publisher.yml@a64c987642f25d81e6bc3531336225fcde0ba4d5 # v2.22.0
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      source-workflow: Run tests
+      source-workflow-path: .github/workflows/test.yml
+      artifact-prefix: allure-results-
+      config-file: .github/allure/allurerc.mjs
+      pyramid-enabled: true
+      pyramid-policy-path: docs/testing/test-pyramid.md

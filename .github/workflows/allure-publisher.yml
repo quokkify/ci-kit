@@ -69,6 +69,51 @@ on:
         required: false
         default: ""
         type: string
+      pyramid-enabled:
+        description: Generate the Allure epic test-pyramid snapshot and advisory gate files (opt-in).
+        required: false
+        default: false
+        type: boolean
+      pyramid-markdown-file:
+        description: Test-pyramid Markdown output path.
+        required: false
+        default: "docs/testing/pyramid-snapshot.md"
+        type: string
+      pyramid-json-file:
+        description: Test-pyramid JSON output path.
+        required: false
+        default: "docs/testing/pyramid-snapshot.json"
+        type: string
+      pyramid-gates-json-file:
+        description: Test-pyramid advisory gate JSON output path.
+        required: false
+        default: "docs/testing/pyramid-quality-gates.json"
+        type: string
+      pyramid-source-run-id:
+        description: Source workflow run id embedded into the test-pyramid snapshot.
+        required: false
+        default: ""
+        type: string
+      pyramid-head-sha:
+        description: Source head SHA embedded into the test-pyramid snapshot.
+        required: false
+        default: ""
+        type: string
+      pyramid-policy-path:
+        description: Optional caller-repository policy path linked from the test-pyramid snapshot.
+        required: false
+        default: ""
+        type: string
+      pyramid-artifact-name:
+        description: Uploaded test-pyramid artifact name.
+        required: false
+        default: "pyramid-snapshot"
+        type: string
+      pyramid-retention-days:
+        description: Test-pyramid artifact retention in days.
+        required: false
+        default: "30"
+        type: string
     secrets:
       github-token:
         description: Optional legacy token override. Prefer the per-job github.token default; a custom token cannot be attenuated by job permissions.
@@ -101,6 +146,15 @@ jobs:
       skip-empty-artifacts: ${{ inputs.skip-empty-artifacts }}
       managed-pages-layout: ${{ inputs.managed-pages-layout }}
       history-path: ${{ inputs.history-path }}
+      pyramid-enabled: ${{ inputs.pyramid-enabled }}
+      pyramid-markdown-file: ${{ inputs.pyramid-markdown-file }}
+      pyramid-json-file: ${{ inputs.pyramid-json-file }}
+      pyramid-gates-json-file: ${{ inputs.pyramid-gates-json-file }}
+      pyramid-source-run-id: ${{ inputs.pyramid-source-run-id }}
+      pyramid-head-sha: ${{ inputs.pyramid-head-sha }}
+      pyramid-policy-path: ${{ inputs.pyramid-policy-path }}
+      pyramid-artifact-name: ${{ inputs.pyramid-artifact-name }}
+      pyramid-retention-days: ${{ inputs.pyramid-retention-days }}
     secrets:
       github-token: ${{ secrets.github-token }}
   pages:
