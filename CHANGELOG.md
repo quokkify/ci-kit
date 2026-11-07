@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.3.1](https://github.com/quokkify/ci-kit/compare/v4.3.0...v4.3.1) (2026-11-07)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed
+
+### 🐛 Fixed
+
+- **core:** keep Prettier checks green after the PR contract update — Repositories that run `prettier --check` no longer fail after the ci-kit update: the generated `.github/workflows/pr-contract.yml` now lists its trigger types one per line, which is already Prettier style. ([#557](https://github.com/quokkify/ci-kit/pull/557))
+
 ## [4.3.0](https://github.com/quokkify/ci-kit/compare/v4.2.0...v4.3.0) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
