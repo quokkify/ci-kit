@@ -28,7 +28,9 @@ The rendered notes are: the Release Please version heading, a marker comment, an
 migration steps, never repeated below), `✨ New`, `🐛 Fixed`, `🚀 Faster`, `⬆️ Updated`
 (dependency updates in a user-facing type) and `↩️ Reverted`, then a collapsed
 `Internal changes (N PRs)` list with one line per dependency (`from → to`, `· major` on a
-major bump) and one line per maintenance subject, PR runs compressed as `#535–#541`.
+major bump; packages with a shared prefix and the same change share a line) and one line
+per maintenance subject. PR runs are compressed as `#535–#541`; more than five references
+become a count and the first and last PR, such as `(15 PRs, #772–#799)`.
 Commit hashes are not shown; the heading's compare link covers the range. Types that
 the config hides (`docs`, `ci`, `test`, ...) are recovered from `git log` between the
 previous tag and the release PR's base commit and listed only inside the collapsed list,
@@ -36,9 +38,12 @@ so they still never cause a release. A PR without the new sections renders from 
 title. A version marker makes reruns a no-op; lines the helper cannot attribute are kept
 visible.
 
-Release Please updates an open release PR only when its own generated body changes. When
-it reports no PR, the workflow renders the single open `autorelease: pending` PR anyway,
-so a toolkit update or a push of hidden-type commits still refreshes the notes. In a
+Release Please updates an open release PR only when its own generated body differs from
+the PR's current body. A rendered body always differs, so every push to the default
+branch, including one with only hidden-type commits, regenerates and re-renders the PR
+through the normal path. The fallback matters only for an open release PR that was never
+rendered (for example right after a toolkit update): when Release Please reports no PR,
+the workflow renders the single open `autorelease: pending` PR anyway. In a
 multi-component repository Release Please flattens the nested list in each component's
 GitHub release; the manifest job resets every new component release to its `CHANGELOG.md`
 section afterwards.

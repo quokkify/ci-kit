@@ -43,6 +43,7 @@ DEPENDENCY_TITLE = re.compile(
 )
 RELEASE_COMMIT = re.compile(r"release\s+\S*\d+\.\d+\.\d+.*", re.IGNORECASE)
 MAX_TABLE_ROWS = 50
+MAX_LISTED_REFS = 5
 MAX_NOTES_LENGTH = 60_000
 INTERNAL_LABEL = "release-notes: internal"
 PENDING_LABEL = "autorelease: pending"
@@ -91,12 +92,19 @@ DEFAULT_SECTION_TYPES = {
 UNSAFE_HTML = re.compile(r"<(/?)(details|summary)", re.IGNORECASE)
 # str.splitlines() also breaks on these; Release Please, Git and GitHub do not. Author
 # text that kept one could otherwise start a forged `## x.y.z` changelog heading.
-LINE_SEPARATORS = re.compile("[\u2028\u2029\x85\x0b\x0c\x1c-\x1e]")
+LINE_SEPARATORS = re.compile("[\r\u2028\u2029\x85\x0b\x0c\x1c-\x1e]")
+# Outside code: an inline code span is kept, any other `<` is escaped so author
+# text cannot open HTML (an unterminated `<!--` would hide the rest of the notes).
+PROSE_HTML = re.compile(r"(`+)[^`\n](?:.*?[^`\n])?\1|`+|<")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 
 class EnrichmentError(RuntimeError):
     """Raised when release metadata is unsafe or ambiguous."""
+
+
+class NotAPullRequest(EnrichmentError):
+    """A `(#N)` reference that the API does not return as a pull request."""
 
 
 # ---------------------------------------------------------------- PR bodies
@@ -174,6 +182,7 @@ def _neutralize(text: str) -> str:
     def flush() -> None:
         if buffer:
             cleaned = re.sub(r"<!--[\s\S]*?-->", "", "\n".join(buffer))
+            cleaned = PROSE_HTML.sub(lambda match: "&lt;" if match.group(0) == "<" else match.group(0), cleaned)
             lines.extend(cleaned.split("\n"))
             buffer.clear()
 
@@ -192,6 +201,12 @@ def _neutralize(text: str) -> str:
     # Release Please as a component release and suppress the GitHub release.
     joined = "\n".join(line.rstrip() for line in lines)
     joined = UNSAFE_HTML.sub(lambda match: "&lt;" + match.group(1) + match.group(2), joined)
+    # An HTML parser (Release Please reads component bodies with one) does not know
+    # about code fences: an unclosed comment even inside code would swallow the rest.
+    opened = joined.rfind("<!--")
+    while opened >= 0 and "-->" not in joined[opened:]:
+        joined = joined[:opened] + "&lt;!--" + joined[opened + 4 :]
+        opened = joined.rfind("<!--", 0, opened)
     return re.sub(r"\n{3,}", "\n\n", joined).strip("\n")
 
 
@@ -336,11 +351,13 @@ class ReleasePleaseNotes:
         listed: dict[int, str],
         breaking: dict[int, list[str]],
         unattributed: list[tuple[str | None, bool, str]],
+        texts: dict[int, str] | None = None,
     ) -> None:
         self.heading = heading
         self.listed = listed
         self.breaking = breaking
         self.unattributed = unattributed
+        self.texts = texts or {}
 
 
 def _strip_legacy(top: str) -> str:
@@ -422,6 +439,7 @@ def parse_release_please_notes(
         bullets, _ = scan(False)
 
     listed: dict[int, str] = {}
+    texts: dict[int, str] = {}
     breaking: dict[int, list[str]] = {}
     unattributed: list[tuple[str | None, bool, str]] = []
     for kind, is_breaking, text in bullets:
@@ -435,9 +453,10 @@ def parse_release_please_notes(
             breaking.setdefault(number, []).append(note)
         else:
             listed.setdefault(number, kind or "other")
+            texts.setdefault(number, match.group("text").strip())
     for number in breaking:
         listed.setdefault(number, "other")
-    return ReleasePleaseNotes(heading, listed, breaking, unattributed)
+    return ReleasePleaseNotes(heading, listed, breaking, unattributed, texts)
 
 
 def build_entries(
@@ -451,7 +470,11 @@ def build_entries(
         source = sources.get(number, {})
         entry = make_entry(number, source, section_type if not section_type.startswith("?") else None)
         if not source:
-            entry.subject = f"PR #{number}"
+            # Not a pull request (or not readable): keep Release Please's own text.
+            text = parsed.texts.get(number, "")
+            scoped = re.fullmatch(r"\*\*(?P<scope>[^*]+):\*\*\s*(?P<subject>.+)", text, re.DOTALL)
+            entry.scope = _escape_title(scoped.group("scope")) if scoped else None
+            entry.subject = _escape_title(scoped.group("subject") if scoped else text) or f"#{number}"
         if number in parsed.breaking:
             entry.breaking = True
             entry.footer = [note for note in parsed.breaking[number] if note]
@@ -557,8 +580,27 @@ def _major(version: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def dependency_lines(entries: Sequence[Entry], link: Callable[[int], str]) -> tuple[list[str], list[Entry]]:
-    """One line per package with real from → to; entries without a package are returned."""
+def ref_summary(numbers: Iterable[int], link: Callable[[int], str]) -> str:
+    """Compressed references; more than MAX_LISTED_REFS become a count and the two endpoints."""
+    ordered = sorted(set(numbers))
+    if len(ordered) > MAX_LISTED_REFS:
+        return f"{len(ordered)} PRs, {link(ordered[0])}–{link(ordered[-1])}"
+    return compress_refs(ordered, link)
+
+
+def _package_prefix(name: str) -> str:
+    cut = max(name.rfind("/"), name.rfind(":"))
+    return name[: cut + 1] if cut > 0 else ""
+
+
+def dependency_lines(
+    entries: Sequence[Entry], link: Callable[[int], str], *, compact: bool = False
+) -> tuple[list[str], list[Entry]]:
+    """One line per package with real from → to; entries without a package are returned.
+
+    `compact` (the collapsed Internal list) joins packages that share a name prefix
+    and the same change, and shortens long reference lists.
+    """
     packages: dict[str, list[tuple[tuple[str, int], str | None, str]]] = {}
     refs: dict[str, set[int]] = {}
     rest: list[Entry] = []
@@ -570,7 +612,8 @@ def dependency_lines(entries: Sequence[Entry], link: Callable[[int], str]) -> tu
         for name, old, new in rows:
             packages.setdefault(name, []).append(((entry.order, entry.number), old, new))
             refs.setdefault(name, set()).add(entry.number)
-    lines: list[str] = []
+    changes_by_key: dict[tuple[str, str, str], list[str]] = {}
+    order: list[tuple[str, str, str]] = []
     for name in sorted(packages, key=lambda value: (value.casefold(), value)):
         changes = sorted(packages[name], key=lambda item: item[0])
         versions = [
@@ -579,12 +622,23 @@ def dependency_lines(entries: Sequence[Entry], link: Callable[[int], str]) -> tu
         ]
         chosen = versions or changes
         old, new = chosen[0][1], chosen[-1][2]
-        text = f"{name} {old} → {new}" if old else f"{name} → {new}"
+        change = f"{old} → {new}" if old else f"→ {new}"
         if versions and old:
             before, after = _major(old), _major(new)
             if before is not None and after is not None and after > before:
-                text += " · major"
-        lines.append(f"- {text} ({compress_refs(refs[name], link)})")
+                change += " · major"
+        prefix = _package_prefix(name) if compact else ""
+        key = (prefix, change, name if not prefix else "")
+        if key not in changes_by_key:
+            changes_by_key[key] = []
+            order.append(key)
+        changes_by_key[key].append(name)
+    lines: list[str] = []
+    for key in order:
+        names = changes_by_key[key]
+        numbers = {number for name in names for number in refs[name]}
+        references = ref_summary(numbers, link) if compact else compress_refs(numbers, link)
+        lines.append(f"- {', '.join(names)} {key[1]} ({references})")
     return lines, rest
 
 
@@ -682,7 +736,7 @@ def render_notes(
     internal = groups["internal"]
     if internal or extra["internal"]:
         dependencies = [entry for entry in internal if is_dependency(entry) and not _authored(entry)]
-        dependency, ungrouped = dependency_lines(dependencies, link)
+        dependency, ungrouped = dependency_lines(dependencies, link, compact=True)
         maintenance = [entry for entry in internal if entry not in dependencies]
         merged: dict[tuple[str, ...], list[int]] = {}
         detailed: list[list[str]] = []
@@ -693,7 +747,7 @@ def render_notes(
             key_text = f"**{entry.scope}:** {entry.subject}" if entry.scope else entry.subject
             merged.setdefault((key_text.casefold(), key_text), []).append(entry.number)
         maintenance_lines = [
-            f"- {text} ({compress_refs(numbers, link)})"
+            f"- {text} ({ref_summary(numbers, link)})"
             for (_, text), numbers in sorted(merged.items(), key=lambda item: (item[0][0].lstrip("*"), item[0][0]))
         ]
         maintenance_lines.extend("- " + "\n  ".join(text.split("\n")) for text in extra["internal"])
@@ -1113,7 +1167,10 @@ def _pending_release_pr(repository: str, target_branch: str) -> int | None:
 
 def _source_pr(repository: str, number: int) -> dict[str, Any]:
     """Fetch one merged PR into this repository; a fork head is allowed (titles are escaped)."""
-    source = _gh_json(["api", f"repos/{repository}/pulls/{number}"])
+    try:
+        source = _gh_json(["api", f"repos/{repository}/pulls/{number}"])
+    except EnrichmentError as error:
+        raise NotAPullRequest(f"#{number} is not a readable pull request ({error})") from error
     if not isinstance(source, dict):
         raise EnrichmentError(f"source PR {number} response must be a JSON object")
     base = source.get("base")
@@ -1139,7 +1196,7 @@ def _source_prs(
         try:
             source = _source_pr(repository, number)
         except EnrichmentError as error:
-            if strict:
+            if strict and not isinstance(error, NotAPullRequest):
                 raise
             # A hidden commit's `(#N)` may not be a merged PR; keep its commit subject.
             print(f"::warning::{error}; listing #{number} from its commit subject")

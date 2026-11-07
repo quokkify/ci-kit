@@ -43,7 +43,7 @@
 - **ci-kit:** hand off base, security, release, allure, renovate to modules ([#43](https://github.com/quokkify/java-test-automation-template/pull/43))
 - **ci-kit:** hand off validate to core module ([#31](https://github.com/quokkify/java-test-automation-template/pull/31))
 - **renovate:** update q4j immediately ([#17](https://github.com/quokkify/java-test-automation-template/pull/17))
-- **template:** update shared project template ([#15](https://github.com/quokkify/java-test-automation-template/pull/15), [#16](https://github.com/quokkify/java-test-automation-template/pull/16), [#19](https://github.com/quokkify/java-test-automation-template/pull/19), [#25](https://github.com/quokkify/java-test-automation-template/pull/25), [#30](https://github.com/quokkify/java-test-automation-template/pull/30), [#33](https://github.com/quokkify/java-test-automation-template/pull/33)–[#40](https://github.com/quokkify/java-test-automation-template/pull/40), [#42](https://github.com/quokkify/java-test-automation-template/pull/42), [#44](https://github.com/quokkify/java-test-automation-template/pull/44)–[#46](https://github.com/quokkify/java-test-automation-template/pull/46), [#49](https://github.com/quokkify/java-test-automation-template/pull/49))
+- **template:** update shared project template (18 PRs, [#15](https://github.com/quokkify/java-test-automation-template/pull/15)–[#49](https://github.com/quokkify/java-test-automation-template/pull/49))
 
 </details>
 

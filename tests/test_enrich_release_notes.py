@@ -242,6 +242,30 @@ class RenovateTests(TestCase):
             "- q4j 0.9.0 → 0.12.0 (#30)",
         ])
 
+    def test_internal_list_joins_packages_with_a_shared_prefix_and_the_same_change(self):
+        table = "| Package | Change |\n|---|---|\n" + "".join(
+            f"| {name} | `{old}` → `{new}` |\n" for name, old, new in (
+                ("selenium/hub", "4.50.0", "4.51.0"), ("selenium/node-docker", "4.50.0", "4.51.0"),
+                ("selenium/standalone-chromium", "2bc5a3e", "ba9dde7"), ("gradle", "9.8.1", "9.8.2"),
+                ("maven", "9.8.1", "9.8.2"),
+            )
+        )
+        entry = self._entry(761, "deps(docker-compose): update selenium grid images", table)
+        compact, _ = notes.dependency_lines([entry], lambda number: f"#{number}", compact=True)
+        self.assertEqual(compact, [
+            "- gradle 9.8.1 → 9.8.2 (#761)",
+            "- maven 9.8.1 → 9.8.2 (#761)",
+            "- selenium/hub, selenium/node-docker 4.50.0 → 4.51.0 (#761)",
+            "- selenium/standalone-chromium 2bc5a3e → ba9dde7 (#761)",
+        ])
+        visible, _ = notes.dependency_lines([entry], lambda number: f"#{number}")
+        self.assertEqual(len(visible), 5)
+
+    def test_long_reference_lists_become_a_count_and_endpoints(self):
+        link = lambda number: f"#{number}"
+        self.assertEqual(notes.ref_summary([1, 2, 4, 5, 9], link), "#1, #2, #4, #5, #9")
+        self.assertEqual(notes.ref_summary([9, 1, 2, 4, 5, 7], link), "6 PRs, #1–#9")
+
     def test_title_without_table_and_grouped_title_without_table(self):
         lines, rest = notes.dependency_lines(
             [
@@ -437,6 +461,27 @@ class RegressionTests(TestCase):
         updated, _ = notes.render_changelog(footer, REPO, {7: {"title": "feat!: x"}})
         self.assertEqual(len(notes._version_ranges(updated)), 2)
         self.assertNotIn("\n## 8.8.8", updated)
+
+    def test_regression_author_html_cannot_hide_the_rest_of_the_notes(self):
+        text = changelog(("Features", [rp_line(1, "a"), rp_line(2, "b")]))
+        rendered = render(text, {
+            1: {"title": "feat(a): a\rcarriage", "body": (
+                "## Release note\nUse <b>bold</b> and `List<String>` here.\r\n"
+                "## Migration\n<!-- guidance that lost its end\nStep after the comment.\n"
+                "```xml\n<!-- kept in code -->\n<!-- open in code\n```"
+            )},
+            2: {"title": "feat(b): the next entry"},
+        })
+        self.assertNotIn("\r", rendered)
+        self.assertIn("a carriage", rendered)
+        self.assertIn("Use &lt;b>bold&lt;/b> and `List<String>` here.", rendered)
+        self.assertIn("&lt;!-- guidance that lost its end", rendered)
+        self.assertIn("Step after the comment.", rendered)
+        self.assertIn("<!-- kept in code -->", rendered)
+        self.assertIn(LINK(2), rendered)
+        comments = [line for line in rendered.split("\n") if "<!--" in line]
+        self.assertEqual(comments, [notes.NOTES_MARKER, "  > <!-- kept in code -->"])
+        self.assertIn("&lt;!-- open in code", rendered)
 
     def test_regression_an_unterminated_fence_in_a_footer_is_read_as_text(self):
         text = changelog(
@@ -878,6 +923,20 @@ class PrepareTests(TestCase):
                 with self.assertRaisesRegex(notes.EnrichmentError, "does not target main"):
                     self._prepare(root, target_branch="main")
             run_gh.assert_not_called()
+
+    def test_regression_a_listed_reference_that_is_not_a_pull_request_keeps_release_pleases_text(self):
+        text = changelog(("Features", [rp_line(7, "**api:** add search"), rp_line(8, "b")]))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+            (root / "prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+            responses = [self._release(50, body_for(text)), notes.EnrichmentError("gh api failed: HTTP 404"), self._pull(8)]
+            with mock.patch.object(notes, "_run_gh"), mock.patch.object(notes, "hidden_commits", return_value=[]), \
+                    mock.patch.object(notes, "_gh_json", side_effect=responses):
+                metadata = self._prepare(root)
+            rendered = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+            self.assertEqual(metadata["source_prs"], [8])
+            self.assertIn(f"- **api:** add search ({LINK(7)})", rendered)
 
     def test_prepare_fetches_hidden_type_prs_leniently(self):
         text = changelog(("Features", [rp_line(7, "a")]))

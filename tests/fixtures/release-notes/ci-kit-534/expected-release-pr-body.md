@@ -27,7 +27,7 @@
 - allure 3.22.1 → 3.33.0 ([#543](https://github.com/quokkify/ci-kit/pull/543))
 - docker/login-action v4.7.0 → v4.8.0 ([#544](https://github.com/quokkify/ci-kit/pull/544))
 - github/codeql-action 9b32540 → 33d7b85 ([#544](https://github.com/quokkify/ci-kit/pull/544))
-- renovate 44.190.2 → 44.221.1 ([#532](https://github.com/quokkify/ci-kit/pull/532), [#535](https://github.com/quokkify/ci-kit/pull/535)–[#541](https://github.com/quokkify/ci-kit/pull/541))
+- renovate 44.190.2 → 44.221.1 (8 PRs, [#532](https://github.com/quokkify/ci-kit/pull/532)–[#541](https://github.com/quokkify/ci-kit/pull/541))
 - uv 0.13.6 → 0.13.7 ([#542](https://github.com/quokkify/ci-kit/pull/542))
 
 **Maintenance**
