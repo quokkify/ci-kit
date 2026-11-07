@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import shutil
@@ -15,6 +16,42 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / ".github/release-please/config.json"
 TEMPLATE_CONFIG_PATH = ROOT / "modules/release/template/.github/release-please/config.json.jinja"
 RENOVATE_PATH = ROOT / "renovate/default.json"
+
+
+def render_component_release_body() -> str:
+    """A three-component Release Please PR body rendered by the v2 enrichment helper."""
+    spec = importlib.util.spec_from_file_location("enrich_release_notes", ROOT / "scripts/enrich_release_notes.py")
+    assert spec and spec.loader
+    notes = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(notes)
+    repository = "acme/widget"
+    sources = {
+        1: {"title": "feat(api): add search", "body": "## Release note\nBackend search is available."},
+        2: {"title": "feat(ui): add a widget", "body": "## Usage example\n```js\nrun();\n```"},
+        3: {"title": "feat(queue)!: drop v1 jobs", "body": "## Migration\nUpgrade worker jobs to v2."},
+        4: {"title": "deps(npm): update lib to v2.1.0"},
+    }
+    blocks = []
+    rendered = {}
+    for component, number in (("backend", 1), ("frontend", 2), ("worker", 3)):
+        heading = (
+            f"## [1.1.0](https://github.com/{repository}/compare/{component}-v1.0.0...{component}-v1.1.0) (2026-11-07)"
+        )
+        changelog = (
+            f"{heading}\n\n\n### Features\n\n"
+            f"* thing ([#{number}](https://github.com/{repository}/issues/{number})) "
+            f"([abcdef0](https://github.com/{repository}/commit/{'a' * 40}))\n\n"
+            f"### Dependencies\n\n"
+            f"* update lib ([#4](https://github.com/{repository}/issues/4)) "
+            f"([abcdef1](https://github.com/{repository}/commit/{'b' * 40}))\n"
+        )
+        rendered[component] = (heading, notes.render_changelog(changelog, repository, sources)[1])
+        blocks.append(f"<details><summary>{component}: 1.1.0</summary>\n\n{heading}\n\n### Features\n\n* thing\n</details>")
+    body = (
+        ":robot: I have created a release *beep* *boop*\n---\n\n\n" + "\n\n".join(blocks)
+        + "\n\n---\nThis PR was generated with [Release Please](https://github.com/googleapis/release-please).\n"
+    )
+    return notes.replace_component_notes(body, rendered)
 
 
 class ReleaseNotesConfigTests(unittest.TestCase):
@@ -154,6 +191,33 @@ class ReleaseNotesConfigTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+            # The rendered v2 notes must still parse back into GitHub releases.
+            bodies = Path(temporary) / "bodies"
+            bodies.mkdir()
+            component_body = bodies / "components.md"
+            component_body.write_text(render_component_release_body(), encoding="utf-8")
+            singles = sorted(
+                str(path) for path in (ROOT / "tests/fixtures/release-notes").glob("*/expected-release-pr-body.md")
+            )
+            self.assertEqual(len(singles), 4)
+            contract = subprocess.run(
+                [
+                    node,
+                    str(ROOT / "tests/release_please_17_contract.cjs"),
+                    str(install_root / "node_modules/release-please"),
+                    str(component_body),
+                    str(CONFIG_PATH),
+                    str(TEMPLATE_CONFIG_PATH),
+                    *singles,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(contract.returncode, 0, contract.stderr or contract.stdout)
+            summary = json.loads(contract.stdout)
+            self.assertEqual(summary["components"], ["backend", "frontend", "worker"])
+            self.assertEqual(sorted(summary["singles"]), ["0.13.0", "0.2.0", "2.0.0", "4.3.0"])
 
     def test_root_and_template_have_matching_section_semantics(self) -> None:
         root_package = self.load_config(CONFIG_PATH)["packages"]["."]

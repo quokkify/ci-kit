@@ -1,0 +1,46 @@
+{
+ "27": {
+  "title": "deps(gradle): update io.github.classgraph:classgraph to v5",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [io.github.classgraph:classgraph](https://redirect.github.com/classgraph/classgraph) | `4.8.199` → `5.0.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/io.github.classgraph:classgraph/5.0.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/io.github.classgraph:classgraph/5.0.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/io.github.classgraph:classgraph/4.8.199/5.0.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/io.github.classgraph:classgraph/4.8.199/5.0.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-07T08:22:41Z"
+ },
+ "38": {
+  "title": "deps(github-actions): update gradle/actions action to v6.4.1",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [gradle/actions](https://redirect.github.com/gradle/actions) | action | patch | `v6.4.0` → `v6.4.1` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-02T01:09:01Z"
+ },
+ "40": {
+  "title": "deps(github-actions): update quokkify/ci-kit action to v4.2.0",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [quokkify/ci-kit](https://redirect.github.com/quokkify/ci-kit) | action | minor | `v4.1.0` → `v4.2.0` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-02T01:15:52Z"
+ },
+ "41": {
+  "title": "deps(gradle): update com.diffplug.spotless:spotless-plugin-gradle to v8.11.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [com.diffplug.spotless:spotless-plugin-gradle](https://redirect.github.com/diffplug/spotless) | `8.10.4` → `8.11.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.diffplug.spotless:spotless-plugin-gradle/8.11.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.diffplug.spotless:spotless-plugin-gradle/8.11.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.diffplug.spotless:spotless-plugin-gradle/8.10.4/8.11.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.diffplug.spotless:spotless-plugin-gradle/8.10.4/8.11.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-05T23:40:37Z"
+ },
+ "42": {
+  "title": "chore: stop Renovate from raising the Maven API floor",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:22:21Z"
+ },
+ "44": {
+  "title": "feat: check the non-empty scopes of main + test rules",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:22:02Z"
+ }
+}

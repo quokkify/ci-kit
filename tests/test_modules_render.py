@@ -103,7 +103,8 @@ class ModuleRenderTests(unittest.TestCase):
             self.rendered_files("core"),
             {
                 ".copier-answers.core.yml", ".ci/modules/core.yml", ".github/workflows/validate.yml",
-                ".github/workflows/copier-update.yml", "docs/ci-kit.md", "README.md", ".github/pull_request_template.md",
+                ".github/workflows/copier-update.yml", ".github/workflows/pr-contract.yml", "docs/ci-kit.md", "README.md",
+                ".github/pull_request_template.md",
             },
         )
 
@@ -167,7 +168,10 @@ class ModuleRenderTests(unittest.TestCase):
 
     def test_caller_passes_actionlint(self) -> None:
         dest = self.render("core", "toolkit_version=v99.0.0")
-        result = subprocess.run(["actionlint", ".github/workflows/validate.yml"], cwd=dest, capture_output=True, text=True)
+        result = subprocess.run(
+            ["actionlint", ".github/workflows/validate.yml", ".github/workflows/pr-contract.yml"],
+            cwd=dest, capture_output=True, text=True,
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_java_component_rejects_bad_input(self) -> None:

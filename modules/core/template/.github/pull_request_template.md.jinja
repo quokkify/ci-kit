@@ -1,33 +1,36 @@
-## Description
-
-<!-- What changed and why? Most PRs stop here: the PR title becomes the changelog bullet. -->
-
 <!--
-The sections below are optional and are published at the top of the release notes.
-Fill one only for a change users should notice. Otherwise leave the comment as is
-or delete the heading: a section that holds only a comment is skipped.
-Do not write "None", "N/A" or "-": any text you add is published.
-
-Each section is merged with other PRs under one shared heading and labelled with
-this PR's title, so write it to stand on its own. Do not add Markdown headings
-inside a section; use a **bold** lead-in instead.
+The PR title and the three sections below are published in the release notes;
+everything after them is for reviewers only. The title is the headline:
+`type(scope): what the user notices` in at most 72 characters, without file or
+function names. `feat`, `fix`, `perf` and `revert` are shown to users; every
+other type is listed under a collapsed "Internal changes".
+A section that holds only a comment is skipped. Do not write "None" or "N/A":
+any text you add is published.
 -->
 
-## Highlight
+## Release note
 
-<!-- One bold sentence with the user-facing benefit, then 1-3 sentences on how to use it and when not to. -->
+<!-- Required for feat, perf and breaking (!) PRs, encouraged for fix; delete for other types.
+One paragraph, at most 300 characters, for someone who only reads release notes:
+what they can do now, or what was broken and how it showed, plus the input, flag
+or step to use. No headings or lists; do not repeat the title. -->
 
 ## Usage example
 
-<!-- A minimal snippet users can copy. Fenced code blocks with a language identifier are supported. -->
+<!-- Optional, feat only: one short fenced snippet users can copy. -->
 
 ## Migration
 
-<!-- Only steps users must take when upgrading. Opt-in changes that keep the current default need no migration; put caveats in Highlight. -->
+<!-- Required when the title has "!": numbered steps users must take when upgrading.
+Opt-in changes that keep the current default need no migration. -->
+
+## Description
+
+<!-- For reviewers, never published: what changed, why, and how it was tested. -->
 
 ## Checklist
 
 - [ ] The PR title follows [Conventional Commits](https://github.com/quokkify/ci-kit/blob/main/CONTRIBUTING.md#branch-and-pr-title-rules) as `type(scope): summary` (scope required), with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`, or `deps` (dependency updates)
-- [ ] Breaking changes are marked with `!` in the title and a `BREAKING CHANGE:` footer
+- [ ] Breaking changes are marked with `!` in the title and a `## Migration` section (a `BREAKING CHANGE:` commit footer is optional)
 - [ ] Tests and docs are updated
 - [ ] No secrets or credentials are included

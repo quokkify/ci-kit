@@ -21,20 +21,35 @@ for example `feat/gradle-problems-summary`, `fix/allure-component-defaults` or
 `automation/` and `ci-kit/`.
 
 PR titles must match `type(scope): summary`, with a required scope and `!` before the colon
-for a breaking change (plus a `BREAKING CHANGE:` footer). Allowed types: `feat`, `fix`,
+for a breaking change (plus a `## Migration` section; a `BREAKING CHANGE:` footer is optional). Allowed types: `feat`, `fix`,
 `perf`, `refactor`, `docs`, `test`, `ci`, `chore`, `build`, `style`, `revert`, and `deps`
 (dependency updates). Branch types use the same list. Repositories with a PR-title check
 enforce this format; the title becomes the changelog entry either way.
 
 New third-party Actions must be pinned to a full commit SHA and covered by Renovate. Add a composite action only with evidence of repeated step-level logic. Do not create or move release tags from feature work.
 
-Optional release context
+## Pull request titles and release notes
 
-The centrally managed PR template includes optional `Release notes`, `Highlight`,
-`Usage example`, and `Migration` sections. They are ignored when empty. Use
-`Highlight` sparingly, keep examples runnable, and preserve fenced code blocks.
-Release Please owns breaking-change notes through the Conventional Commit
-`BREAKING CHANGE:` footer.
+Release notes are rendered from merged pull requests by `scripts/enrich_release_notes.py`
+(the same helper every consumer gets through the `release` module). Only the title, the
+labels and the `## Release note`, `## Usage example` and `## Migration` sections are
+published; everything else in the body is for reviewers.
+
+- `feat`, `fix`, `perf` and `revert` are shown to users; every other type is listed under a
+  collapsed "Internal changes". The label `release-notes: internal` moves a `feat` or `fix`
+  that only maintainers notice there too.
+- The title is the headline: what the user notices, at most 72 characters, without file or
+  function names.
+- `## Release note`: one paragraph, at most 300 characters, for users. Required for `feat`,
+  `perf` and breaking PRs, encouraged for `fix`. The label `release-notes: title-only`
+  waives it when the title says everything.
+- A `!` title needs `## Migration` with numbered upgrade steps (`## Breaking change` is
+  accepted as an alias).
+- Fix a published note by editing the merged PR; the release PR is regenerated.
+
+The core module's `PR contract` check (`.github/workflows/pr-contract.yml`) enforces these
+rules from the PR event alone. Pull requests opened by bots (GitHub Apps such as Renovate,
+Dependabot and `github-actions[bot]` for Release Please) are exempt; a branch name never is.
 
 The canonical validator automatically runs every root `tests/test_*.py` suite in
 filename order through `scripts/run_test_suites.py`. Add new suites there without

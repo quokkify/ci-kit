@@ -1849,7 +1849,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             self.assertEqual(workflows, ["Validate", "Run tests"])
             self.assertEqual(len(set(workflows)), 2)
             pull_request_template = (destination / ".github/pull_request_template.md").read_text()
-            for heading in ("Description", "Highlight", "Usage example", "Migration"):
+            for heading in ("Release note", "Usage example", "Migration", "Description"):
                 self.assertIn(f"## {heading}", pull_request_template)
 
             reusable = yaml.safe_load((ROOT / ".github/workflows/allure-publisher-core.yml").read_text())

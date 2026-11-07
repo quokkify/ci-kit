@@ -1,0 +1,244 @@
+{
+ "15": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-08T06:28:30Z"
+ },
+ "16": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-08T09:05:14Z"
+ },
+ "17": {
+  "title": "chore(renovate): update q4j immediately",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-08T16:50:49Z"
+ },
+ "18": {
+  "title": "fix(deps): update q4j to v0.10.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [dev.quokkify:testng](https://redirect.github.com/quokkify/q4j) | `0.9.0` → `0.10.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.10.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.10.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.9.0/0.10.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.9.0/0.10.0?slim=true) |\n| [dev.quokkify:config](https://redirect.github.com/quokkify/q4j) | `0.9.0` → `0.10.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.10.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.10.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.9.0/0.10.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.9.0/0.10.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-08T19:07:45Z"
+ },
+ "19": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-09T05:52:40Z"
+ },
+ "21": {
+  "title": "fix(deps): update q4j to v0.11.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [dev.quokkify:testng](https://redirect.github.com/quokkify/q4j) | `0.10.0` → `0.11.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.11.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.11.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.10.0/0.11.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.10.0/0.11.0?slim=true) |\n| [dev.quokkify:config](https://redirect.github.com/quokkify/q4j) | `0.10.0` → `0.11.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.11.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.11.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.10.0/0.11.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.10.0/0.11.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-09T10:36:55Z"
+ },
+ "22": {
+  "title": "deps(deps): update gradle to v9.8.1",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [gradle](https://gradle.org) ([source](https://redirect.github.com/gradle/gradle)) | patch | `9.8.0` → `9.8.1` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-09T16:04:11Z"
+ },
+ "23": {
+  "title": "fix(deps): update q4j to v0.12.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [dev.quokkify:architecture](https://redirect.github.com/quokkify/q4j) | `0.11.0` → `0.12.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:architecture/0.12.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:architecture/0.12.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:architecture/0.11.0/0.12.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:architecture/0.11.0/0.12.0?slim=true) |\n| [dev.quokkify:testng](https://redirect.github.com/quokkify/q4j) | `0.11.0` → `0.12.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.12.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.12.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.11.0/0.12.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.11.0/0.12.0?slim=true) |\n| [dev.quokkify:config](https://redirect.github.com/quokkify/q4j) | `0.11.0` → `0.12.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.12.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.12.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.11.0/0.12.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.11.0/0.12.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-10T11:01:31Z"
+ },
+ "24": {
+  "title": "fix(deps): update q4j to v0.12.1",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [dev.quokkify:architecture](https://redirect.github.com/quokkify/q4j) | `0.12.0` → `0.12.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:architecture/0.12.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:architecture/0.12.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:architecture/0.12.0/0.12.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:architecture/0.12.0/0.12.1?slim=true) |\n| [dev.quokkify:testng](https://redirect.github.com/quokkify/q4j) | `0.12.0` → `0.12.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.12.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.12.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.12.0/0.12.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.12.0/0.12.1?slim=true) |\n| [dev.quokkify:config](https://redirect.github.com/quokkify/q4j) | `0.12.0` → `0.12.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.12.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.12.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.12.0/0.12.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.12.0/0.12.1?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-10T16:34:18Z"
+ },
+ "25": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-12T17:23:51Z"
+ },
+ "26": {
+  "title": "fix(deps): update q4j to v0.12.2",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [dev.quokkify:architecture](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:architecture/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:architecture/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:architecture/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:architecture/0.12.1/0.12.2?slim=true) |\n| [dev.quokkify:testng](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.12.1/0.12.2?slim=true) |\n| [dev.quokkify:config](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.12.1/0.12.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T14:12:09Z"
+ },
+ "27": {
+  "title": "deps(deps): update com.github.spotbugs to v6.5.13",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| com.github.spotbugs | `6.5.12` → `6.5.13` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.13?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.13?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.12/6.5.13?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.12/6.5.13?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T21:40:55Z"
+ },
+ "28": {
+  "title": "deps(deps): update actions/setup-java action to v6.1.0",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [actions/setup-java](https://redirect.github.com/actions/setup-java) | action | minor | `v6.0.1` → `v6.1.0` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-19T06:24:04Z"
+ },
+ "29": {
+  "title": "deps(deps): update python to 3.15",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [python](https://redirect.github.com/actions/python-versions) | uses-with | minor | `3.14` → `3.15` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-19T10:07:33Z"
+ },
+ "30": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T07:25:01Z"
+ },
+ "31": {
+  "title": "chore(ci-kit): hand off validate to core module",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T07:47:32Z"
+ },
+ "32": {
+  "title": "fix(release): show dependency updates in release notes",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T16:52:27Z"
+ },
+ "33": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T08:59:34Z"
+ },
+ "34": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T10:19:40Z"
+ },
+ "35": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T17:34:25Z"
+ },
+ "36": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T18:25:06Z"
+ },
+ "37": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-21T20:55:29Z"
+ },
+ "38": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-22T09:41:32Z"
+ },
+ "39": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-22T11:40:52Z"
+ },
+ "40": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-22T21:19:21Z"
+ },
+ "41": {
+  "title": "deps(deps): update gradle to v9.8.2",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [gradle](https://gradle.org) ([source](https://redirect.github.com/gradle/gradle)) | patch | `9.8.1` → `9.8.2` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-22T21:16:25Z"
+ },
+ "42": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-23T14:15:37Z"
+ },
+ "43": {
+  "title": "chore(ci-kit): hand off base, security, release, allure, renovate to modules",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-23T14:36:20Z"
+ },
+ "44": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-23T17:05:12Z"
+ },
+ "45": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-24T03:03:14Z"
+ },
+ "46": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-24T17:54:28Z"
+ },
+ "47": {
+  "title": "deps(deps): update org.aspectj:aspectjweaver to v1.9.26",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [org.aspectj:aspectjweaver](https://www.eclipse.org/aspectj/) ([source](https://redirect.github.com/eclipse/org.aspectj)) | `1.9.25.1` → `1.9.26` | ![age](https://developer.mend.io/api/mc/badges/age/maven/org.aspectj:aspectjweaver/1.9.26?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/org.aspectj:aspectjweaver/1.9.26?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/org.aspectj:aspectjweaver/1.9.25.1/1.9.26?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/org.aspectj:aspectjweaver/1.9.25.1/1.9.26?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-25T01:19:18Z"
+ },
+ "48": {
+  "title": "deps(deps): update actions/setup-python action to v7.1.0",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [actions/setup-python](https://redirect.github.com/actions/setup-python) | action | minor | `v7.0.0` → `v7.1.0` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-26T04:56:26Z"
+ },
+ "49": {
+  "title": "chore(template): update shared project template",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-10-28T20:50:50Z"
+ },
+ "51": {
+  "title": "deps(deps): update checkstyle to v14.4.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [checkstyle](https://checkstyle.org/) ([source](https://redirect.github.com/checkstyle/checkstyle), [changelog](https://checkstyle.org/releasenotes.html)) | `14.3.0` → `14.4.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.puppycrawl.tools:checkstyle/14.4.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.puppycrawl.tools:checkstyle/14.4.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.puppycrawl.tools:checkstyle/14.3.0/14.4.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.puppycrawl.tools:checkstyle/14.3.0/14.4.0?slim=true) |\n| [com.puppycrawl.tools:checkstyle](https://checkstyle.org/) ([source](https://redirect.github.com/checkstyle/checkstyle), [changelog](https://checkstyle.org/releasenotes.html)) | `14.3.0` → `14.4.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.puppycrawl.tools:checkstyle/14.4.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.puppycrawl.tools:checkstyle/14.4.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.puppycrawl.tools:checkstyle/14.3.0/14.4.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.puppycrawl.tools:checkstyle/14.3.0/14.4.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-04T01:34:38Z"
+ },
+ "53": {
+  "title": "feat!: replace the q4j architecture gate with the ArchGate plugin",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.\n\n## Migration\n\nBreaking change. Projects generated before 2.0.0:\n\n**After the update, the project has no architecture gate.** The migration removes the q4j gate but does not apply the ArchGate plugin. The gate stays disabled until section 3 of `docs/agents/architecture-verification.md` is done.\n\n1. `copier update --trust --vcs-ref v2.0.0` (or later). The migration removes the old gate, and the build works again without it. Fix every `WARNING` line it prints.\n2. Follow section 3 of `docs/agents/architecture-verification.md`: add the `archgate` version, library and plugin to the catalog; apply `alias(libs.plugins.archgate)` and the `archgate { }` block in `build.gradle`; add the two `testImplementation` lines; check that the services file exists.\n3. Replace `verifyArchitecture` with `archgateCheck` in CI task lists.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:23:23Z"
+ }
+}
