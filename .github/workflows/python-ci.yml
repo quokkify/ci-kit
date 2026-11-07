@@ -108,17 +108,22 @@ jobs:
           UV_VERSION: ${{ inputs.uv-version }}
         run: |
           set -euo pipefail
+          command_text() {
+            local value="${1//"%"/%25}"
+            value="${value//$'\r'/%0D}"
+            printf '%s' "${value//$'\n'/%0A}"
+          }
           for input in "cache-dependencies=$CACHE_DEPENDENCIES" "install-dependencies=$INSTALL_DEPENDENCIES"; do
             name=${input%%=*}
             value=${input#*=}
             if [[ "$value" != "true" && "$value" != "false" ]]; then
-              echo "$name must be 'true' or 'false': $value" >&2
+              echo "$name must be 'true' or 'false': $(command_text "$value")" >&2
               exit 2
             fi
           done
           case "$PACKAGE_MANAGER" in
             auto|pip|uv|poetry) ;;
-            *) echo "Unsupported package-manager: $PACKAGE_MANAGER" >&2; exit 2 ;;
+            *) echo "Unsupported package-manager: $(command_text "$PACKAGE_MANAGER")" >&2; exit 2 ;;
           esac
           if [[ -z "$UV_VERSION" || -z "$POETRY_VERSION" || -z "$PIP_VERSION" ]]; then
             echo "uv-version, poetry-version, and pip-version must be exact non-empty versions" >&2
@@ -167,6 +172,7 @@ jobs:
             uv) version="$UV_VERSION" ;;
             poetry) version="$POETRY_VERSION" ;;
           esac
+          [[ -n "$version" && "$version" != *$'\n'* ]] || { echo "Invalid $manager version" >&2; exit 2; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$CACHE_DEPENDENCIES" == true ]]; then
             case "$manager" in
@@ -201,6 +207,11 @@ jobs:
           PYTHON_PATH: ${{ steps.runtime.outputs.python-path }}
         run: |
           set -euo pipefail
+          command_text() {
+            local value="${1//"%"/%25}"
+            value="${value//$'\r'/%0D}"
+            printf '%s' "${value//$'\n'/%0A}"
+          }
           cd "$WORKING_DIRECTORY"
 
           if [[ -n "$INSTALL_COMMAND" ]]; then
@@ -222,7 +233,7 @@ jobs:
             pip)
               requirements="$REQUIREMENTS_FILE"
               if [[ -n "$requirements" && ! -f "$requirements" ]]; then
-                echo "requirements-file does not exist: $requirements" >&2
+                echo "requirements-file does not exist: $(command_text "$requirements")" >&2
                 exit 2
               fi
               if [[ -z "$requirements" && -f requirements.txt ]]; then

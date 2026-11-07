@@ -96,8 +96,14 @@ runs:
       run: |
         set -euo pipefail
 
+        command_text() {
+          local value="${1//"%"/%25}"
+          value="${value//$'\r'/%0D}"
+          printf '%s' "${value//$'\n'/%0A}"
+        }
+
         fail() {
-          echo "$1" >&2
+          printf '%s\n' "$(command_text "$1")" >&2
           exit 2
         }
 
