@@ -17,7 +17,7 @@ Executable examples use full commit SHA pins with release comments (`@<40-charac
 - `actions/compose-up/action.yml`
   - validates safe Compose/profile/hook inputs, delegates one startup lifecycle to the standalone health action, and optionally waits for HTTP readiness
 - `actions/deploy-gh-pages-subdir/action.yml`
-  - compatibility wrapper in toolkit `v2.6.0` that forwards the unchanged input contract once to immutable standalone `gh-pages-subdir-action` `v0.1.1` (`816d85aa756f480457befb42168633cb6ccf09c7`) and remains input-compatible for migration.
+  - compatibility wrapper in toolkit `v2.6.0` that forwards the unchanged input contract once to immutable standalone `gh-pages-subdir-action` `v0.1.2` (`816d85aa756f480457befb42168633cb6ccf09c7`) and remains input-compatible for migration.
 - `actions/gradle-problems-summary/action.yml`
   - summarizes workspace-contained Gradle Problems Reports as an escaped, bounded job-summary table with problem counts as outputs
 - `actions/junit-step-summary/action.yml`
