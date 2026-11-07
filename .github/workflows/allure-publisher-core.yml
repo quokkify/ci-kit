@@ -490,7 +490,7 @@ jobs:
             output.write(f"sha256={digest}\n")
         print(f"Restored {target} from {source}")
     - name: Build report without write privileges
-      uses: quokkify/allure-report-action@22a17ce8c0545f1afbe7e69182d80761e6be784b # v0.5.3
+      uses: quokkify/allure-report-action@6315a0127c701e87a16fbf0d3f93aff240f87d75 # v0.5.4
       with:
         github-token: ${{ secrets.github-token || github.token }}
         results-directory: .allure-input/results
