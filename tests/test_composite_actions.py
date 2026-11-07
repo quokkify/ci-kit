@@ -633,6 +633,27 @@ class JUnitStepSummaryTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("complete path segment", result.stderr)
 
+    def test_globstar_segments_are_collapsed_and_bounded(self) -> None:
+        # Regression guard: stacked ** segments compiled to nested (?:[^/]+/)* groups
+        # backtrack exponentially against deep attacker-created directory trees.
+        with tempfile.TemporaryDirectory(prefix="junit-summary-globstar-") as tmp:
+            workspace = Path(tmp)
+            deep = workspace / "results" / Path(*(["a"] * 40))
+            deep.mkdir(parents=True)
+            (deep / "junit.xml").write_text('<testsuite tests="1" />')
+            started = time.perf_counter()
+            result, _, output = self.run_summary(
+                workspace, patterns="results/" + "**/" * 30 + "*.xml"
+            )
+            self.assertLess(time.perf_counter() - started, 30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("files=1\n", output)
+            result, _, _ = self.run_summary(
+                workspace, patterns="results/" + "**/a/" * 5 + "*.xml"
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("more than 4 ** segments", result.stderr)
+
     def test_action_metadata_is_self_contained_and_exposes_numeric_outputs(self) -> None:
         data = action("junit-step-summary")
         step = data["runs"]["steps"][0]
