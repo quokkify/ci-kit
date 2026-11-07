@@ -1,0 +1,168 @@
+{
+ "754": {
+  "title": "deps(gradle): update com.github.spotbugs:spotbugs-annotations to v4.10.5",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [com.github.spotbugs:spotbugs-annotations](https://spotbugs.github.io/) ([source](https://redirect.github.com/spotbugs/spotbugs)) | `4.10.4` → `4.10.5` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.github.spotbugs:spotbugs-annotations/4.10.5?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.github.spotbugs:spotbugs-annotations/4.10.5?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.github.spotbugs:spotbugs-annotations/4.10.4/4.10.5?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.github.spotbugs:spotbugs-annotations/4.10.4/4.10.5?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T07:46:55Z"
+ },
+ "756": {
+  "title": "docs(modules): update q4j module documentation to v0.12.2",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [awaitility](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:awaitility/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:awaitility/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:awaitility/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:awaitility/0.12.1/0.12.2?slim=true) |\n| [config](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:config/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:config/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:config/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:config/0.12.1/0.12.2?slim=true) |\n| [core](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:core/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:core/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:core/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:core/0.12.1/0.12.2?slim=true) |\n| [crypto](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:crypto/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:crypto/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:crypto/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:crypto/0.12.1/0.12.2?slim=true) |\n| [files](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:files/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:files/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:files/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:files/0.12.1/0.12.2?slim=true) |\n| [html](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:html/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:html/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:html/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:html/0.12.1/0.12.2?slim=true) |\n| [jackson-csv](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jackson-csv/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jackson-csv/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jackson-csv/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jackson-csv/0.12.1/0.12.2?slim=true) |\n| [jackson-json](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jackson-json/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jackson-json/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jackson-json/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jackson-json/0.12.1/0.12.2?slim=true) |\n| [jackson-support](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jackson-support/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jackson-support/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jackson-support/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jackson-support/0.12.1/0.12.2?slim=true) |\n| [jackson-xml](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jackson-xml/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jackson-xml/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jackson-xml/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jackson-xml/0.12.1/0.12.2?slim=true) |\n| [jackson-yaml](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jackson-yaml/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jackson-yaml/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jackson-yaml/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jackson-yaml/0.12.1/0.12.2?slim=true) |\n| [jira-core](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jira-core/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jira-core/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jira-core/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jira-core/0.12.1/0.12.2?slim=true) |\n| [jira-testng](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jira-testng/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jira-testng/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jira-testng/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jira-testng/0.12.1/0.12.2?slim=true) |\n| [jira-testrail](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jira-testrail/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jira-testrail/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jira-testrail/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jira-testrail/0.12.1/0.12.2?slim=true) |\n| [jwt](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:jwt/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:jwt/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:jwt/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:jwt/0.12.1/0.12.2?slim=true) |\n| [kafka](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:kafka/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:kafka/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:kafka/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:kafka/0.12.1/0.12.2?slim=true) |\n| [morphia](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:morphia/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:morphia/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:morphia/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:morphia/0.12.1/0.12.2?slim=true) |\n| [rabbitmq](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:rabbitmq/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:rabbitmq/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:rabbitmq/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:rabbitmq/0.12.1/0.12.2?slim=true) |\n| [redis](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:redis/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:redis/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:redis/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:redis/0.12.1/0.12.2?slim=true) |\n| [reflection](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:reflection/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:reflection/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:reflection/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:reflection/0.12.1/0.12.2?slim=true) |\n| [reportportal-core](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:reportportal-core/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:reportportal-core/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:reportportal-core/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:reportportal-core/0.12.1/0.12.2?slim=true) |\n| [reportportal-testng](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:reportportal-testng/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:reportportal-testng/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:reportportal-testng/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:reportportal-testng/0.12.1/0.12.2?slim=true) |\n| [reportportal-testrail](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:reportportal-testrail/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:reportportal-testrail/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:reportportal-testrail/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:reportportal-testrail/0.12.1/0.12.2?slim=true) |\n| [rest-assured](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:rest-assured/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:rest-assured/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:rest-assured/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:rest-assured/0.12.1/0.12.2?slim=true) |\n| [selenide](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:selenide/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:selenide/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:selenide/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:selenide/0.12.1/0.12.2?slim=true) |\n| [selenide-grid](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:selenide-grid/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:selenide-grid/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:selenide-grid/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:selenide-grid/0.12.1/0.12.2?slim=true) |\n| [selenide-proxy](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:selenide-proxy/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:selenide-proxy/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:selenide-proxy/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:selenide-proxy/0.12.1/0.12.2?slim=true) |\n| [sql](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:sql/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:sql/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:sql/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:sql/0.12.1/0.12.2?slim=true) |\n| [ssh](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:ssh/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:ssh/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:ssh/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:ssh/0.12.1/0.12.2?slim=true) |\n| [testng](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testng/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testng/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testng/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testng/0.12.1/0.12.2?slim=true) |\n| [testrail-core](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testrail-core/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testrail-core/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testrail-core/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testrail-core/0.12.1/0.12.2?slim=true) |\n| [testrail-testng](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:testrail-testng/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:testrail-testng/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:testrail-testng/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:testrail-testng/0.12.1/0.12.2?slim=true) |\n| [tyrus](https://redirect.github.com/quokkify/q4j) | `0.12.1` → `0.12.2` | ![age](https://developer.mend.io/api/mc/badges/age/maven/dev.quokkify:tyrus/0.12.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/dev.quokkify:tyrus/0.12.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/dev.quokkify:tyrus/0.12.1/0.12.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/dev.quokkify:tyrus/0.12.1/0.12.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T15:58:32Z"
+ },
+ "757": {
+  "title": "deps(docker-compose): update reportportal/service-authorization docker tag to v5.15.2",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/service-authorization | patch | `5.15.1` → `5.15.2` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T15:28:49Z"
+ },
+ "758": {
+  "title": "deps(dockerfile): update nginx docker tag to v1.31.7",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [nginx](https://hub.docker.com/_/nginx) ([source](https://redirect.github.com/nginx/docker-nginx)) | final | patch | `1.31.6` → `1.31.7` |\n| [nginx](https://hub.docker.com/_/nginx) ([source](https://redirect.github.com/nginx/docker-nginx)) |  | patch | `1.31.6` → `1.31.7` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T16:47:28Z"
+ },
+ "759": {
+  "title": "deps(gradle): update plugin com.github.spotbugs to v6.5.13",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| com.github.spotbugs | `6.5.12` → `6.5.13` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.13?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.13?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.12/6.5.13?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.github.spotbugs:com.github.spotbugs.gradle.plugin/6.5.12/6.5.13?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T16:48:13Z"
+ },
+ "760": {
+  "title": "deps(curl): update curlimages/curl docker tag to v8.23.0",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [curlimages/curl](https://redirect.github.com/curl/curl-container) | minor | `8.22.0` → `8.23.0` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T16:47:37Z"
+ },
+ "761": {
+  "title": "deps(docker-compose): update selenium grid images",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [selenium/hub](https://redirect.github.com/SeleniumHQ/docker-selenium) | minor | `4.50.0-20261010` → `4.51.0-20261010` |\n| [selenium/node-docker](https://redirect.github.com/SeleniumHQ/docker-selenium) | minor | `4.50.0-20261010` → `4.51.0-20261010` |\n| [selenium/standalone-chromium](https://redirect.github.com/SeleniumHQ/docker-selenium) | digest | `2bc5a3e` → `ba9dde7` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-15T16:48:32Z"
+ },
+ "762": {
+  "title": "deps(docker-compose): update reportportal/service-api docker tag to v5.15.5",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/service-api | patch | `5.15.4` → `5.15.5` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-16T10:29:51Z"
+ },
+ "763": {
+  "title": "deps(docker-compose): update reportportal/service-index docker tag to v5.15.2",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/service-index | patch | `5.15.1` → `5.15.2` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-16T10:47:56Z"
+ },
+ "764": {
+  "title": "deps(docker-compose): update reportportal/migrations docker tag to v5.15.5",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/migrations | patch | `5.15.4` → `5.15.5` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-16T15:56:42Z"
+ },
+ "765": {
+  "title": "deps(docker-compose): update reportportal/service-auto-analyzer docker tag to v5.15.6",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/service-auto-analyzer | patch | `5.15.5` → `5.15.6` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-16T16:21:21Z"
+ },
+ "766": {
+  "title": "deps(docker-compose): update reportportal/service-jobs docker tag to v5.15.3",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| reportportal/service-jobs | patch | `5.15.2` → `5.15.3` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-16T16:38:04Z"
+ },
+ "767": {
+  "title": "deps(docker-compose): update mongo:9.0.2 docker digest to f5c6240",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [mongo](https://hub.docker.com/_/mongo) ([source](https://redirect.github.com/docker-library/mongo)) | digest | `bac22ea` → `f5c6240` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-17T10:20:12Z"
+ },
+ "768": {
+  "title": "deps(docker-compose): update mongo docker tag to v9.0.4",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [mongo](https://hub.docker.com/_/mongo) ([source](https://redirect.github.com/docker-library/mongo)) | patch | `9.0.2` → `9.0.4` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-17T11:40:13Z"
+ },
+ "769": {
+  "title": "deps(docker-compose): update traefik docker tag to v3.7.15",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [traefik](https://hub.docker.com/_/traefik) ([source](https://redirect.github.com/traefik/traefik)) | patch | `v3.7.14` → `v3.7.15` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-19T06:44:55Z"
+ },
+ "770": {
+  "title": "deps(gradle): update rest.assured to v6.2.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [io.rest-assured:json-schema-validator](https://rest-assured.io/) ([source](https://redirect.github.com/rest-assured/rest-assured)) | `6.1.0` → `6.2.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/io.rest-assured:json-schema-validator/6.2.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/io.rest-assured:json-schema-validator/6.2.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/io.rest-assured:json-schema-validator/6.1.0/6.2.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/io.rest-assured:json-schema-validator/6.1.0/6.2.0?slim=true) |\n| [io.rest-assured:rest-assured](https://rest-assured.io/) ([source](https://redirect.github.com/rest-assured/rest-assured)) | `6.1.0` → `6.2.0` | ![age](https://developer.mend.io/api/mc/badges/age/maven/io.rest-assured:rest-assured/6.2.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/io.rest-assured:rest-assured/6.2.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/io.rest-assured:rest-assured/6.1.0/6.2.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/io.rest-assured:rest-assured/6.1.0/6.2.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-21T08:02:28Z"
+ },
+ "793": {
+  "title": "deps(dockerfile): update nginx docker tag to v1.31.8",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [nginx](https://hub.docker.com/_/nginx) ([source](https://redirect.github.com/nginx/docker-nginx)) | final | patch | `1.31.7` → `1.31.8` |\n| [nginx](https://hub.docker.com/_/nginx) ([source](https://redirect.github.com/nginx/docker-nginx)) |  | patch | `1.31.7` → `1.31.8` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-03T12:31:31Z"
+ },
+ "794": {
+  "title": "deps(gradle-wrapper): update gradle to v9.8.2",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [gradle](https://gradle.org) ([source](https://redirect.github.com/gradle/gradle)) | patch | `9.8.1` → `9.8.2` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-28T20:08:19Z"
+ },
+ "795": {
+  "title": "deps(gradle): update selenide to v7.19.1",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [com.codeborne:selenide-proxy](https://selenide.org) ([source](https://redirect.github.com/selenide/selenide)) | `7.19.0` → `7.19.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.codeborne:selenide-proxy/7.19.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.codeborne:selenide-proxy/7.19.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.codeborne:selenide-proxy/7.19.0/7.19.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.codeborne:selenide-proxy/7.19.0/7.19.1?slim=true) |\n| [com.codeborne:selenide-grid](https://selenide.org) ([source](https://redirect.github.com/selenide/selenide)) | `7.19.0` → `7.19.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.codeborne:selenide-grid/7.19.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.codeborne:selenide-grid/7.19.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.codeborne:selenide-grid/7.19.0/7.19.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.codeborne:selenide-grid/7.19.0/7.19.1?slim=true) |\n| [com.codeborne:selenide](https://selenide.org) ([source](https://redirect.github.com/selenide/selenide)) | `7.19.0` → `7.19.1` | ![age](https://developer.mend.io/api/mc/badges/age/maven/com.codeborne:selenide/7.19.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/maven/com.codeborne:selenide/7.19.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/maven/com.codeborne:selenide/7.19.0/7.19.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/maven/com.codeborne:selenide/7.19.0/7.19.1?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-28T19:37:27Z"
+ },
+ "796": {
+  "title": "deps(docker-compose): update rabbitmq docker tag to v4.4.0",
+  "body": "| Package | Update | Change |\n|---|---|---|\n| [rabbitmq](https://hub.docker.com/_/rabbitmq) ([source](https://redirect.github.com/docker-library/rabbitmq)) | minor | `4.3.6-management` → `4.4.0-management` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-03T12:53:50Z"
+ },
+ "801": {
+  "title": "feat(architecture)!: replace the architecture module with the ArchGate plugin",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.\n\n## Breaking change\n\n`dev.quokkify:architecture` is no longer published. `HttpStatusConstantRule` moved from `dev.quokkify:rest-assured` to `dev.quokkify:archgate-rules`. The Copier template migrates in parallel in quokkify/java-test-automation-template#50 and no longer needs the q4j `architecture` artifact.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:20:36Z"
+ }
+}

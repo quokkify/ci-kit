@@ -1,0 +1,90 @@
+[
+ {
+  "number": 772,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 774,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 775,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 776,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 777,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 778,
+  "title": "ci(validate): prepare validate for the ci-kit modules migration"
+ },
+ {
+  "number": 779,
+  "title": "ci(validate): drop placeholder language components"
+ },
+ {
+  "number": 780,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 781,
+  "title": "chore(ci-kit): hand off validate to core module"
+ },
+ {
+  "number": 782,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 783,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 784,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 785,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 786,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 787,
+  "title": "chore(ci-kit): prepare for the legacy template exit"
+ },
+ {
+  "number": 788,
+  "title": "chore(ci-kit): hand off base, security, release, allure, renovate to modules"
+ },
+ {
+  "number": 789,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 790,
+  "title": "chore(ci-kit): let Prettier check codeql.yml again"
+ },
+ {
+  "number": 791,
+  "title": "ci(ci-kit): read the project contract from the module answers"
+ },
+ {
+  "number": 792,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 797,
+  "title": "chore(template): update shared project template"
+ },
+ {
+  "number": 799,
+  "title": "chore(template): update shared project template"
+ }
+]

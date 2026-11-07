@@ -16,20 +16,36 @@
 
 Release notes
 
-Release Please remains authoritative for versions and Conventional Commit
-sections, including breaking changes from the `BREAKING CHANGE:` footer. Enrich
-adds only the optional PR template sections `Highlight`, `Usage example`, and
-`Migration`. Leave these fields empty for ordinary changes; a section that
-holds only the template comment is skipped, while placeholder text such as
-"None" is published verbatim. Each section is rendered once per release with
-every contributing PR listed under it, so write entries that stand on their own
-and avoid Markdown headings inside them. Usage examples may contain fenced
-Markdown, including language identifiers.
+Release Please stays authoritative for versions, tags and which commits belong to a
+release. With `enrich-release-notes: true` the helper `enrich_release_notes.py` rebuilds
+the notes of the top version from that list, the merged PRs' titles, labels and
+`## Release note` / `## Usage example` / `## Migration` sections, and writes the same
+text to the release PR body and the top section of `CHANGELOG.md`. The GitHub release is
+created from the merged PR body, so all three surfaces match.
 
-Renovate dependency updates use `deps(<manager>)` Conventional Commits (for example `deps(github-actions)`) and appear
-in the `📦 Dependencies` section; legacy `chore(deps)` commits stay in
-`🧹 Chores`. Enrich does not move,
-normalize, or synthesize chore/dependency entries.
+The rendered notes are: the Release Please version heading, a marker comment, an
+`At a glance` count line, `⚠️ Breaking changes` (each in a warning box with its
+migration steps, never repeated below), `✨ New`, `🐛 Fixed`, `🚀 Faster`, `⬆️ Updated`
+(dependency updates in a user-facing type) and `↩️ Reverted`, then a collapsed
+`Internal changes (N PRs)` list with one line per dependency (`from → to`, `· major` on a
+major bump) and one line per maintenance subject, PR runs compressed as `#535–#541`.
+Commit hashes are not shown; the heading's compare link covers the range. Types that
+the config hides (`docs`, `ci`, `test`, ...) are recovered from `git log` between the
+previous tag and the release PR's base commit and listed only inside the collapsed list,
+so they still never cause a release. A PR without the new sections renders from its
+title. A version marker makes reruns a no-op; lines the helper cannot attribute are kept
+visible.
+
+Release Please updates an open release PR only when its own generated body changes. When
+it reports no PR, the workflow renders the single open `autorelease: pending` PR anyway,
+so a toolkit update or a push of hidden-type commits still refreshes the notes. In a
+multi-component repository Release Please flattens the nested list in each component's
+GitHub release; the manifest job resets every new component release to its `CHANGELOG.md`
+section afterwards.
+
+Renovate dependency updates use `deps(<manager>)` Conventional Commits (for example `deps(github-actions)`); Release Please
+lists them in the `📦 Dependencies` section and the helper groups them per package inside
+the collapsed list.
 The reusable Release Please workflow fails before releasing when a config-backed
 package has no visible `deps` changelog section: without one, Release Please
 falls back to its default sections and silently drops every `deps(...)` commit.

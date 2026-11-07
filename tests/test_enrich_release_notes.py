@@ -1,81 +1,104 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any
 from unittest import TestCase, mock
 
+import yaml
 from jinja2 import Environment, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests/fixtures/release-notes"
+SAMPLES = {
+    "ci-kit-534": "quokkify/ci-kit",
+    "q4j-755": "quokkify/q4j",
+    "archgate-39": "quokkify/archgate",
+    "java-test-automation-template-20": "quokkify/java-test-automation-template",
+}
 spec = importlib.util.spec_from_file_location("enrich_release_notes", ROOT / "scripts/enrich_release_notes.py")
 assert spec and spec.loader
 notes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(notes)
 
+REPO = "acme/widget"
+LINK = notes.pull_link(REPO)
+VERSION_TRIPLE = re.compile(r"\d+\.\d+\.\d+")
 
-class RichNotesTests(TestCase):
-    def test_enrich_handles_only_its_custom_release_sections(self):
-        self.assertEqual(notes.RICH_HEADINGS, {
-            "highlight": "✨ Highlights",
-            "usage example": "💡 Usage Examples",
-            "migration": "🔄 Migration",
-        })
+
+def rp_line(number: int, text: str, *, commit: bool = True) -> str:
+    """One Release Please changelog bullet with its canonical PR (and commit) links."""
+    line = f"* {text} ([#{number}](https://github.com/{REPO}/issues/{number}))"
+    if commit:
+        sha = f"{number:x}".ljust(40, "a")[:40]
+        line += f" ([{sha[:7]}](https://github.com/{REPO}/commit/{sha}))"
+    return line
+
+
+def changelog(*sections: tuple[str, list[str]], older: bool = True) -> str:
+    text = f"# Changelog\n\n## [1.1.0](https://github.com/{REPO}/compare/v1.0.0...v1.1.0) (2026-11-07)\n\n"
+    for title, lines in sections:
+        text += f"\n### {title}\n\n" + "\n".join(lines) + "\n\n"
+    if older:
+        text += "## [1.0.0](https://github.com/acme/widget/compare/v0.9.0...v1.0.0) (2026-10-01)\n\n* old entry\n"
+    return text
+
+
+def body_for(changelog_text: str) -> str:
+    _, _, top = notes.top_section(changelog_text)
+    return (
+        ":robot: I have created a release *beep* *boop*\n---\n\n\n" + top.rstrip() + "\n\n---\n"
+        "This PR was generated with [Release Please](https://github.com/googleapis/release-please).\n"
+    )
+
+
+def render(text: str, sources: dict[int, dict[str, Any]], **kwargs: Any) -> str:
+    return notes.render_changelog(text, REPO, sources, **kwargs)[1]
+
+
+def load_sample(name: str) -> tuple[str, str, dict[int, dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+    directory = FIXTURES / name
+    config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+    sources = {
+        int(number): value
+        for number, value in json.loads((directory / "sources.json").read_text(encoding="utf-8")).items()
+    }
+    hidden = json.loads((directory / "hidden-commits.json").read_text(encoding="utf-8"))
+    return (
+        (directory / "CHANGELOG.md").read_text(encoding="utf-8"),
+        (directory / "release-pr-body.md").read_text(encoding="utf-8"),
+        sources,
+        hidden,
+        notes._section_types(config["changelog-sections"]),
+    )
+
+
+def render_sample(name: str) -> tuple[str, str, str]:
+    """Return (changelog, release PR body, notes) the way --prepare renders one sample."""
+    text, body, sources, hidden, types = load_sample(name)
+    updated, rendered = notes.render_changelog(text, SAMPLES[name], sources, section_types=types, hidden=hidden)
+    heading = notes.top_section(updated)[2].split("\n", 1)[0]
+    return updated, notes.replace_body_notes(body, heading, rendered), rendered
+
+
+class SectionTests(TestCase):
+    def test_published_sections_and_aliases(self):
         sections = notes.extract_rich_sections(
-            "## Release notes\nignore\n## Breaking change\nignore\n## Migration\nUse v2."
+            "## Summary\nreview only\n## Release note\nYou can now X.\n## Release notes\nignored\n"
+            "## Breaking change\nRemove Y.\n## Usage example\n```yaml\na: 1\n```\n## Checklist\n- [ ] x\n"
         )
-        self.assertEqual(sections, {"migration": "Use v2."})
-
-    def test_release_please_chore_and_dependency_content_is_untouched(self):
-        changelog = (
-            "## 2.23.2\n\n### 🧹 Chores\n\n"
-            "- deps: update example package (#314)\n"
-        )
-        prs = [{"number": 314, "title": "chore(deps): update example package", "body": ""}]
-        self.assertEqual(notes.enrich_changelog(changelog, prs), changelog)
         self.assertEqual(
-            notes.enrich_release_body(changelog, notes._render_entries(prs, set())),
-            changelog,
+            sections,
+            {"release note": "You can now X.", "migration": "Remove Y.", "usage example": "```yaml\na: 1\n```"},
         )
 
-    def test_release_please_owns_breaking_changes(self):
-        release_body = (
-            "## 3.0.0\n\n### ⚠ BREAKING CHANGES\n\n"
-            "- remove the deprecated API\n\n---\nRelease Please footer\n"
-        )
-        prs = [{
-            "number": 8,
-            "title": "feat!: remove the deprecated API",
-            "body": "## Breaking change\nRemove the deprecated API.",
-        }]
-        updated = notes.enrich_release_body(release_body, notes._render_entries(prs, set()))
-        self.assertIn("### ⚠ BREAKING CHANGES", updated)
-        self.assertNotIn("### ⚠️ Breaking Changes", updated)
-        self.assertNotIn("Remove the deprecated API.", updated)
-        self.assertEqual(updated.count("deprecated API"), 1)
-
-    def test_dependency_pr_can_contribute_only_its_migration_note(self):
-        prs = [{
-            "number": 5,
-            "title": "chore(deps): update one",
-            "body": "## Migration\nChange the import path.\n## Dependencies\nDo not render this.",
-        }]
-        rendered = notes._render_entries(prs, set())
-        self.assertIn("### 🔄 Migration", rendered)
-        self.assertIn("Change the import path.", rendered)
-        self.assertNotIn("Dependencies", rendered)
-        self.assertNotIn("chore(deps)", rendered)
-
-    def test_workflow_delegates_source_discovery_to_the_helper(self):
-        workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
-        self.assertIn("--prepare", workflow)
-        self.assertIn("--release-prs", workflow)
-        self.assertIn("--repository", workflow)
-        self.assertNotIn("gh pr view", workflow)
-        self.assertNotIn("headRepository,baseRepository", workflow)
+    def test_migration_and_breaking_change_headings_are_both_kept(self):
+        sections = notes.extract_rich_sections("## Migration\nStep one.\n## Breaking changes\nStep two.\n")
+        self.assertEqual(sections["migration"], "Step one.\n\nStep two.")
 
     def test_extracts_sections_and_preserves_java_fence(self):
         body = "## Description\r\ninternal\r\n## Usage example\r\n```java\r\nVerifier.verify();\r\n```\r\n## Migration\r\n<!-- guidance -->\r\n"
@@ -84,305 +107,485 @@ class RichNotesTests(TestCase):
         self.assertNotIn("migration", sections)
 
     def test_trailing_whitespace_is_dropped_so_the_changelog_passes_diff_check(self):
-        body = "## Highlight\nBefore:  \n```text\nArchitectureRunner - \t\n```\n"
-        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
-        sections = notes.extract_rich_sections(body)
-        self.assertEqual(sections["highlight"], "Before:\n```text\nArchitectureRunner -\n```")
-        enriched = notes.enrich_changelog(changelog, [{"number": 7, "title": "Report", "body": body}])
-        self.assertEqual([line for line in enriched.splitlines() if line != line.rstrip()], [])
+        body = "## Release note\nBefore:  \n```text\nArchitectureRunner - \t\n```\n"
+        self.assertEqual(notes.extract_rich_sections(body)["release note"], "Before:\n```text\nArchitectureRunner -\n```")
+        text = changelog(("Features", [rp_line(7, "report")]))
+        updated, _ = notes.render_changelog(text, REPO, {7: {"title": "feat(x): report", "body": body}})
+        self.assertEqual([line for line in updated.splitlines() if line != line.rstrip()], [])
 
     def test_comments_and_unknown_or_duplicate_headings_are_ignored(self):
         body = "## Highlight\n<!-- only guidance -->\n## Highlight\nsecond\n## Other\nno\n"
         self.assertEqual(notes.extract_rich_sections(body), {})
 
-    def test_enrichment_is_sorted_and_idempotent(self):
-        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
-        prs = [
-            {"number": 12, "title": "Second", "body": "## Migration\nUpgrade now."},
-            {"number": 4, "title": "First", "body": "## Highlight\nImportant."},
-            {"number": 99, "title": "Empty", "body": "## Usage example\n<!-- optional -->"},
-        ]
-        first = notes.enrich_changelog(changelog, prs)
-        self.assertLess(first.index("Important."), first.index("Upgrade now."))
-        self.assertEqual(notes.enrich_changelog(first, prs), first)
-        self.assertEqual(first.count("rich-release-notes"), 2)
-
-    def test_multiple_prs_share_one_heading_per_section(self):
-        # regression: each source PR used to repeat the whole Highlights/Usage/Migration set
-        prs = [
-            {
-                "number": 672,
-                "title": "feat(console): serialize concurrent SSH commands per target",
-                "body": "## Highlight\nSSH lock.\n## Usage example\n```java\nssh();\n```",
-            },
-            {
-                "number": 671,
-                "title": "feat(testng-extensions): allow running @SingleThread tests in parallel",
-                "body": "## Highlight\nFaster suites.\n## Usage example\n```bash\nrun\n```\n## Migration\nOpt in.",
-            },
-        ]
-        rendered = notes._render_entries(prs, set())
-        for heading in notes.RICH_HEADINGS.values():
-            self.assertEqual(rendered.count(f"### {heading}"), 1)
-        self.assertLess(rendered.index("### ✨ Highlights"), rendered.index("### 💡 Usage Examples"))
-        self.assertLess(rendered.index("### 💡 Usage Examples"), rendered.index("### 🔄 Migration"))
-        highlights = rendered[: rendered.index("### 💡 Usage Examples")]
-        self.assertLess(highlights.index("Faster suites."), highlights.index("SSH lock."))
-        self.assertIn(
-            "#### **testng-extensions:** allow running @SingleThread tests in parallel (#671)\nFaster suites.",
-            rendered,
-        )
-        self.assertIn("#### **console:** serialize concurrent SSH commands per target (#672)\nSSH lock.", rendered)
-        migration = rendered[rendered.index("### 🔄 Migration") :]
-        self.assertIn("(#671)\nOpt in.", migration)
-        self.assertNotIn("#672", migration)
-        self.assertEqual(notes._rich_numbers(rendered), {"671", "672"})
-
-    def test_grouped_sections_are_idempotent_in_changelog(self):
-        changelog = "# Changelog\n\n## 2.1.0\n\n### ✨ Features\n\n- normal\n"
-        prs = [
-            {"number": 2, "title": "feat: two", "body": "## Highlight\nB\n## Migration\nM"},
-            {"number": 1, "title": "feat: one", "body": "## Highlight\nA"},
-        ]
-        first = notes.enrich_changelog(changelog, prs)
-        self.assertEqual(first.count("### ✨ Highlights"), 1)
-        self.assertEqual(notes.enrich_changelog(first, prs), first)
-        top = notes._version_ranges(first)[0]
-        self.assertEqual(notes._rich_numbers(first[top[0] : top[1]]), {"1", "2"})
-
-    def test_single_pr_renders_without_attribution_heading(self):
-        prs = [{"number": 3, "title": "feat(core): add x", "body": "## Highlight\nOnly one."}]
-        rendered = notes._render_entries(prs, set())
-        self.assertEqual(
-            rendered,
-            "### ✨ Highlights\n<!-- project-toolkit:rich-release-notes pr=3 -->\nOnly one.",
-        )
-
-    def test_attribution_heading_normalizes_untrusted_titles(self):
-        self.assertEqual(notes._attribution(5, "fix!: drop List<String>\n  support"), "drop List&lt;String&gt; support (#5)")
-        self.assertEqual(notes._attribution(6, "Plain title"), "Plain title (#6)")
-        self.assertEqual(notes._attribution(7, "   "), "#7")
-        self.assertEqual(notes._attribution(8, "feat(a/b)!: thing"), "**a/b:** thing (#8)")
-    def test_untouched_pull_request_template_contributes_no_release_notes(self):
-        template = (ROOT / "modules/core/template/.github/pull_request_template.md.jinja").read_text(encoding="utf-8")
-        body = Environment(undefined=StrictUndefined).from_string(template).render()
-        for heading in ("Highlight", "Usage example", "Migration"):
-            self.assertIn(f"## {heading}\n", body)
-        self.assertEqual(notes.extract_rich_sections(body), {})
-        self.assertIn("\n## Checklist\n", body)
-        # Regression guard: the trailing checklist must never leak into release notes.
-        filled = body.replace("## Migration\n", "## Migration\nUpgrade steps.\n")
-        self.assertNotIn("Checklist", notes.extract_rich_sections(filled)["migration"])
-        self.assertNotIn("[ ]", notes.extract_rich_sections(filled)["migration"])
-        self.assertIn('Do not write "None"', body)
-        placeholder = notes.extract_rich_sections(body.replace("## Migration\n", "## Migration\nNone.\n"))
-        self.assertTrue(placeholder["migration"].startswith("None."))
-
-    def test_release_notes_section_is_ignored(self):
-        changelog = "## 1.0.0\n"
-        body = "## Release notes\n${{ github.token }}\n$(touch /tmp/pwned)\n"
-        output = notes.enrich_changelog(changelog, [{"number": 7, "body": body}])
-        self.assertNotIn("${{ github.token }}", output)
-        self.assertNotIn("$(touch /tmp/pwned)", output)
-        self.assertNotIn(notes.BLOCK_START, output)
-
-    def test_cli_writes_generated_markdown(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            changelog = root / "CHANGELOG.md"
-            prs = root / "prs.json"
-            changelog.write_text("## 1.0.0\n", encoding="utf-8")
-            prs.write_text('[{"number": 1, "body": "## Highlight\\nHello"}]', encoding="utf-8")
-            output = notes.enrich_changelog(changelog.read_text(), [{"number": 1, "body": "## Highlight\nHello"}])
-            changelog.write_text(output, encoding="utf-8")
-            self.assertIn("### ✨ Highlights", changelog.read_text())
-
     def test_headings_inside_fences_are_not_sections_or_versions(self):
         body = "## Usage example\n```java\n## Migration\n```\nAfter\n"
         self.assertIn("```java\n## Migration\n```\nAfter", notes.extract_rich_sections(body)["usage example"])
         self.assertNotIn("migration", notes.extract_rich_sections(body))
-        changelog = "## 1.0.0\n```md\n## fake\n```\n### Features\n- x\n## 0.9.0\n"
-        self.assertEqual(len(notes._version_ranges(changelog)), 2)
-
-    def test_release_body_block_is_replaced_once(self):
-        body = "## Generated\n" + notes.BLOCK_START + "\nold\n" + notes.BLOCK_END + "\nFooter\n"
-        updated = notes.enrich_release_body(body, "new\n```md\n## nested\n```")
-        self.assertEqual(updated.count(notes.BLOCK_START), 1)
-        self.assertIn("new", updated)
-        self.assertNotIn("old", updated)
-
-    def test_release_body_block_is_before_release_please_footer(self):
-        body = "## Generated notes\n\n---\nThis PR was generated with Release Please.\n"
-        updated = notes.enrich_release_body(body, "### Highlights\nNew")
-        self.assertLess(updated.index(notes.BLOCK_START), updated.index("\n---\n"))
-        self.assertIn("This PR was generated", updated)
-
-    def test_release_body_highlights_precede_release_please_sections_and_old_block_moves(self):
-        body = (
-            ":robot: release\n---\n\n"
-            "## 0.20.0\n\n### Features\n- feature\n\n### Bug Fixes\n- fix\n\n"
-            + notes.BLOCK_START + "\nold highlights\n" + notes.BLOCK_END + "\n---\nfooter\n"
-        )
-        updated = notes.enrich_release_body(body, "### ✨ Highlights\nNew highlights")
-        self.assertLess(updated.index("New highlights"), updated.index("### Features"))
-        self.assertLess(updated.index("New highlights"), updated.index("### Bug Fixes"))
-        self.assertLess(updated.index("New highlights"), updated.rindex("\n---\n"))
-        self.assertNotIn("old highlights", updated)
-        self.assertEqual(updated.count(notes.BLOCK_START), 1)
-        self.assertEqual(
-            notes.enrich_release_body(updated, "### ✨ Highlights\nNew highlights"),
-            updated,
-        )
-
-    def test_release_body_without_rich_content_is_byte_preserving(self):
-        body = "## 1.0.0\n\n---\nfooter\n\n"
-        self.assertEqual(notes.enrich_release_body(body, ""), body)
-
-    def test_component_blocks_are_inside_release_please_details(self):
-        body = (
-            ":robot: header\n---\n\n\n"
-            "<details><summary>backend: 1.2.3</summary>\n\n## 1.2.3\n\n</details>\n\n"
-            "<details><summary>frontend: 4.5.6</summary>\n\n## 4.5.6\n\n</details>\n\n"
-            "---\nfooter"
-        )
-        updated = notes.enrich_component_release_body(
-            body, {"backend": "Backend rich", "frontend": "Frontend rich"}
-        )
-        self.assertEqual(updated.count(notes.BLOCK_START), 2)
-        self.assertLess(updated.index("Backend rich"), updated.index("</details>"))
-        frontend_start = updated.index("<details><summary>frontend")
-        self.assertLess(updated.index("Frontend rich", frontend_start), updated.index("</details>", frontend_start))
-        self.assertEqual(
-            notes.enrich_component_release_body(
-                updated, {"backend": "Backend rich", "frontend": "Frontend rich"}
-            ),
-            updated,
-        )
-
-    def test_component_reruns_do_not_accumulate_blank_lines(self):
-        body = (
-            ":robot: header\n---\n\n\n"
-            "<details><summary>backend: 1.2.3</summary>\n\n## 1.2.3\n\n### Features\n\n* add api\n</details>\n\n"
-            "<details><summary>frontend: 4.5.6</summary>\n\n## 4.5.6\n\n</details>\n\n"
-            "---\nfooter"
-        )
-        rich = {"backend": "Backend rich", "frontend": "Frontend rich"}
-        first = notes.enrich_component_release_body(body, rich)
-        second = notes.enrich_component_release_body(first, rich)
-        self.assertEqual(notes.enrich_component_release_body(second, rich), first)
-        self.assertEqual(second, first)
-        self.assertIn(notes.BLOCK_END + "\n\n### Features", first)
-
-    def test_footer_insertion_reruns_do_not_accumulate_blank_lines(self):
-        block = notes.BLOCK_START + "\nrich\n" + notes.BLOCK_END
-        body = "## 1.0.0\n\nnotes\n\n---\nfooter\n"
-        first = notes._insert_rich_block(body, block)
-        removed = first.replace(block, "")
-        self.assertEqual(notes._insert_rich_block(removed, block), first)
-
-    def test_empty_rich_content_removes_stale_release_body_block(self):
-        body = (
-            ":robot: header\n---\nnotes\n\n"
-            + notes.BLOCK_START
-            + "\nstale\n"
-            + notes.BLOCK_END
-            + "\n---\nThis PR was generated with Release Please.\n"
-        )
-        updated = notes.enrich_release_body(body, "")
-        self.assertNotIn("stale", updated)
-        self.assertNotIn(notes.BLOCK_START, updated)
-        self.assertEqual(notes.enrich_release_body(updated, ""), updated)
-
-    def test_duplicate_source_records_render_once(self):
-        changelog = "## 1.0.0\n"
-        prs = [{"number": 7, "body": "## Highlight\nOne"}] * 2
-        output = notes.enrich_changelog(changelog, prs)
-        self.assertEqual(output.count("rich-release-notes pr=7"), 1)
-
-    def test_empty_sources_remove_existing_block(self):
-        changelog = "## 1.0.0\n\n" + notes.BLOCK_START + "\nold\n" + notes.BLOCK_END + "\n\n### Features\n- x\n"
-        updated = notes.enrich_changelog(changelog, [])
-        self.assertNotIn(notes.BLOCK_START, updated)
-        self.assertIn("### Features", updated)
-
-    def test_legacy_marker_cleanup_preserves_fenced_headings(self):
-        changelog = (
-            "## 1.0.0\n\n<!-- project-toolkit:rich-release-notes pr=1 -->\n"
-            "### Highlights\nold\n```md\n### Keep this\n```\n### Features\n- normal\n"
-        )
-        updated = notes.enrich_changelog(changelog, [])
-        self.assertNotIn("old", updated)
-        self.assertIn("### Features", updated)
-
-    def test_legacy_marker_cleanup_in_generated_helper_matches_root(self):
-        template = (ROOT / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
-        self.assertEqual(template, (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
-
-    def test_generated_helper_template_renders_without_changing_python_syntax(self):
-        template = (ROOT / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja").read_text(encoding="utf-8")
-        rendered = Environment(undefined=StrictUndefined).from_string(template).render()
-        self.assertEqual(rendered + "\n", (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8"))
+        text = "## 1.0.0\n```md\n## fake\n```\n### Features\n- x\n## 0.9.0\n"
+        self.assertEqual(len(notes._version_ranges(text)), 2)
 
     def test_nested_fences_require_matching_outer_length(self):
         body = "## Usage example\n````markdown\n```java\n## Migration\n```\n````\n## Migration\nApply it.\n"
         sections = notes.extract_rich_sections(body)
         self.assertIn("usage example", sections)
         self.assertIn("migration", sections)
-        changelog = "## 1.0.0\n````md\n## fake\n```\n````\n## 0.9.0\n"
-        self.assertEqual(len(notes._version_ranges(changelog)), 2)
+        text = "## 1.0.0\n````md\n## fake\n```\n````\n## 0.9.0\n"
+        self.assertEqual(len(notes._version_ranges(text)), 2)
 
-    def test_reserved_delimiters_in_pr_body_are_rejected(self):
-        body = f"## Highlight\nattacker {notes.BLOCK_END} tail"
-        output = notes.enrich_changelog("## 1.0.0\n", [{"number": 7, "body": body}])
-        self.assertNotIn(notes.BLOCK_START, output)
-        self.assertEqual(notes.enrich_changelog(output, [{"number": 7, "body": body}]), output)
+    def test_untouched_pull_request_template_contributes_no_release_notes(self):
+        template = (ROOT / "modules/core/template/.github/pull_request_template.md.jinja").read_text(encoding="utf-8")
+        body = Environment(undefined=StrictUndefined).from_string(template).render()
+        for heading in ("Release note", "Usage example", "Migration", "Description"):
+            self.assertIn(f"## {heading}\n", body)
+        self.assertLess(body.index("## Release note"), body.index("## Description"))
+        self.assertEqual(notes.extract_rich_sections(body), {})
+        # Regression guard: the reviewer sections must never leak into release notes.
+        filled = body.replace("## Migration\n", "## Migration\nUpgrade steps.\n")
+        migration = notes.extract_rich_sections(filled)["migration"]
+        self.assertTrue(migration.startswith("Upgrade steps."))
+        for leaked in ("Checklist", "[ ]", "For reviewers"):
+            self.assertNotIn(leaked, migration)
+        self.assertEqual(notes._neutralize(migration), "Upgrade steps.")
 
-    def test_reserved_delimiters_in_pr_title_are_rejected(self):
-        title = f"unsafe {notes.BLOCK_END} title"
-        prs = [{"number": 7, "title": title, "body": "## Highlight\ncontent"}]
-        output = notes.enrich_changelog("## 1.0.0\n", prs)
-        self.assertNotIn(notes.BLOCK_START, output)
-        self.assertEqual(notes.enrich_changelog(output, prs), output)
 
-    def test_legacy_marker_injection_in_title_or_body_is_rejected(self):
-        injected = "<!-- project-toolkit:rich-release-notes pr=999 -->"
-        for pr in (
-            {"number": 7, "title": injected, "body": "## Highlight\ncontent"},
-            {"number": 7, "title": "safe", "body": f"## Highlight\n{injected}"},
-        ):
-            with self.subTest(pr=pr):
-                output = notes.enrich_changelog("## 1.0.0\n", [pr])
-                self.assertNotIn(notes.BLOCK_START, output)
+class RenovateTests(TestCase):
+    def test_linked_change_cells_and_extra_columns(self):
+        body = (
+            "| Package | Change | [Age](https://x) |\n|---|---|---|\n"
+            "| [renovate](https://renovatebot.com) ([source](https://x)) "
+            "| [`44.190.2` → `44.192.2`](https://octochangelog.com/x) | ![age](https://x) |\n"
+        )
+        self.assertEqual(notes.renovate_rows(body), [("renovate", "44.190.2", "44.192.2")])
 
-    def test_plain_marker_lookalike_in_rich_text_is_rejected(self):
-        pr = {
-            "number": 7,
-            "title": "safe",
-            "body": "## Highlight\nproject-toolkit:rich-release-notes pr=999",
+    def test_grouped_table_keeps_digest_rows_and_ignores_later_tables(self):
+        body = (
+            "| Package | Update | Change |\n|---|---|---|\n"
+            "| [selenium/hub](https://x) | minor | `4.50.0-20261010` → `4.51.0-20261010` |\n"
+            "| [selenium/standalone-chromium](https://x) | digest | `2bc5a3e` → `ba9dde7` |\n"
+            "| [selenium/hub](https://x) | minor | `4.50.0-20261010` → `4.51.0-20261010` |\n\n"
+            "| Components | Package | Change |\n|---|---|---|\n| x | other | `1.0.0` → `2.0.0` |\n"
+        )
+        self.assertEqual(
+            notes.renovate_rows(body),
+            [
+                ("selenium/hub", "4.50.0-20261010", "4.51.0-20261010"),
+                ("selenium/standalone-chromium", "2bc5a3e", "ba9dde7"),
+            ],
+        )
+
+    def test_hostile_cells_are_rejected_and_rows_are_capped(self):
+        hostile = (
+            "| Package | Change |\n|---|---|\n"
+            "| <script>x</script> | `1.0.0` → `2.0.0` |\n"
+            "| ok | `1.0.0` → `<img src=x>` |\n"
+            "| [x](y) | not a change |\n"
+        )
+        self.assertEqual(notes.renovate_rows(hostile), [])
+        many = "| Package | Change |\n|---|---|\n" + "".join(
+            f"| pkg{index} | `1.0.{index}` → `1.0.{index + 1}` |\n" for index in range(80)
+        )
+        self.assertEqual(len(notes.renovate_rows(many)), notes.MAX_TABLE_ROWS)
+
+    def _entry(self, number: int, title: str, body: str = "", merged_at: str = "") -> Any:
+        return notes.make_entry(number, {"title": title, "body": body, "merged_at": merged_at})
+
+    def test_from_is_the_earliest_and_to_the_latest_bump(self):
+        table = "| Package | Change |\n|---|---|\n| [q4j](https://x) | `{old}` → `{new}` |\n"
+        entries = [
+            self._entry(26, "fix(deps): update q4j to v0.12.2", table.format(old="0.12.1", new="0.12.2"), "2026-11-03"),
+            self._entry(18, "fix(deps): update q4j to v0.10.0", table.format(old="0.9.0", new="0.10.0"), "2026-11-01"),
+            self._entry(21, "fix(deps): update q4j to v0.11.0", table.format(old="0.10.0", new="0.11.0"), "2026-11-02"),
+        ]
+        lines, rest = notes.dependency_lines(entries, lambda number: f"#{number}")
+        self.assertEqual(rest, [])
+        self.assertEqual(lines, ["- q4j 0.9.0 → 0.12.2 (#18, #21, #26)"])
+
+    def test_digest_update_folds_into_the_version_bump_of_the_same_image(self):
+        entries = [
+            self._entry(
+                767, "deps(docker-compose): update mongo:9.0.2 docker digest to f5c6240",
+                "| Package | Update | Change |\n|---|---|---|\n| [mongo](https://x) | digest | `bac22ea` → `f5c6240` |\n",
+            ),
+            self._entry(
+                768, "deps(docker-compose): update mongo docker tag to v9.0.4",
+                "| Package | Update | Change |\n|---|---|---|\n| [mongo](https://x) | patch | `9.0.2` → `9.0.4` |\n",
+            ),
+        ]
+        lines, _ = notes.dependency_lines(entries, lambda number: f"#{number}")
+        self.assertEqual(lines, ["- mongo 9.0.2 → 9.0.4 (#767, #768)"])
+
+    def test_digest_only_update_keeps_the_digests(self):
+        entry = self._entry(
+            9, "deps(github-actions): update actions/checkout digest to 33d7b85",
+            "| Package | Change |\n|---|---|\n| actions/checkout | `9b32540` → `33d7b85` |\n",
+        )
+        self.assertEqual(
+            notes.dependency_lines([entry], lambda number: f"#{number}")[0],
+            ["- actions/checkout 9b32540 → 33d7b85 (#9)"],
+        )
+
+    def test_major_bumps_are_flagged(self):
+        table = "| Package | Change |\n|---|---|\n| [{name}](https://x) | `{old}` → `{new}` |\n"
+        entries = [
+            self._entry(27, "deps(gradle): update io.github.classgraph:classgraph to v5",
+                        table.format(name="io.github.classgraph:classgraph", old="4.8.199", new="5.0.2")),
+            self._entry(28, "deps(github-actions): update actions/setup-java action to v6",
+                        table.format(name="actions/setup-java", old="v5.2.0", new="v6.0.0")),
+            self._entry(29, "deps(deps): update python to 3.15", table.format(name="python", old="3.14", new="3.15")),
+            self._entry(30, "deps: update q4j to v0.12.0", table.format(name="q4j", old="0.9.0", new="0.12.0")),
+        ]
+        lines, _ = notes.dependency_lines(entries, lambda number: f"#{number}")
+        self.assertEqual(lines, [
+            "- actions/setup-java v5.2.0 → v6.0.0 · major (#28)",
+            "- io.github.classgraph:classgraph 4.8.199 → 5.0.2 · major (#27)",
+            "- python 3.14 → 3.15 (#29)",
+            "- q4j 0.9.0 → 0.12.0 (#30)",
+        ])
+
+    def test_title_without_table_and_grouped_title_without_table(self):
+        lines, rest = notes.dependency_lines(
+            [
+                self._entry(5, "deps(uv): update uv to v0.13.7"),
+                self._entry(6, "deps(github-actions): update github actions non-major updates"),
+            ],
+            lambda number: f"#{number}",
+        )
+        self.assertEqual(lines, ["- uv → v0.13.7 (#5)"])
+        self.assertEqual([entry.number for entry in rest], [6])
+
+
+class RenderTests(TestCase):
+    def test_old_prs_without_new_sections_render_from_their_titles(self):
+        text = changelog(
+            ("✨ Features", [rp_line(3, "**core:** add x")]),
+            ("🐛 Bug Fixes", [rp_line(4, "fix y")]),
+        )
+        rendered = render(text, {
+            3: {"title": "feat(core): add x", "body": "## Summary\nLong reviewer text.\n## Test plan\n- ran"},
+            4: {"title": "fix: fix y", "body": ""},
+        })
+        self.assertIn(f"### ✨ New\n\n- **core:** add x ({LINK(3)})", rendered)
+        self.assertIn(f"### 🐛 Fixed\n\n- fix y ({LINK(4)})", rendered)
+        self.assertNotIn("reviewer", rendered)
+
+    def test_release_note_then_highlight_then_title(self):
+        text = changelog(("Features", [rp_line(1, "a"), rp_line(2, "b"), rp_line(3, "c")]))
+        rendered = render(text, {
+            1: {"title": "feat(a): a", "body": "## Release note\nNew text.\n## Highlight\nOld text."},
+            2: {"title": "feat(b): b", "body": "## Highlight\n**Bold** legacy\nhighlight."},
+            3: {"title": "feat(c): c", "body": ""},
+        })
+        self.assertIn(f"- **a:** a — New text. ({LINK(1)})", rendered)
+        self.assertNotIn("Old text", rendered)
+        self.assertIn(f"- **b:** b — **Bold** legacy highlight. ({LINK(2)})", rendered)
+        self.assertIn(f"- **c:** c ({LINK(3)})", rendered)
+
+    def test_usage_example_renders_as_an_indented_block_under_its_bullet(self):
+        text = changelog(("Features", [rp_line(1, "a")]))
+        rendered = render(text, {1: {"title": "feat(a): a", "body": "## Usage example\n```yaml\n- uses: x\n```"}})
+        self.assertIn(f"- **a:** a ({LINK(1)})\n  ```yaml\n  - uses: x\n  ```", rendered)
+
+    def test_glance_line_omits_zero_parts_and_follows_the_marker(self):
+        text = changelog(
+            ("Features", [rp_line(1, "a")]),
+            ("📦 Dependencies", [rp_line(2, "update x to v2")]),
+        )
+        rendered = render(text, {1: {"title": "feat: a"}, 2: {"title": "deps(npm): update x to v2"}})
+        self.assertTrue(rendered.startswith(notes.NOTES_MARKER + "\n**At a glance:** 1 new · 1 internal\n"))
+
+    def test_internal_label_demotes_a_fix_and_security_updates_are_fixed(self):
+        text = changelog(("Bug Fixes", [rp_line(1, "retry"), rp_line(2, "update lib to v1.2.4 [security]")]))
+        rendered = render(text, {
+            1: {"title": "fix(rollout): retry", "labels": [{"name": "release-notes: internal"}]},
+            2: {"title": "fix(deps): update lib to v1.2.4 [security]",
+                "body": "| Package | Change |\n|---|---|\n| lib | `1.2.3` → `1.2.4` |\n"},
+        })
+        fixed = rendered[rendered.index("### 🐛 Fixed"):rendered.index("<details>")]
+        self.assertIn("- lib 1.2.3 → 1.2.4", fixed)
+        self.assertNotIn("retry", fixed)
+        self.assertIn("**rollout:** retry", rendered[rendered.index("<details>"):])
+
+    def test_dependency_pr_with_an_authored_note_is_not_grouped_away(self):
+        text = changelog(("Bug Fixes", [rp_line(1, "update lib to v2")]))
+        rendered = render(text, {1: {
+            "title": "fix(deps): update lib to v2",
+            "body": "## Release note\nLib 2 fixes the crash on start.\n| Package | Change |\n|---|---|\n| lib | `1.0.0` → `2.0.0` |\n",
+        }})
+        self.assertIn("Lib 2 fixes the crash on start.", rendered)
+
+    def test_breaking_pr_is_not_repeated_and_migration_replaces_the_footer(self):
+        text = changelog(
+            ("⚠ BREAKING CHANGES", [
+                "* the old API is removed",
+                rp_line(9, "**api:** drop v1 endpoints", commit=False),
+            ]),
+            ("Features", [rp_line(8, "replace the gate"), rp_line(9, "**api:** drop v1 endpoints")]),
+        )
+        rendered = render(text, {
+            8: {"title": "feat!: replace the gate", "body": "## Migration\n1. Run the update.\n2. Apply the plugin."},
+            9: {"title": "feat(api)!: drop v1 endpoints", "body": ""},
+        })
+        self.assertEqual(rendered.count(f"({LINK(8)})"), 1)
+        self.assertEqual(rendered.count(f"({LINK(9)})"), 1)
+        self.assertNotIn("### ✨ New", rendered)
+        self.assertIn("> [!WARNING]\n> replace the gate", rendered)
+        self.assertIn("> 1. Run the update.\n> 2. Apply the plugin.", rendered)
+        self.assertNotIn("the old API is removed", rendered)
+        self.assertIn("**At a glance:** ⚠️ 2 breaking", rendered)
+
+    def test_breaking_footer_without_migration_is_kept(self):
+        text = changelog(
+            ("⚠ BREAKING CHANGES", ["* the old API is removed"]),
+            ("Features", [rp_line(8, "replace the gate")]),
+        )
+        rendered = render(text, {8: {"title": "feat!: replace the gate", "body": ""}})
+        self.assertIn("> replace the gate", rendered)
+        self.assertIn("> the old API is removed", rendered)
+
+    def test_unattributed_lines_stay_visible(self):
+        text = changelog(
+            ("Features", ["* direct push without a PR ([abcdef0](https://github.com/acme/widget/commit/" + "a" * 40 + "))"]),
+            ("Mystery", ["* something release please printed"]),
+            ("⚠ BREAKING CHANGES", ["* footer one", "* footer two"]),
+        )
+        rendered = render(text, {})
+        self.assertIn("### ✨ New\n\n- direct push without a PR", rendered)
+        self.assertNotIn("/commit/", rendered)
+        self.assertIn("- something release please printed", rendered)
+        self.assertIn("> footer one", rendered)
+        self.assertIn("> footer two", rendered)
+
+    def test_hidden_commits_are_listed_internally_only(self):
+        text = changelog(("Features", [rp_line(1, "a")]))
+        rendered = render(text, {1: {"title": "feat: a"}}, hidden=[
+            {"number": 2, "title": "ci(validate): split jobs"},
+            {"number": 3, "title": "feat: something release please did not list"},
+            {"number": 1, "title": "feat: a"},
+        ])
+        internal = rendered[rendered.index("<details>"):]
+        self.assertIn("**validate:** split jobs", internal)
+        self.assertIn("something release please did not list", internal)
+        self.assertEqual(rendered.count(LINK(1)), 1)
+        self.assertIn("Internal changes (2 PRs)", rendered)
+
+    def test_identical_subjects_merge_and_refs_compress(self):
+        text = changelog(("Chores", [rp_line(number, "**template:** update shared project template") for number in (4, 5, 6, 7, 9)]))
+        rendered = render(text, {
+            number: {"title": "chore(template): update shared project template"} for number in (4, 5, 6, 7, 9)
+        })
+        self.assertIn(f"- **template:** update shared project template ({LINK(4)}–{LINK(7)}, {LINK(9)})", rendered)
+        self.assertEqual(notes.compress_refs([1, 2, 4, 5, 6, 9], str), "1, 2, 4–6, 9")
+
+    def test_untrusted_titles_are_escaped(self):
+        text = changelog(("Features", [rp_line(1, "a")]))
+        rendered = render(text, {1: {"title": "feat: drop List<String>\n  support <details><summary>x: 9.9.9</summary>"}})
+        self.assertIn("drop List&lt;String&gt; support &lt;details&gt;&lt;summary&gt;", rendered)
+        self.assertNotIn("<details><summary>x", rendered)
+
+    def test_an_oversized_internal_list_collapses_to_a_pointer(self):
+        entries = [notes.Entry(number, "chore", "area", f"maintenance task number {number} " + "x" * 80)
+                   for number in range(1, 1000, 2)]
+        entries.append(notes.Entry(2000, "feat", "core", "the visible change"))
+        rendered = notes.render_notes(entries, [], LINK)
+        self.assertLess(len(rendered), notes.MAX_NOTES_LENGTH)
+        self.assertIn("- **core:** the visible change", rendered)
+        self.assertIn("Internal changes (500 PRs)</summary>\n\nToo many to list here", rendered)
+
+    def test_internal_only_release_renders_one_collapsed_block(self):
+        text = changelog(("📦 Dependencies", [rp_line(2, "**npm:** update x to v2")]))
+        rendered = render(text, {2: {"title": "deps(npm): update x to v2"}})
+        self.assertNotIn("###", rendered)
+        self.assertIn("<details><summary>Internal changes (1 PR)</summary>", rendered)
+
+
+class RegressionTests(TestCase):
+    """Regression guards for the failure modes the release-notes redesign must not repeat."""
+
+    def test_regression_migration_and_release_note_text_is_never_lost(self):
+        hostile = (
+            "Step 1: run it.\n\n---\n\n<details><summary>widget: 9.9.9</summary>\nhidden?\n</details>\n\n"
+            "```md\n## not a version\n<!-- kept in code -->\n```\n<!-- authoring comment -->\nLast line."
+        )
+        cases = {
+            "feat with migration": ("feat(a): add", {"title": "feat(a): add", "body": "## Migration\n" + hostile}),
+            "breaking": ("feat(a)!: remove", {"title": "feat(a)!: remove", "body": "## Breaking change\n" + hostile}),
+            "internal with migration": ("chore(a): move", {"title": "chore(a): move", "body": "## Migration\n" + hostile}),
+            "internal label": ("fix(a): fix", {
+                "title": "fix(a): fix", "labels": ["release-notes: internal"], "body": "## Migration\n" + hostile,
+            }),
+            "release note": ("feat(a): add", {"title": "feat(a): add", "body": "## Release note\n" + hostile}),
         }
-        output = notes.enrich_changelog("## 1.0.0\n", [pr])
-        self.assertNotIn(notes.BLOCK_START, output)
-        self.assertEqual(notes._rich_numbers(output), set())
+        for name, (subject, source) in cases.items():
+            with self.subTest(name):
+                text = changelog(("Features", [rp_line(1, subject)]))
+                updated, rendered = notes.render_changelog(text, REPO, {1: source})
+                for words in ("Step 1: run it.", "hidden?", "## not a version", "Last line.", "widget: 9.9.9"):
+                    self.assertIn(words, rendered)
+                self.assertNotIn("authoring comment", rendered)
+                self.assertNotIn("<details><summary>widget", rendered)
+                self.assertEqual(len(notes._version_ranges(updated)), 2)
+                self.assertEqual(notes.render_changelog(updated, REPO, {1: source}), (updated, rendered))
 
-    def test_workflow_parser_contract_tracks_nested_fences_and_rich_block(self):
-        workflow = (ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8")
-        self.assertNotIn("python - <<'PY'", workflow)
-        self.assertNotIn("baseRepository", workflow)
-        self.assertNotIn("--slurp", workflow)
-        self.assertEqual(workflow.count("uses: actions/checkout@"), 4)
-        self.assertEqual(workflow.count("name: Prepare enriched release notes"), 1)
-        self.assertIn("ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}", workflow)
-        self.assertIn('python "$ENRICHMENT_SCRIPT" "${arguments[@]}"', workflow)
+    def test_regression_migration_survives_on_every_golden_sample(self):
+        for name in SAMPLES:
+            _, _, sources, _, _ = load_sample(name)
+            _, body, rendered = render_sample(name)
+            for number, source in sources.items():
+                sections = notes.extract_rich_sections(source["body"])
+                for key in ("migration", "release note", "highlight"):
+                    for line in sections.get(key, "").splitlines():
+                        if line.strip():
+                            with self.subTest(sample=name, pr=number, line=line[:40]):
+                                self.assertIn(line.strip(), rendered)
 
-    def test_standard_attribution_rejects_a_second_pr_like_title_link(self):
+    def test_regression_summary_text_never_contains_a_version_triple(self):
+        rendered_samples = [render_sample(name)[1] for name in SAMPLES]
+        for body in rendered_samples:
+            for summary in re.findall(r"<summary>(.*?)</summary>", body):
+                self.assertIsNone(VERSION_TRIPLE.search(summary), summary)
+        for count in (0, 1, 2, 3, 12, 123, 999_999):
+            entries = [notes.Entry(number, "chore", None, "x.1.2.3 1.2.3") for number in range(1, count + 2)]
+            output = notes.render_notes(entries, [], LINK)
+            for summary in re.findall(r"<summary>(.*?)</summary>", output):
+                self.assertIsNone(VERSION_TRIPLE.search(summary), summary)
+
+    def test_regression_reruns_are_a_fixed_point(self):
+        for name in SAMPLES:
+            with self.subTest(name):
+                text, body, sources, hidden, types = load_sample(name)
+                first, rendered = notes.render_changelog(text, SAMPLES[name], sources, section_types=types, hidden=hidden)
+                second, again = notes.render_changelog(first, SAMPLES[name], {}, section_types=types)
+                self.assertEqual((first, rendered), (second, again))
+                heading = notes.top_section(first)[2].split("\n", 1)[0]
+                once = notes.replace_body_notes(body, heading, rendered)
+                self.assertEqual(notes.replace_body_notes(once, heading, again), once)
+
+    def test_regression_breaking_pr_is_listed_once(self):
+        for name, number in (("q4j-755", 801), ("java-test-automation-template-20", 53)):
+            rendered = render_sample(name)[2]
+            self.assertEqual(rendered.count(f"[#{number}]("), 1, name)
+            self.assertNotIn("### ✨ New", rendered)
+
+    def test_regression_old_prs_render_from_titles(self):
+        rendered = render_sample("ci-kit-534")[2]
+        self.assertIn("- **allure:** fail component mode when results are not at the artifact root ([#546](", rendered)
+        self.assertNotIn("Test plan", rendered)
+
+
+class GoldenTests(TestCase):
+    def test_golden_release_bodies_and_changelogs(self):
+        for name in SAMPLES:
+            with self.subTest(name):
+                updated, body, rendered = render_sample(name)
+                directory = FIXTURES / name
+                self.assertEqual(body, (directory / "expected-release-pr-body.md").read_text(encoding="utf-8"))
+                self.assertEqual(updated, (directory / "expected-CHANGELOG.md").read_text(encoding="utf-8"))
+
+    def test_changelog_top_section_and_release_body_notes_are_byte_identical(self):
+        for name in SAMPLES:
+            with self.subTest(name):
+                updated, body, rendered = render_sample(name)
+                top = notes.top_section(updated)[2]
+                lines = body.split("\n")
+                content = "\n".join(lines[lines.index("---") + 1 : len(lines) - 1 - lines[::-1].index("---")]).strip()
+                self.assertEqual(content, top.strip())
+                self.assertEqual(notes.rendered_notes_of(top), rendered)
+
+    def test_golden_structure_matches_the_spec(self):
+        for name in SAMPLES:
+            with self.subTest(name):
+                original_changelog = (FIXTURES / name / "CHANGELOG.md").read_text(encoding="utf-8")
+                updated, body, rendered = render_sample(name)
+                self.assertNotIn("/commit/", rendered)
+                self.assertNotIn("/issues/", rendered)
+                self.assertTrue(rendered.startswith(notes.NOTES_MARKER + "\n**At a glance:** "))
+                self.assertTrue(rendered.rstrip().endswith("</details>"))
+                self.assertEqual(rendered.count("<details>"), 1)
+                self.assertNotIn(notes.BLOCK_START, body)
+                self.assertNotIn("rich-release-notes", body)
+                older = original_changelog[notes.top_section(original_changelog)[1]:]
+                self.assertTrue(updated.endswith(older))
+                self.assertLess(len(body.encode()), len((FIXTURES / name / "release-pr-body.md").read_bytes()))
+
+    def test_template_sample_covers_every_listed_and_hidden_pr(self):
+        for name in SAMPLES:
+            _, _, sources, hidden, _ = load_sample(name)
+            rendered = render_sample(name)[2]
+            referenced = set()
+            for start, end in re.findall(r"\[#(\d+)\]\([^)]*\)(?:–\[#(\d+)\])?", rendered):
+                referenced.update(range(int(start), int(end or start) + 1))
+            expected = set(sources) | {commit["number"] for commit in hidden}
+            self.assertLessEqual(expected, referenced, name)
+
+
+class BodyTests(TestCase):
+    def test_single_body_notes_are_replaced_between_heading_and_footer(self):
+        text = changelog(("Features", [rp_line(1, "a")]))
+        updated, rendered = notes.render_changelog(text, REPO, {1: {"title": "feat: a"}})
+        heading = notes.top_section(updated)[2].split("\n", 1)[0]
+        body = notes.replace_body_notes(body_for(text), heading, rendered)
+        self.assertTrue(body.startswith(":robot: I have created a release *beep* *boop*\n---\n\n\n## [1.1.0]"))
+        self.assertTrue(body.endswith("</details>\n\n---\nThis PR was generated with [Release Please](https://github.com/googleapis/release-please).\n")
+                        or body.endswith(f"({LINK(1)})\n\n---\nThis PR was generated with [Release Please](https://github.com/googleapis/release-please).\n"))
+        self.assertNotIn("/commit/", body)
+
+    def test_body_heading_must_match_the_changelog(self):
+        text = changelog(("Features", [rp_line(1, "a")]))
+        with self.assertRaisesRegex(notes.EnrichmentError, "disagree"):
+            notes.replace_body_notes(body_for(text).replace("1.1.0", "1.2.0"), notes.top_section(text)[2].split("\n")[0], "x")
+
+    def test_component_bodies_keep_nested_internal_details_inside_their_component(self):
+        body = (
+            ":robot: header\n---\n\n\n"
+            "<details><summary>backend: 1.1.0</summary>\n\n## [1.1.0](https://x) (2026-11-07)\n\n### Features\n\n* a\n</details>\n\n"
+            "<details><summary>frontend: 2.0.0</summary>\n\n## [2.0.0](https://y) (2026-11-07)\n\n* b\n</details>\n\n"
+            "---\nfooter\n"
+        )
+        rendered = notes.NOTES_MARKER + "\n\n<details><summary>Internal changes (1 PR)</summary>\n\n- x\n\n</details>"
+        updated = notes.replace_component_notes(body, {
+            "backend": ("## [1.1.0](https://x) (2026-11-07)", rendered),
+            "frontend": ("## [2.0.0](https://y) (2026-11-07)", rendered.replace("- x", "- y")),
+        })
+        self.assertEqual(notes.release_body_components(updated), {"backend", "frontend"})
+        again = notes.replace_component_notes(updated, {
+            "backend": ("## [1.1.0](https://x) (2026-11-07)", rendered),
+            "frontend": ("## [2.0.0](https://y) (2026-11-07)", rendered.replace("- x", "- y")),
+        })
+        self.assertEqual(again, updated)
+        backend = updated[: updated.index("frontend: 2.0.0")]
+        self.assertIn("- x", backend)
+        self.assertNotIn("- y", backend)
+        with self.assertRaisesRegex(notes.EnrichmentError, "missing configured component"):
+            notes.replace_component_notes(body, {"worker": ("## 1", "x")})
+
+    def test_v1_rich_block_is_migrated_out_of_the_top_version(self):
+        text = changelog(("Features", [rp_line(1, "a")])).replace(
+            "(2026-11-07)\n\n",
+            "(2026-11-07)\n\n" + notes.BLOCK_START + "\n### 🔄 Migration\n<!-- project-toolkit:rich-release-notes pr=1 -->\nold\n"
+            + notes.BLOCK_END + "\n\n",
+            1,
+        )
+        rendered = render(text, {1: {"title": "feat: a", "body": "## Migration\nnew steps"}})
+        self.assertNotIn("old", rendered)
+        self.assertIn("new steps", rendered)
+
+    def test_legacy_marker_cleanup_preserves_fenced_headings(self):
+        top = "## 1.0.0\n\n<!-- project-toolkit:rich-release-notes pr=1 -->\n### Highlights\nold\n```md\n### Keep this\n```\n### Features\n- normal\n"
+        stripped = notes._strip_legacy(top)
+        self.assertNotIn("old", stripped)
+        self.assertIn("### Features", stripped)
+
+
+class DiscoveryTests(TestCase):
+    def test_standard_attribution_uses_only_the_trailing_link(self):
         commit = "a" * 40
-        changelog = (
+        text = (
             "## 1.2.3\n\n### Features\n"
             "* title [#99](https://github.com/acme/widget/pull/99) "
             "([#7](https://github.com/acme/widget/issues/7)) "
             f"([abcdef0](https://github.com/acme/widget/commit/{commit}))\n"
         )
-        self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [7])
+        self.assertEqual(notes.source_pr_numbers(text, REPO), [7])
 
     def test_source_discovery_ignores_fences_machine_blocks_and_older_versions(self):
         commit = "b" * 40
@@ -390,214 +593,244 @@ class RichNotesTests(TestCase):
             "* valid ([#8](https://github.com/acme/widget/pull/8)) "
             f"([abcdef1](https://github.com/acme/widget/commit/{commit}))\n"
         )
-        changelog = (
+        text = (
             "## 2.0.0\n````md\n```java\n## fake\n```\n````\n"
-            + notes.BLOCK_START
-            + "\n"
-            + canonical.replace("#8", "#9").replace("/8", "/9")
-            + notes.BLOCK_END
-            + "\n"
-            + canonical
-            + "## 1.0.0\n"
-            + canonical.replace("#8", "#10").replace("/8", "/10")
+            + notes.BLOCK_START + "\n" + canonical.replace("#8", "#9").replace("/8", "/9") + notes.BLOCK_END + "\n"
+            + canonical + "## 1.0.0\n" + canonical.replace("#8", "#10").replace("/8", "/10")
         )
-        self.assertEqual(notes.source_pr_numbers(changelog, "acme/widget"), [8])
+        self.assertEqual(notes.source_pr_numbers(text, REPO), [8])
 
-    def test_rich_number_parser_accepts_only_machine_marker_shapes(self):
-        marker = "<!-- project-toolkit:rich-release-notes pr=999 -->"
-        text = "\n".join(
-            [
-                marker,
-                f"- generated dependency {marker}",
-                f"literal documentation example: {marker} trailing text",
-                f"- malformed {marker} trailing text",
-                f"- multiple {marker} {marker}",
-                "```md",
-                marker,
-                f"- fenced dependency {marker}",
-                "```",
-            ]
-        )
-        self.assertEqual(notes._rich_numbers(text), {"999"})
+    def test_previous_tag_from_compare_link(self):
+        heading = f"## [1.1.0](https://github.com/{REPO}/compare/v1.0.0...v1.1.0) (2026-11-07)"
+        self.assertEqual(notes.previous_tag(heading, REPO), "v1.0.0")
         self.assertEqual(
-            notes._rich_numbers(
-                f"literal documentation example: {marker} trailing text\n"
-                f"- malformed {marker} trailing text\n"
-                f"- multiple {marker} {marker}"
-            ),
-            set(),
+            notes.previous_tag(f"## [1.1.0](https://github.com/{REPO}/compare/backend-v1.0.0...backend-v1.1.0) (x)", REPO),
+            "backend-v1.0.0",
         )
-
-    def test_documentation_marker_substring_does_not_suppress_current_pr(self):
-        changelog = (
-            "## 1.0.0\n\n"
-            "literal documentation example: "
-            "<!-- project-toolkit:rich-release-notes pr=999 --> trailing text\n"
-        )
-        prs = [{"number": 999, "title": "Current highlight", "body": "## Highlight\nCurrent note"}]
-        output = notes.enrich_changelog(changelog, prs)
-        self.assertIn("Current note", output)
-        self.assertIn("rich-release-notes pr=999", output)
+        self.assertIsNone(notes.previous_tag("## 1.0.0 (2026-11-07)", REPO))
+        self.assertIsNone(notes.previous_tag(heading.replace(REPO, "evil/repo"), REPO))
+        with self.assertRaises(notes.EnrichmentError):
+            notes.previous_tag(f"## [1](https://github.com/{REPO}/compare/-x;rm...v1)", REPO)
 
     def test_manifest_discovers_package_local_and_root_relative_changelogs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = root / "config.json"
             manifest = root / "manifest.json"
-            config.write_text(
-                json.dumps(
-                    {
-                        "changelog-path": "CHANGELOG.md",
-                        "packages": {
-                            "backend": {"package-name": "backend"},
-                            "frontend": {"package-name": "frontend", "changelog-path": "docs/NEWS.md"},
-                            "worker": {"package-name": "worker", "changelog-path": "/WORKER.md"},
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            manifest.write_text(
-                json.dumps({"backend": "1.0.0", "frontend": "2.0.0", "worker": "3.0.0"}),
-                encoding="utf-8",
-            )
-            paths = notes.discover_changelog_paths(
-                mode="manifest",
-                package_path=".",
-                config_file=config,
-                manifest_file=manifest,
-                config_backed_single=False,
+            config.write_text(json.dumps({
+                "changelog-path": "CHANGELOG.md",
+                "packages": {
+                    "backend": {"package-name": "backend"},
+                    "frontend": {"package-name": "frontend", "changelog-path": "docs/NEWS.md"},
+                    "worker": {"package-name": "worker", "changelog-path": "/WORKER.md"},
+                },
+            }), encoding="utf-8")
+            manifest.write_text(json.dumps({"backend": "1.0.0", "frontend": "2.0.0", "worker": "3.0.0"}), encoding="utf-8")
+            targets = notes.discover_targets(
+                mode="manifest", package_path=".", config_file=config, manifest_file=manifest, config_backed_single=False,
             )
         self.assertEqual(
-            [path.as_posix() for path in paths],
-            ["WORKER.md", "backend/CHANGELOG.md", "frontend/docs/NEWS.md"],
+            [(target.changelog.as_posix(), target.package.as_posix()) for target in targets],
+            [("backend/CHANGELOG.md", "backend"), ("frontend/docs/NEWS.md", "frontend"), ("WORKER.md", "worker")],
         )
 
     def test_legacy_single_path_does_not_require_config(self):
         paths = notes.discover_changelog_paths(
-            mode="single",
-            package_path="package",
-            config_file=Path("missing-config.json"),
-            manifest_file=Path("missing-manifest.json"),
-            config_backed_single=False,
+            mode="single", package_path="package", config_file=Path("missing-config.json"),
+            manifest_file=Path("missing-manifest.json"), config_backed_single=False,
         )
         self.assertEqual(paths, [Path("package/CHANGELOG.md")])
 
-    def test_generated_helper_is_the_same_behavioral_contract(self):
-        generated = ROOT / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja"
-        self.assertEqual(generated.read_bytes(), (ROOT / "scripts/enrich_release_notes.py").read_bytes())
-        compile(generated.read_text(encoding="utf-8"), str(generated), "exec")
+    def test_unsafe_paths_are_rejected(self):
+        for value in ("../x", "/etc", "a b", "a/../b", ""):
+            with self.subTest(value), self.assertRaises(notes.EnrichmentError):
+                notes._safe_relative_path(value, label="path")
 
-    def test_generated_release_body_placement_and_rerun_match_root(self):
-        namespace: dict[str, Any] = {"__name__": "generated_helper"}
-        generated = ROOT / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja"
-        exec(compile(generated.read_text(encoding="utf-8"), str(generated), "exec"), namespace)
-        body = ":robot: header\n---\nnotes\n---\nThis PR was generated with Release Please.\n"
-        enrich_body = cast(Callable[[str, str], str], namespace["enrich_release_body"])
-        first = enrich_body(body, "### Highlights\nNew")
-        second = enrich_body(first, "### Highlights\nNew")
-        self.assertEqual(first, second)
-        self.assertLess(first.index(notes.BLOCK_START), first.rindex("\n---\n"))
-        self.assertTrue(first.startswith(":robot: header\n---\nnotes"))
-        self.assertTrue(first.endswith("This PR was generated with Release Please.\n"))
 
-    def test_prepare_fails_closed_for_zero_or_multiple_release_prs(self):
+class HiddenCommitTests(TestCase):
+    def _git(self, root: Path, *arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *arguments],
+            cwd=root, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def test_regression_hidden_commits_are_anchored_at_the_release_pr_base_sha(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            release_prs = root / "prs.json"
-            for payload in ([], [{"number": 1}, {"number": 2}]):
-                release_prs.write_text(json.dumps(payload), encoding="utf-8")
-                with self.assertRaisesRegex(notes.EnrichmentError, "exactly one"):
-                    notes.prepare_release_enrichment(
-                        repository="acme/widget",
-                        release_prs_file=release_prs,
-                        mode="single",
-                        package_path=".",
-                        config_file=root / "config.json",
-                        manifest_file=root / "manifest.json",
-                        config_backed_single=False,
-                        output_directory=root / "output",
-                    )
+            self._git(root, "init", "-q", "-b", "main")
+            (root / "pkg").mkdir()
 
-    def test_prepare_rejects_unmerged_or_cross_repository_source_pr(self):
-        release = {
-            "number": 50,
-            "body": "notes",
-            "head": {"repo": {"full_name": "acme/widget"}},
-            "base": {"repo": {"full_name": "acme/widget"}},
-        }
-        source = {
-            "number": 7,
-            "state": "open",
-            "merged_at": None,
-            "title": "source",
-            "body": "## Highlight\nnew",
-            "head": {"repo": {"full_name": "acme/widget"}},
-            "base": {"repo": {"full_name": "acme/widget"}},
-        }
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / "CHANGELOG.md").write_text(self._changelog(7), encoding="utf-8")
-            (root / "prs.json").write_text('[{"number": 50}]', encoding="utf-8")
-            with (
-                mock.patch.object(notes, "_run_gh"),
-                mock.patch.object(notes, "_gh_json", side_effect=[release, source]),
-            ):
-                previous = Path.cwd()
-                os.chdir(root)
-                try:
-                    with self.assertRaisesRegex(notes.EnrichmentError, "not merged"):
-                        notes.prepare_release_enrichment(
-                            repository="acme/widget",
-                            release_prs_file=root / "prs.json",
-                            mode="single",
-                            package_path=".",
-                            config_file=root / "config.json",
-                            manifest_file=root / "manifest.json",
-                            config_backed_single=False,
-                            output_directory=root / "output",
-                        )
-                finally:
-                    os.chdir(previous)
+            def commit(message: str, path: str = "file") -> str:
+                (root / path).write_text(message, encoding="utf-8")
+                self._git(root, "add", ".")
+                self._git(root, "commit", "-qm", message)
+                return self._git(root, "rev-parse", "HEAD")
 
+            commit("chore(main): release 1.0.0 (#10)")
+            self._git(root, "tag", "v1.0.0")
+            commit("ci(validate): split jobs (#11)")
+            commit("feat: listed by release please (#12)")
+            commit("docs: outside the package (#13)")
+            commit("test(pkg): cover the package (#14)", "pkg/file")
+            commit("chore(main): release 1.1.0 (#15)")
+            commit("direct push without a PR number")
+            base = commit("docs: merged after the release PR base (#16)")
+            later = self._git(root, "rev-parse", "HEAD~1")
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                everything = notes.hidden_commits(previous="v1.0.0", base_sha=later, package=Path("."), listed=[12])
+                package = notes.hidden_commits(previous="v1.0.0", base_sha=later, package=Path("pkg"), listed=[])
+                with self.assertRaises(notes.EnrichmentError):
+                    notes.hidden_commits(previous="v1.0.0", base_sha="HEAD", package=Path("."), listed=[])
+                with self.assertRaises(notes.EnrichmentError):
+                    notes.hidden_commits(previous="--output=/tmp/x", base_sha=base, package=Path("."), listed=[])
+                with self.assertRaises(notes.EnrichmentError):
+                    notes.hidden_commits(previous="v9.9.9", base_sha=base, package=Path("."), listed=[])
+            finally:
+                os.chdir(previous)
+        self.assertEqual(
+            everything,
+            [
+                {"number": 11, "title": "ci(validate): split jobs"},
+                {"number": 13, "title": "docs: outside the package"},
+                {"number": 14, "title": "test(pkg): cover the package"},
+            ],
+        )
+        self.assertEqual(package, [{"number": 14, "title": "test(pkg): cover the package"}])
+
+
+class PrepareTests(TestCase):
     @staticmethod
-    def _changelog(number: int) -> str:
-        commit = (hex(number)[2:] or "a") * 40
-        commit = commit[:40].ljust(40, "a")
-        return (
-            f"## 1.0.{number}\n\n### Features\n* change "
-            f"([#{number}](https://github.com/acme/widget/issues/{number})) "
-            f"([abcdef0](https://github.com/acme/widget/commit/{commit}))\n"
+    def _pull(number: int, *, body: str = "", title: str | None = None, **extra: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "number": number,
+            "state": "closed",
+            "merged_at": "2026-01-01T00:00:00Z",
+            "title": title or f"feat: PR {number}",
+            "body": body,
+            "labels": [],
+            "head": {"repo": {"full_name": REPO}, "ref": f"feature/{number}"},
+            "base": {"repo": {"full_name": REPO}, "sha": "c" * 40},
+        }
+        payload.update(extra)
+        return payload
+
+    def _release(self, number: int, body: str) -> dict[str, Any]:
+        return self._pull(
+            number, body=body, state="open", merged_at=None,
+            head={"repo": {"full_name": REPO}, "ref": "release-please--branches--main"},
         )
 
-    def test_end_to_end_manifest_cli_reads_only_released_component_changelogs(self):
+    def _prepare(self, root: Path, **overrides: Any) -> dict[str, Any]:
+        arguments: dict[str, Any] = {
+            "repository": REPO,
+            "release_prs_file": root / "prs.json",
+            "mode": "single",
+            "package_path": ".",
+            "config_file": root / "config.json",
+            "manifest_file": root / "manifest.json",
+            "config_backed_single": False,
+            "output_directory": root / "output",
+        }
+        arguments.update(overrides)
+        previous = Path.cwd()
+        os.chdir(root)
+        try:
+            return notes.prepare_release_enrichment(**arguments)
+        finally:
+            os.chdir(previous)
+
+    def test_prepare_fails_closed_for_multiple_release_prs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "backend").mkdir()
-            (root / "backend/CHANGELOG.md").write_text(self._changelog(1), encoding="utf-8")
-            (root / "config.json").write_text(
-                json.dumps(
-                    {
-                        "packages": {name: {"package-name": name} for name in ("backend", "frontend", "worker")}
-                    }
-                ),
-                encoding="utf-8",
+            (root / "prs.json").write_text(json.dumps([{"number": 1}, {"number": 2}]), encoding="utf-8")
+            with self.assertRaisesRegex(notes.EnrichmentError, "exactly one"):
+                self._prepare(root)
+
+    def test_regression_pending_release_pr_fallback(self):
+        text = changelog(("Features", [rp_line(7, "a")]))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+            for output in ("", "[]"):
+                (root / "prs.json").write_text(output, encoding="utf-8")
+                gh_json = mock.Mock(side_effect=[
+                    [{"number": 50, "headRefName": "release-please--branches--main"}],
+                    self._release(50, body_for(text)),
+                    self._pull(7),
+                ])
+                with mock.patch.object(notes, "_run_gh") as run_gh, mock.patch.object(notes, "_gh_json", gh_json), \
+                        mock.patch.object(notes, "hidden_commits", return_value=[]) as hidden:
+                    metadata = self._prepare(root)
+                self.assertEqual(metadata["release_pr"], 50)
+                self.assertTrue(metadata["body_changed"])
+                self.assertIn("autorelease: pending", gh_json.call_args_list[0].args[0])
+                run_gh.assert_called_once_with(["pr", "checkout", "50", "--repo", REPO, "--force"])
+                self.assertEqual(hidden.call_args.kwargs["base_sha"], "c" * 40)
+                (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+
+    def test_fallback_skips_when_there_is_not_exactly_one_pending_release_pr(self):
+        for listing in ([], [{"number": 1, "headRefName": "release-please--a"}, {"number": 2, "headRefName": "release-please--b"}],
+                        [{"number": 3, "headRefName": "feature/labelled-by-hand"}]):
+            with self.subTest(listing=listing), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "prs.json").write_text("[]", encoding="utf-8")
+                with mock.patch.object(notes, "_run_gh") as run_gh, mock.patch.object(notes, "_gh_json", return_value=listing):
+                    metadata = self._prepare(root)
+                self.assertTrue(metadata["skipped"])
+                run_gh.assert_not_called()
+                self.assertTrue(json.loads((root / "output/metadata.json").read_text())["skipped"])
+
+    def test_prepare_rejects_a_release_pr_that_is_not_a_release_please_branch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+            with mock.patch.object(notes, "_run_gh") as run_gh, \
+                    mock.patch.object(notes, "_gh_json", return_value=self._pull(50, state="open")):
+                with self.assertRaisesRegex(notes.EnrichmentError, "not an open Release Please branch"):
+                    self._prepare(root)
+            run_gh.assert_not_called()
+
+    def test_prepare_rejects_unmerged_or_cross_repository_source_pr(self):
+        text = changelog(("Features", [rp_line(7, "a")]))
+        cases = {
+            "not merged": self._pull(7, state="open", merged_at=None),
+            "repository validation failed": self._pull(7, head={"repo": {"full_name": "fork/widget"}}),
+        }
+        for message, source in cases.items():
+            with self.subTest(message), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+                (root / "prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+                with mock.patch.object(notes, "_run_gh"), \
+                        mock.patch.object(notes, "_gh_json", side_effect=[self._release(50, body_for(text)), source]):
+                    with self.assertRaisesRegex(notes.EnrichmentError, message):
+                        self._prepare(root)
+
+    def test_end_to_end_manifest_cli_renders_components_and_is_a_fixed_point(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            backend = changelog(("Features", [rp_line(1, "backend thing")])).replace(
+                f"https://github.com/{REPO}/compare/v1.0.0...v1.1.0", f"https://github.com/{REPO}/compare/backend-v1.0.0...backend-v1.1.0"
             )
+            (root / "backend").mkdir()
+            (root / "backend/CHANGELOG.md").write_text(backend, encoding="utf-8")
+            (root / "config.json").write_text(json.dumps(
+                {"packages": {name: {"package-name": name} for name in ("backend", "frontend", "worker")}}
+            ), encoding="utf-8")
             (root / "manifest.json").write_text(
-                json.dumps({name: "1.0.0" for name in ("backend", "frontend", "worker")}),
-                encoding="utf-8",
+                json.dumps({name: "1.0.0" for name in ("backend", "frontend", "worker")}), encoding="utf-8"
             )
             (root / "release-prs.json").write_text('[{"number": 50}]', encoding="utf-8")
+            top = notes.top_section(backend)[2].rstrip()
             fake_data = {
-                "50": self._pull_payload(
-                    50,
-                    body=(
-                        ":robot: header\n---\n\n\n"
-                        "<details><summary>backend: 1.0.1</summary>\n\n## 1.0.1\n\n</details>\n\n"
-                        "---\nThis PR was generated with Release Please.\n"
-                    ),
-                ),
-                "1": self._pull_payload(1, body="## Highlight\nBackend"),
+                "50": self._release(50, (
+                    ":robot: header\n---\n\n\n"
+                    f"<details><summary>backend: 1.1.0</summary>\n\n{top}\n</details>\n\n"
+                    "---\nThis PR was generated with Release Please.\n"
+                )),
+                "1": self._pull(1, title="feat(api): backend thing", body="## Release note\nBackend users get X."),
             }
             data_path = root / "gh-data.json"
             data_path.write_text(json.dumps(fake_data), encoding="utf-8")
@@ -617,68 +850,156 @@ class RichNotesTests(TestCase):
                 encoding="utf-8",
             )
             fake_gh.chmod(0o755)
-            env = os.environ.copy()
-            env.update(
-                {
-                    "PATH": f"{bin_dir}:{env['PATH']}",
-                    "FAKE_GH_DATA": str(data_path),
-                    "FAKE_GH_LOG": str(log_path),
-                }
+            fake_git = bin_dir / "git"
+            fake_git.write_text(
+                "#!/usr/bin/env python3\nimport sys\n"
+                "args=sys.argv[1:]\n"
+                "if args[:1]==['rev-parse']: print('d'*40)\n"
+                "elif args[:1]==['log']:\n"
+                " assert args[-2:]==['--','backend'], args\n"
+                " assert args[2]=='d'*40+'..'+'c'*40, args\n"
+                " print('e'*40+'\\x00ci(backend): split jobs (#3)')\n"
+                "else: sys.exit(2)\n",
+                encoding="utf-8",
             )
+            fake_git.chmod(0o755)
+            env = os.environ.copy()
+            env.update({"PATH": f"{bin_dir}:{env['PATH']}", "FAKE_GH_DATA": str(data_path), "FAKE_GH_LOG": str(log_path)})
             command = [
-                sys.executable,
-                str(ROOT / "scripts/enrich_release_notes.py"),
-                "--prepare",
-                "--repository",
-                "acme/widget",
-                "--release-prs",
-                "release-prs.json",
-                "--mode",
-                "manifest",
-                "--config-file",
-                "config.json",
-                "--manifest-file",
-                "manifest.json",
-                "--output-directory",
-                "output",
+                sys.executable, str(ROOT / "scripts/enrich_release_notes.py"), "--prepare",
+                "--repository", REPO, "--release-prs", "release-prs.json", "--mode", "manifest",
+                "--config-file", "config.json", "--manifest-file", "manifest.json", "--output-directory", "output",
             ]
             first = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
             self.assertEqual(first.returncode, 0, first.stderr)
-            snapshot = {
-                path: (root / path).read_text(encoding="utf-8")
-                for path in ("backend/CHANGELOG.md",)
-            }
-            second = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
-            self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertEqual(
-                snapshot,
-                {path: (root / path).read_text(encoding="utf-8") for path in snapshot},
-            )
+            snapshot = (root / "backend/CHANGELOG.md").read_text(encoding="utf-8")
+            release_body = json.loads((root / "output/release-body.json").read_text(encoding="utf-8"))["body"]
             metadata = json.loads((root / "output/metadata.json").read_text(encoding="utf-8"))
             self.assertEqual(metadata["source_prs"], [1])
-            self.assertEqual(metadata["rendered_prs"], [1])
+            self.assertEqual(metadata["hidden_prs"], [3])
             self.assertEqual(metadata["changelogs"], ["backend/CHANGELOG.md"])
-            self.assertIn("rich-release-notes pr=1", snapshot["backend/CHANGELOG.md"])
-            self.assertEqual(snapshot["backend/CHANGELOG.md"].count("rich-release-notes"), 1)
-            release_body = json.loads(
-                (root / "output/release-body.json").read_text(encoding="utf-8")
-            )["body"]
-            self.assertEqual(release_body.count(notes.BLOCK_START), 1)
-            backend_end = release_body.index("</details>")
-            self.assertLess(release_body.index("Backend"), backend_end)
+            self.assertIn("Backend users get X.", snapshot)
+            self.assertIn("**backend:** split jobs", snapshot)
+            backend_block = release_body[: release_body.index("\n</details>\n\n---")]
+            self.assertIn("Backend users get X.", backend_block)
+            self.assertIn("<details><summary>Internal changes (1 PR)</summary>", backend_block)
+            fake_data["50"]["body"] = release_body
+            data_path.write_text(json.dumps(fake_data), encoding="utf-8")
+            second = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual((root / "backend/CHANGELOG.md").read_text(encoding="utf-8"), snapshot)
+            rerun = json.loads((root / "output/metadata.json").read_text(encoding="utf-8"))
+            self.assertFalse(rerun["body_changed"])
+            self.assertEqual(rerun["source_prs"], [])
             calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
-            self.assertIn(["pr", "checkout", "50", "--repo", "acme/widget", "--force"], calls)
-            self.assertTrue(all("--slurp" not in call for call in calls))
-            self.assertTrue(all("--json" not in call for call in calls))
+            self.assertIn(["pr", "checkout", "50", "--repo", REPO, "--force"], calls)
 
-    @staticmethod
-    def _pull_payload(number: int, *, body: str) -> dict[str, object]:
-        return {
-            "number": number,
-            "state": "closed",
-            "merged_at": "2026-01-01T00:00:00Z" if number != 50 else None,
-            "title": f"PR {number}",
-            "body": body,
-            "head": {"repo": {"full_name": "acme/widget"}},
-            "base": {"repo": {"full_name": "acme/widget"}},
-        }
+
+class ComponentReleaseSyncTests(TestCase):
+    def _setup(self, root: Path, packages: dict[str, str]) -> None:
+        (root / "config.json").write_text(json.dumps(
+            {"packages": {path: {"package-name": name} for path, name in packages.items()}}
+        ), encoding="utf-8")
+        (root / "manifest.json").write_text(json.dumps({path: "1.1.0" for path in packages}), encoding="utf-8")
+        for path in packages:
+            (root / path).mkdir(parents=True, exist_ok=True)
+            text = changelog(("Features", [rp_line(1, "a")]))
+            rendered, _ = notes.render_changelog(text, REPO, {1: {"title": "feat: a"}})
+            (root / path / "CHANGELOG.md").write_text(rendered, encoding="utf-8")
+
+    def _sync(self, root: Path, outputs: dict[str, Any], mode: str = "manifest") -> tuple[list[str], mock.Mock]:
+        previous = Path.cwd()
+        os.chdir(root)
+        try:
+            with mock.patch.object(notes, "_run_gh") as run_gh:
+                synced = notes.sync_component_releases(
+                    repository=REPO, outputs=outputs, mode=mode, config_file=Path("config.json"),
+                    manifest_file=Path("manifest.json"), notes_directory=root / "notes",
+                )
+            return synced, run_gh
+        finally:
+            os.chdir(previous)
+
+    def test_multi_component_releases_are_reset_to_their_changelog_sections(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._setup(root, {"src/backend": "backend", "src/frontend": "frontend", "public": "public"})
+            outputs = {
+                "releases_created": "true",
+                "paths_released": json.dumps(["src/backend", "public"]),
+                "src/backend--tag_name": "backend-v1.1.0", "src/backend--version": "1.1.0",
+                "public--tag_name": "public-v1.1.0", "public--version": "1.1.0",
+            }
+            synced, run_gh = self._sync(root, outputs)
+            self.assertEqual(synced, ["backend-v1.1.0", "public-v1.1.0"])
+            self.assertEqual([call.args[0][:3] for call in run_gh.call_args_list],
+                             [["release", "edit", "backend-v1.1.0"], ["release", "edit", "public-v1.1.0"]])
+            notes_file = Path(run_gh.call_args_list[0].args[0][-1])
+            text = notes_file.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("## [1.1.0]"))
+            self.assertIn(notes.NOTES_MARKER, text)
+            self.assertIn("### ✨ New", text)
+            self.assertNotIn("## [1.0.0]", text)
+
+    def test_single_package_releases_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._setup(root, {".": "ci-kit"})
+            outputs = {"releases_created": "true", "paths_released": '["."]', "--tag_name": "v1.1.0", ".--tag_name": "v1.1.0", ".--version": "1.1.0"}
+            synced, run_gh = self._sync(root, outputs)
+            self.assertEqual(synced, [])
+            run_gh.assert_not_called()
+            synced, run_gh = self._sync(root, outputs, mode="single")
+            run_gh.assert_not_called()
+
+    def test_sync_refuses_mismatched_versions_and_unsafe_tags(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._setup(root, {"a": "a", "b": "b"})
+            for outputs in (
+                {"paths_released": '["a"]', "a--tag_name": "a-v2.0.0", "a--version": "2.0.0"},
+                {"paths_released": '["a"]', "a--tag_name": "--notes=x", "a--version": "1.1.0"},
+                {"paths_released": '["../a"]', "../a--tag_name": "a-v1.1.0", "../a--version": "1.1.0"},
+                {"paths_released": '["c"]', "c--tag_name": "c-v1.1.0", "c--version": "1.1.0"},
+            ):
+                with self.subTest(outputs=outputs), self.assertRaises(notes.EnrichmentError):
+                    self._sync(root, outputs)
+
+
+class WorkflowAndCopyTests(TestCase):
+    def setUp(self) -> None:
+        self.workflow = yaml.safe_load((ROOT / ".github/workflows/release-please.yml").read_text(encoding="utf-8"))
+
+    def test_generated_helper_is_byte_identical_and_renders_through_jinja(self):
+        generated = ROOT / "modules/release/template/.github/scripts/enrich_release_notes.py.jinja"
+        source = (ROOT / "scripts/enrich_release_notes.py").read_text(encoding="utf-8")
+        self.assertEqual(generated.read_text(encoding="utf-8"), source)
+        rendered = Environment(undefined=StrictUndefined).from_string(generated.read_text(encoding="utf-8")).render()
+        self.assertEqual(rendered + "\n", source)
+
+    def test_enrich_job_runs_on_the_pending_release_pr_fallback(self):
+        condition = self.workflow["jobs"]["enrich"]["if"]
+        for job in ("single", "manifest"):
+            self.assertIn(f"needs.{job}.outputs.release-prs != ''", condition)
+            self.assertIn(f"needs.{job}.outputs.releases-created != 'true'", condition)
+        update = next(step for step in self.workflow["jobs"]["enrich"]["steps"]
+                      if step["name"] == "Update the existing Release Please pull request")
+        self.assertIn(".skipped", update["run"])
+        self.assertIn(".body_changed", update["run"])
+        prepare = next(step for step in self.workflow["jobs"]["enrich"]["steps"]
+                       if step["name"] == "Prepare enriched release notes")
+        self.assertIn('python "$ENRICHMENT_SCRIPT" "${arguments[@]}"', prepare["run"])
+        self.assertIn("--release-prs", prepare["run"])
+
+    def test_component_release_sync_step_is_wired_after_release_please(self):
+        steps = self.workflow["jobs"]["manifest"]["steps"]
+        names = [step.get("name") for step in steps]
+        sync = steps[names.index("Reset component release notes to their changelog sections")]
+        self.assertGreater(names.index(sync["name"]), names.index("Run Release Please in manifest mode"))
+        self.assertEqual(
+            sync["if"], "${{ inputs.enrich-release-notes && steps.release.outputs.releases_created == 'true' }}"
+        )
+        self.assertEqual(sync["env"]["RELEASE_OUTPUTS"], "${{ toJSON(steps.release.outputs) }}")
+        self.assertIn("--sync-releases", sync["run"])
+        self.assertNotIn("${{", sync["run"])
+        self.assertNotIn("Reset component", str(self.workflow["jobs"]["single"]))

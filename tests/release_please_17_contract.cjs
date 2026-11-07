@@ -8,8 +8,11 @@ const releasePleaseRoot = process.argv[2];
 const releaseBodyPath = process.argv[3];
 const toolkitConfigPath = process.argv[4];
 const generatedConfigPath = process.argv[5];
+// Rendered single-package release PR bodies: each must still produce exactly one
+// GitHub release whose notes keep the collapsed Internal list verbatim.
+const singleBodyPaths = process.argv.slice(6);
 if (!releasePleaseRoot || !releaseBodyPath || !toolkitConfigPath || !generatedConfigPath) {
-  throw new Error('usage: release_please_17_contract.cjs RELEASE_PLEASE_ROOT BODY TOOLKIT_CONFIG GENERATED_CONFIG');
+  throw new Error('usage: release_please_17_contract.cjs RELEASE_PLEASE_ROOT BODY TOOLKIT_CONFIG GENERATED_CONFIG [SINGLE_BODY...]');
 }
 
 const load = relative => require(path.join(releasePleaseRoot, relative));
@@ -35,6 +38,47 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
     if (!expected[release.component] || !release.notes.includes(expected[release.component])) {
       throw new Error(`rich notes missing from parsed ${release.component || 'unknown'} release`);
     }
+    // textContent flattens the nested Internal list; the sync step restores it.
+    if (!release.notes.includes('Internal changes')) {
+      throw new Error(`internal changes missing from parsed ${release.component} release`);
+    }
+  }
+
+  const quiet = {warn() {}, error() {}, info() {}, debug() {}, trace() {}};
+  const singles = [];
+  for (const singlePath of singleBodyPaths) {
+    const singleBody = fs.readFileSync(singlePath, 'utf8');
+    const single = PullRequestBody.parse(singleBody, quiet);
+    if (!single || single.releaseData.length !== 1 || single.releaseData[0].component) {
+      throw new Error(`${singlePath}: expected exactly one componentless release`);
+    }
+    const [release] = single.releaseData;
+    const heading = singleBody.match(/^## \[?(\d+\.\d+\.\d+)/m);
+    if (!heading || release.version.toString() !== heading[1]) {
+      throw new Error(`${singlePath}: release version does not match the notes heading`);
+    }
+    const lines = singleBody.trim().split('\n');
+    const content = lines.slice(lines.indexOf('---') + 1, lines.lastIndexOf('---')).join('\n').trim();
+    if (release.notes !== content) {
+      throw new Error(`${singlePath}: GitHub release notes differ from the release PR notes`);
+    }
+    if (!release.notes.includes('<details><summary>Internal changes') ||
+        !release.notes.includes('<!-- project-toolkit:release-notes v2 -->')) {
+      throw new Error(`${singlePath}: rendered notes lost the marker or the collapsed list`);
+    }
+    singles.push(release.version.toString());
+  }
+
+  // Negative control: a summary ending in a version triple is read as a
+  // component release, which would leave the single-package release unpublished.
+  const hijacked = PullRequestBody.parse([
+    ':robot: I have created a release *beep* *boop*', '---', '',
+    '## [1.2.0](https://github.com/acme/widget/compare/v1.1.0...v1.2.0) (2026-11-07)', '',
+    '<details><summary>Dependencies (renovate 44.192.2 → 44.221.1)</summary>', '', '- x', '', '</details>', '',
+    '---', 'footer',
+  ].join('\n'), quiet);
+  if (!hijacked || hijacked.releaseData.length !== 1 || !hijacked.releaseData[0].component) {
+    throw new Error('expected a version-bearing summary to be parsed as a component release');
   }
 
   const generatedConfig = JSON.parse(fs.readFileSync(generatedConfigPath, 'utf8'));
@@ -82,6 +126,7 @@ const {DefaultChangelogNotes} = load('build/src/changelog-notes/default.js');
   process.stdout.write(JSON.stringify({
     releasePlease: packageJson.version,
     components: parsed.releaseData.map(release => release.component),
+    singles,
     tag,
     branch,
     dependencies: true,

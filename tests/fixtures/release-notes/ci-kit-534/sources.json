@@ -1,0 +1,126 @@
+{
+ "532": {
+  "title": "deps(renovate): update renovate to v44.192.2",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.190.2` → `44.192.2`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.190.2&to=44.192.2) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.192.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.192.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.190.2/44.192.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.190.2/44.192.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-29T23:40:51Z"
+ },
+ "535": {
+  "title": "deps(renovate): update renovate to v44.198.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.192.2` → `44.198.0`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.192.2&to=44.198.0) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.198.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.198.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.192.2/44.198.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.192.2/44.198.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-10-31T01:54:43Z"
+ },
+ "536": {
+  "title": "deps(renovate): update renovate to v44.198.3",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.198.0` → `44.198.3`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.198.0&to=44.198.3) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.198.3?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.198.3?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.198.0/44.198.3?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.198.0/44.198.3?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-01T04:33:55Z"
+ },
+ "537": {
+  "title": "deps(renovate): update renovate to v44.199.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.198.3` → `44.199.0`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.198.3&to=44.199.0) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.199.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.199.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.198.3/44.199.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.198.3/44.199.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-02T19:08:15Z"
+ },
+ "538": {
+  "title": "deps(renovate): update renovate to v44.199.2",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.199.0` → `44.199.2`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.199.0&to=44.199.2) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.199.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.199.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.199.0/44.199.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.199.0/44.199.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-03T02:46:22Z"
+ },
+ "539": {
+  "title": "deps(renovate): update renovate to v44.206.2",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.199.2` → `44.206.2`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.199.2&to=44.206.2) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.206.2?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.206.2?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.199.2/44.206.2?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.199.2/44.206.2?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-04T06:12:59Z"
+ },
+ "540": {
+  "title": "deps(renovate): update renovate to v44.210.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.206.2` → `44.210.0`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.206.2&to=44.210.0) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.210.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.210.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.206.2/44.210.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.206.2/44.210.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-05T02:41:28Z"
+ },
+ "541": {
+  "title": "deps(renovate): update renovate to v44.221.1",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [renovate](https://renovatebot.com) ([source](https://redirect.github.com/renovatebot/renovate)) | [`44.210.0` → `44.221.1`](https://octochangelog.com/compare?repo=renovatebot%2Frenovate&from=44.210.0&to=44.221.1) | ![age](https://developer.mend.io/api/mc/badges/age/npm/renovate/44.221.1?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/renovate/44.221.1?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/renovate/44.210.0/44.221.1?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/renovate/44.210.0/44.221.1?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-06T21:50:34Z"
+ },
+ "542": {
+  "title": "deps(uv): update uv to v0.13.7",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [uv](https://pypi.org/project/uv/) ([source](https://redirect.github.com/astral-sh/uv), [changelog](https://redirect.github.com/astral-sh/uv/blob/main/CHANGELOG.md)) | `0.13.6` → `0.13.7` | ![age](https://developer.mend.io/api/mc/badges/age/pypi/uv/0.13.7?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/pypi/uv/0.13.7?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/pypi/uv/0.13.6/0.13.7?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/pypi/uv/0.13.6/0.13.7?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-06T12:54:52Z"
+ },
+ "543": {
+  "title": "deps(allure): update allure to v3.33.0",
+  "body": "| Package | Change | [Age](https://docs.renovatebot.com/merge-confidence/) | [Adoption](https://docs.renovatebot.com/merge-confidence/) | [Passing](https://docs.renovatebot.com/merge-confidence/) | [Confidence](https://docs.renovatebot.com/merge-confidence/) |\n|---|---|---|---|---|---|\n| [allure](https://redirect.github.com/allure-framework/allure3) | `3.22.1` → `3.33.0` | ![age](https://developer.mend.io/api/mc/badges/age/npm/allure/3.33.0?slim=true) | ![adoption](https://developer.mend.io/api/mc/badges/adoption/npm/allure/3.33.0?slim=true) | ![passing](https://developer.mend.io/api/mc/badges/compatibility/npm/allure/3.22.1/3.33.0?slim=true) | ![confidence](https://developer.mend.io/api/mc/badges/confidence/npm/allure/3.22.1/3.33.0?slim=true) |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-07T08:38:29Z"
+ },
+ "544": {
+  "title": "deps(github-actions): update github actions non-major updates",
+  "body": "| Package | Type | Update | Change |\n|---|---|---|---|\n| [actions/setup-java](https://redirect.github.com/actions/setup-java) | action | minor | `v6.1.0` → `v6.2.0` |\n| [docker/login-action](https://redirect.github.com/docker/login-action) | action | minor | `v4.7.0` → `v4.8.0` |\n| [github/codeql-action](https://redirect.github.com/github/codeql-action) ([changelog](https://redirect.github.com/github/codeql-action/compare/9b3254085494b55a0f7c4c2b3d2d52cc712ce370..33d7b85da1a04171e211befe2c739303b9a4c066)) | action | digest | `9b32540` → `33d7b85` |",
+  "labels": [
+   "dependencies"
+  ],
+  "merged_at": "2026-11-07T08:38:38Z"
+ },
+ "545": {
+  "title": "fix(rollout): retry transient GitHub reads in the fleet CI gate",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:27:45Z"
+ },
+ "546": {
+  "title": "fix(allure): fail component mode when results are not at the artifact root",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:28:06Z"
+ },
+ "549": {
+  "title": "feat(allure): expose opt-in pyramid advisory gates in reusable publisher",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:29:34Z"
+ },
+ "550": {
+  "title": "feat(core): add PR title checklist and document branch naming rules",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:29:52Z"
+ },
+ "552": {
+  "title": "feat(actions): publish Gradle Problems Report in job summary",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:30:44Z"
+ },
+ "553": {
+  "title": "fix(actions): escape workflow commands in action error output",
+  "body": "## Summary\n\nReviewer notes are omitted from this fixture.",
+  "labels": [],
+  "merged_at": "2026-11-07T08:31:02Z"
+ }
+}

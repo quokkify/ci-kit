@@ -1,0 +1,6 @@
+[
+ {
+  "number": 37,
+  "title": "ci: run tests as one job per Gradle project"
+ }
+]

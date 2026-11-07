@@ -1,0 +1,10 @@
+[
+ {
+  "number": 533,
+  "title": "docs: update quokkify/ci-kit to v4.2.0"
+ },
+ {
+  "number": 548,
+  "title": "test(actions): cover gradle-retry 429 exhaustion and malformed inputs"
+ }
+]

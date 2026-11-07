@@ -32,7 +32,7 @@ on:
         type: string
         default: ""
       enrich-release-notes:
-        description: Enrich the generated release PR from its optional PR-body sections.
+        description: Render compact release notes (release PR body, CHANGELOG and GitHub release) from merged PRs.
         type: boolean
         default: false
       enrichment-script:
@@ -138,12 +138,40 @@ jobs:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           target-branch: ${{ inputs.target-branch }}
+      # Release Please builds multi-component release notes from the PR body's
+      # text content, which expands the collapsed Internal list. Reset each new
+      # component release to its CHANGELOG section; one package is left alone.
+      - name: Reset component release notes to their changelog sections
+        if: ${{ inputs.enrich-release-notes && steps.release.outputs.releases_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_OUTPUTS: ${{ toJSON(steps.release.outputs) }}
+          ENRICHMENT_SCRIPT: ${{ inputs.enrichment-script }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+          MANIFEST_FILE: ${{ inputs.manifest-file }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$RELEASE_OUTPUTS" > "$RUNNER_TEMP/release-outputs.json"
+          python "$ENRICHMENT_SCRIPT" --sync-releases \
+            --repository "$REPOSITORY" \
+            --release-outputs "$RUNNER_TEMP/release-outputs.json" \
+            --mode manifest \
+            --config-file "$CONFIG_FILE" \
+            --manifest-file "$MANIFEST_FILE" \
+            --output-directory "$RUNNER_TEMP/component-release-notes"
 
+  # Release Please leaves an open release PR untouched (and reports no PR) when
+  # its generated body did not change. The helper then enriches the single open
+  # `autorelease: pending` PR, so a push of hidden-type commits or a toolkit
+  # update still renders the current notes; a rendered PR is a no-op.
   enrich:
     if: >-
       ${{ always() && inputs.enrich-release-notes &&
-          ((needs.single.result == 'success' && needs.single.outputs.release-prs != '') ||
-           (needs.manifest.result == 'success' && needs.manifest.outputs.release-prs != '')) }}
+          ((needs.single.result == 'success' &&
+            (needs.single.outputs.release-prs != '' || needs.single.outputs.releases-created != 'true')) ||
+           (needs.manifest.result == 'success' &&
+            (needs.manifest.outputs.release-prs != '' || needs.manifest.outputs.releases-created != 'true'))) }}
     needs: [single, manifest]
     runs-on: ubuntu-latest
     steps:
@@ -187,6 +215,9 @@ jobs:
           OUTPUT_DIRECTORY: ${{ runner.temp }}/release-enrichment
         run: |
           set -euo pipefail
+          if [[ "$(jq -r '.skipped' "$OUTPUT_DIRECTORY/metadata.json")" == true ]]; then
+            exit 0
+          fi
           mapfile -t changelogs < "$OUTPUT_DIRECTORY/changelog-paths.txt"
           if ((${#changelogs[@]})) && ! git diff --quiet -- "${changelogs[@]}"; then
             git config user.name github-actions[bot]
@@ -195,6 +226,8 @@ jobs:
             git commit -m "chore(release): enrich release notes"
             git push origin HEAD
           fi
-          release_pr="$(jq -r '.release_pr' "$OUTPUT_DIRECTORY/metadata.json")"
-          gh api -X PATCH "repos/${REPOSITORY}/pulls/${release_pr}" \
-            --input "$OUTPUT_DIRECTORY/release-body.json"
+          if [[ "$(jq -r '.body_changed' "$OUTPUT_DIRECTORY/metadata.json")" == true ]]; then
+            release_pr="$(jq -r '.release_pr' "$OUTPUT_DIRECTORY/metadata.json")"
+            gh api -X PATCH "repos/${REPOSITORY}/pulls/${release_pr}" \
+              --input "$OUTPUT_DIRECTORY/release-body.json"
+          fi
