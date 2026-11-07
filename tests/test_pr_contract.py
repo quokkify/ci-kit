@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import subprocess
@@ -187,6 +188,17 @@ class PrContractTests(TestCase):
                 if "highlight" in helper and "release note" in helper:
                     published["release note"] = notes._neutralize(helper["release note"])
                 self.assertEqual(set(sections(body)), set(published))
+
+    def test_regression_check_script_has_no_unreachable_code(self):
+        tree = ast.parse(self.step["run"])
+        for node in ast.walk(tree):
+            for field in ("body", "orelse", "finalbody"):
+                statements = getattr(node, field, None)
+                if not isinstance(statements, list):
+                    continue
+                for position, statement in enumerate(statements[:-1]):
+                    if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+                        self.fail(f"unreachable code after line {statement.lineno} of the check script")
 
     def test_workflow_reads_only_the_event_payload(self):
         job = self.workflow["jobs"]["contract"]

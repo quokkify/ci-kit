@@ -176,61 +176,6 @@ jobs:
                           "and it will look broken; use plain text, a **bold** lead-in or a fenced code block.",
                       ))
               return errors, warnings, notices, None
-              kind, breaking = match.group("type"), bool(match.group("bang"))
-              found = sections(body)
-              waived = labels & WAIVERS
-              if (kind in ("feat", "perf") or breaking) and "release note" not in found and not waived:
-                  errors.append((
-                      "Release note missing",
-                      f"{kind}{'!' if breaking else ''} PRs are published in the release notes. Add to the PR body:\n\n"
-                      "## Release note\n\n"
-                      "<one paragraph, at most 300 characters, for users: what they can do now or what was broken, "
-                      "plus the input, flag or step to use>\n\n"
-                      "If the title already says everything, add the label \"release-notes: title-only\". If only "
-                      "maintainers notice this change, use a maintainer type (chore, ci, refactor, ...) or add the "
-                      "label \"release-notes: internal\". Editing the PR re-runs this check.",
-                  ))
-              elif kind == "fix" and "release note" not in found and not waived:
-                  notices.append((
-                      "Release note suggested",
-                      "This fix is published with its title only. To tell users what was broken and how it showed, "
-                      "add a `## Release note` paragraph to the PR body.",
-                  ))
-              if breaking and "migration" not in found:
-                  errors.append((
-                      "Migration missing",
-                      "A `!` title marks a breaking change. Add to the PR body:\n\n"
-                      "## Migration\n\n"
-                      "1. <first step users must take when upgrading>\n"
-                      "2. <next step>\n\n"
-                      "If users need to do nothing, the change is not breaking: remove the `!` from the title.",
-                  ))
-              if len(title) > 72:
-                  warnings.append(("Long title", f"The title has {len(title)} characters; keep it at most 72."))
-              subject = match.group("subject")
-              if re.search(r"\b[\w./-]+\.(?:py|ya?ml|java|kt|js|ts|md|json|gradle|sh|toml)\b|\w\(\)|\b[a-z]+_[a-z0-9_]+\b|\b[a-z]+[A-Z]\w*\b", subject):
-                  warnings.append((
-                      "Technical title",
-                      "The title names a file, function or identifier. Describe what the user notices instead.",
-                  ))
-              note = found.get("release note", "")
-              if note and (len(" ".join(note.split())) > 300 or "\n\n" in note or re.search(r"(?m)^\s*(?:[-*+]|\d+\.)\s", note)):
-                  warnings.append((
-                      "Long release note",
-                      "Keep `## Release note` to one paragraph of at most 300 characters, without lists; it is "
-                      "printed on one line next to the title.",
-                  ))
-              for key, value in found.items():
-                  outside = "\n".join(line for line in value.split("\n") if not line.startswith(("    ", "\t")))
-                  if re.search(r"<\/?(?:details|summary)", value, re.IGNORECASE) or (
-                      key == "release note" and re.search(r"(?m)^#{1,6} ", outside)
-                  ):
-                      warnings.append((
-                          "Unsafe markup",
-                          f"`## {key.capitalize()}` contains a heading or <details>/<summary> markup. The release "
-                          "notes escape it and it will look broken; use plain text or a **bold** lead-in.",
-                      ))
-              return errors, warnings, notices, None
 
 
           def main():
