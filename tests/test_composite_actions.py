@@ -1858,7 +1858,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
             archives = root / "archives"
             archives.mkdir()
             with zipfile.ZipFile(archives / "allure-results-app-java.zip", "w") as archive:
-                archive.writestr("result.json", "{}")
+                archive.writestr("a-result.json", "{}")
             extractor = destination / ".github/allure/safe_extract.py"
             materialized = destination / ".allure-input/results"
             extracted = root / "extracted"
@@ -1879,7 +1879,7 @@ main().then(() => console.log(JSON.stringify({outputs, failures, warnings}))).ca
                 text=True,
             )
             self.assertEqual(extract_result.returncode, 0, extract_result.stderr)
-            self.assertEqual((materialized / "result.json").read_text(), "{}")
+            self.assertEqual((materialized / "a-result.json").read_text(), "{}")
             self.assertFalse((materialized / "allure-results").exists())
             external_archives = root / "external-archives"
             external_archives.mkdir()
