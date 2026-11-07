@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed · 1 internal
+
+### 🐛 Fixed
+
+- **allure:** let trusted Pages publish the generated report again — Trusted Allure Pages publication works again: since 4.3.0 the Pages job failed on every fresh same-repository PR with "component artifacts contain no *-result.json at the artifact root". Repositories on 4.3.0/4.3.1 recover after updating to the release that carries this fix; no input changes are needed. ([#560](https://github.com/quokkify/ci-kit/pull/560))
+
+<details><summary>Internal changes (1 PR)</summary>
+
+**Dependencies**
+
+- renovate 44.221.4 → 44.221.5 ([#556](https://github.com/quokkify/ci-kit/pull/556))
+
+</details>
+
 ## [4.3.1](https://github.com/quokkify/ci-kit/compare/v4.3.0...v4.3.1) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
