@@ -358,6 +358,15 @@ class AllureHistoryTransportTests(TestCase):
         self.assertEqual(outcome['outputs']['artifact-name'], 'allure-history-4-pr-42')
         self.assertEqual(outcome['outputs']['found'], 'false')
 
+    def test_pages_download_materializes_a_report_not_results(self) -> None:
+        # Regression guard: the generated report has no *-result.json, so the Pages download must not
+        # run the results-at-root guard that the component download relies on.
+        download = next(step for step in PAGES['jobs']['pages']['steps'] if step.get('name') == 'Safely download generated report')
+        self.assertEqual(download['env']['MATERIALIZE_CONTENT'], 'report')
+        self.assertNotIn('MATERIALIZE_CONTENT', next(
+            step for step in CORE['jobs']['download']['steps'] if step.get('name') == 'Download, preflight, and merge Allure results'
+        )['env'])
+
     def test_restore_steps_are_gated_bounded_and_read_only(self) -> None:
         names = [step.get('name') for step in CORE['jobs']['generate']['steps']]
         self.assertLess(names.index('Install restored Allure history'), names.index('Build report without write privileges'))

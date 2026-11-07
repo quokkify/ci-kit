@@ -130,6 +130,7 @@ jobs:
         ARCHIVE_ROOT: ${{ runner.temp }}/allure-pages-archives
         OUTPUT_ROOT: ${{ runner.temp }}/allure-pages-expanded
         MATERIALIZE_ROOT: ${{ github.workspace }}/allure-report
+        MATERIALIZE_CONTENT: report
       run: python .toolkit/modules/allure/template/.github/allure/safe_extract.py.jinja
     - name: Revalidate source immediately before publication
       id: publication

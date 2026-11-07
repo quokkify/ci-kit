@@ -49,7 +49,9 @@ class SafeExtractTest(TestCase):
         data[central + 8] |= 0x1
         path.write_bytes(bytes(data))
 
-    def extract(self, names: list[str], layout: str | None) -> subprocess.CompletedProcess[str]:
+    def extract(
+        self, names: list[str], layout: str | None, content: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             **os.environ,
             "ARTIFACT_MANIFEST": json.dumps([{"name": name, "id": index} for index, name in enumerate(names, 1)]),
@@ -62,6 +64,9 @@ class SafeExtractTest(TestCase):
         env.pop("MATERIALIZE_LAYOUT", None)
         if layout is not None:
             env["MATERIALIZE_LAYOUT"] = layout
+        env.pop("MATERIALIZE_CONTENT", None)
+        if content is not None:
+            env["MATERIALIZE_CONTENT"] = content
         return subprocess.run(
             [sys.executable, "-I", str(EXTRACTOR)],
             cwd=self.workspace,
@@ -345,6 +350,35 @@ class SafeExtractTest(TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.root / "expanded/history.jsonl").is_file())
+
+    def test_report_content_materializes_a_generated_report_without_result_files(self) -> None:
+        # Regression guard: allure-pages.yml reuses the extractor for the generated HTML report, which
+        # holds no *-result.json; the #546 results guard failed every trusted Pages publish on v4.3.x.
+        self.write_archive("allure-report-7", [("index.html", "<html></html>"), ("data/widgets.json", "{}")])
+
+        result = self.extract(["allure-report-7"], None, content="report")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.materialized_files(), {"index.html", "data/widgets.json"})
+
+    def test_results_content_is_the_default_and_keeps_the_results_guard(self) -> None:
+        self.write_archive("allure-report-7", [("index.html", "<html></html>")])
+
+        for content in (None, "results"):
+            with self.subTest(content=content):
+                result = self.extract(["allure-report-7"], None, content=content)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("test run produced results", result.stderr)
+
+    def test_unknown_content_fails_closed(self) -> None:
+        self.write_archive("allure-results-a", [("a-result.json", "{}")])
+
+        result = self.extract(["allure-results-a"], None, content="anything")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported MATERIALIZE_CONTENT", result.stderr)
+        self.assertFalse(self.materialized.exists())
 
     def test_unknown_layout_fails_closed(self) -> None:
         self.write_archive("allure-results-backend", [("b-result.json", "{}")])
