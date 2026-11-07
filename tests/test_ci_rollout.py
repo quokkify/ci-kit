@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import ExitStack
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -76,7 +77,8 @@ class ReleaseGateTests(unittest.TestCase):
                     gate.release_ready(REPO, SHA)
 
     def test_api_error_and_empty_checks_timeout(self):
-        with patch.object(gate.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["gh"])):
+        with patch.object(gate.time, "sleep"), \
+             patch.object(gate.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["gh"])):
             with self.assertRaises(gate.GateError):
                 gate.api("repos/example")
         with self.assertRaises(gate.GateError):
@@ -315,14 +317,85 @@ class PilotGateTests(unittest.TestCase):
     def test_api_returns_none_only_for_a_confirmed_404(self):
         def failing(stderr):
             return subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
-        with patch.object(gate.subprocess, "run", side_effect=failing("gh: Not Found (HTTP 404)")):
+        with patch.object(gate.time, "sleep"), \
+             patch.object(gate.subprocess, "run", side_effect=failing("gh: Not Found (HTTP 404)")):
             self.assertIsNone(gate.api("repos/a/b/contents/x", missing_ok=True))
             with self.assertRaises(gate.GateError):
                 gate.api("repos/a/b/contents/x")
         for error in (failing("gh: Bad Gateway (HTTP 502)"), subprocess.TimeoutExpired(["gh"], 45)):
-            with self.subTest(error=error), patch.object(gate.subprocess, "run", side_effect=error):
+            with self.subTest(error=error), patch.object(gate.time, "sleep"), \
+                 patch.object(gate.subprocess, "run", side_effect=error):
                 with self.assertRaises(gate.GateError):
                     gate.api("repos/a/b/contents/x", missing_ok=True)
+
+    def test_transient_read_failure_is_retried_and_reported(self):
+        # Regression guard: one failed read (skills/pulls/151 seven seconds after the PR was
+        # created; q4j codeql runs mid-wait) aborted whole fleet rollouts, and the gh error was dropped.
+        ok = subprocess.CompletedProcess(["gh"], 0, stdout='{"number": 151}', stderr="")
+        for error in (subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad Gateway (HTTP 502)\n"),
+                      subprocess.CalledProcessError(1, ["gh"], stderr="gh: Not Found (HTTP 404)\n"),
+                      subprocess.TimeoutExpired(["gh"], 45)):
+            with self.subTest(error=error), patch.object(gate.time, "sleep") as sleep, \
+                 patch.object(gate.subprocess, "run", side_effect=[error, ok]) as run:
+                self.assertEqual(gate.api("repos/quokkify/skills/pulls/151"), {"number": 151})
+                self.assertEqual(run.call_count, 2)
+                sleep.assert_called_once()
+        persistent = subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad Gateway (HTTP 502)\n")
+        with patch.object(gate.time, "sleep"), patch.object(gate.subprocess, "run", side_effect=persistent) as run:
+            with self.assertRaisesRegex(gate.GateError, r"repos/a/b.*HTTP 502"):
+                gate.api("repos/a/b")
+            self.assertEqual(run.call_count, len(gate.API_RETRY_DELAYS) + 1)
+
+    def test_non_transient_client_errors_fail_fast_without_retry(self):
+        for stderr in ("gh: Validation Failed (HTTP 422)", "gh: Bad credentials (HTTP 401)",
+                       "gh: Resource not accessible by integration (HTTP 403)"):
+            error = subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+            with self.subTest(stderr=stderr), patch.object(gate.time, "sleep") as sleep, \
+                 patch.object(gate.subprocess, "run", side_effect=error) as run:
+                with self.assertRaisesRegex(gate.GateError, re.escape(stderr)):
+                    gate.api("repos/a/b")
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+        ok = subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
+        for stderr in ("gh: API rate limit exceeded for installation (HTTP 403)",
+                       "gh: Too Many Requests (HTTP 429)", "gh: Request Timeout (HTTP 408)",
+                       "gh: Service Unavailable (HTTP 503)"):
+            error = subprocess.CalledProcessError(1, ["gh"], stderr=stderr)
+            with self.subTest(stderr=stderr), patch.object(gate.time, "sleep"), \
+                 patch.object(gate.subprocess, "run", side_effect=[error, ok]) as run:
+                self.assertEqual(gate.api("repos/a/b"), {})
+                self.assertEqual(run.call_count, 2)
+
+    def test_retry_requires_headroom_before_the_read_deadline(self):
+        error = subprocess.CalledProcessError(1, ["gh"], stderr="gh: Bad Gateway (HTTP 502)")
+        first_delay = gate.API_RETRY_DELAYS[0]
+        # Just enough time for the sleep but not the headroom: fail now rather than run a near-zero read.
+        tight = gate.time.monotonic() + first_delay + gate.API_RETRY_HEADROOM - 1
+        with patch.object(gate, "API_DEADLINE", tight), patch.object(gate.time, "sleep") as sleep, \
+             patch.object(gate.subprocess, "run", side_effect=error) as run:
+            with self.assertRaisesRegex(gate.GateError, "HTTP 502"):
+                gate.api("repos/a/b")
+            self.assertEqual(run.call_count, 1)
+            sleep.assert_not_called()
+        ok = subprocess.CompletedProcess(["gh"], 0, stdout="{}", stderr="")
+        roomy = gate.time.monotonic() + first_delay + gate.API_RETRY_HEADROOM + 30
+        with patch.object(gate, "API_DEADLINE", roomy), patch.object(gate.time, "sleep"), \
+             patch.object(gate.subprocess, "run", side_effect=[error, ok]) as run:
+            self.assertEqual(gate.api("repos/a/b"), {})
+            self.assertEqual(run.call_count, 2)
+
+    def test_confirmed_404_with_missing_ok_and_expired_deadline_are_not_retried(self):
+        missing = subprocess.CalledProcessError(1, ["gh"], stderr="gh: Not Found (HTTP 404)")
+        with patch.object(gate.time, "sleep") as sleep, \
+             patch.object(gate.subprocess, "run", side_effect=missing) as run:
+            self.assertIsNone(gate.api("repos/a/b/contents/x", missing_ok=True))
+            self.assertEqual(run.call_count, 1)
+            sleep.assert_not_called()
+        with patch.object(gate, "API_DEADLINE", gate.time.monotonic() - 1), \
+             patch.object(gate.subprocess, "run") as run:
+            with self.assertRaisesRegex(gate.GateError, "deadline expired"):
+                gate.api("repos/a/b")
+            run.assert_not_called()
 
     def test_transient_error_on_core_or_security_read_fails_closed(self):
         def broken(path):
