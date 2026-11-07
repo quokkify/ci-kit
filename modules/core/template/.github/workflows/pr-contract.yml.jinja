@@ -4,7 +4,14 @@ name: PR contract
 # release notes. See "Pull request titles and release notes" in docs/ci-kit.md.
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
 
 permissions: {}
 
