@@ -204,7 +204,7 @@ jobs:
       if: ${{ steps.freshness.outputs.fresh == 'true' }}
     - name: Publish Allure HTML to GitHub Pages
       if: ${{ steps.freshness.outputs.fresh == 'true' && steps.publication.outputs.fresh == 'true' }}
-      uses: quokkify/gh-pages-subdir-action@e936122cbdf5a9676b5587d5a812fadf7ddfde6b # v0.1.1
+      uses: quokkify/gh-pages-subdir-action@71cecf2eff835ddbf4c582d320d38cb7d6032ee1 # v0.1.2
       with:
         token: ${{ secrets.github-token || github.token }}
         publish-dir: ${{ inputs.managed-pages-layout && 'allure-report' || 'allure-report/allure-report' }}
