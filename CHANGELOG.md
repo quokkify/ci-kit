@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.1](https://github.com/quokkify/ci-kit/compare/v4.3.0...v4.3.1) (2026-11-07)
+
+
+### 🐛 Bug Fixes
+
+* **core:** keep Prettier checks green after the PR contract update ([#557](https://github.com/quokkify/ci-kit/issues/557)) ([1c1702b](https://github.com/quokkify/ci-kit/commit/1c1702b29232225393d1145c93c4f92977588492))
+
 ## [4.3.0](https://github.com/quokkify/ci-kit/compare/v4.2.0...v4.3.0) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
