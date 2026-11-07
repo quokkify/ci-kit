@@ -285,6 +285,91 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn("CIK-CORE-030", codes(build_plan(repo, drift=False)))
 
 
+def allure_repo(declarations: dict[str, list[dict]], source: str | None) -> Path:
+    repo = modules_repo(declarations)
+    answers = "module: allure\n" + (f"allure_source: {source}\n" if source else "")
+    (repo / ".copier-answers.allure.yml").write_text(answers)
+    (repo / ".ci/modules/allure.yml").write_text("schema_version: 1\n")
+    return repo
+
+
+def upload_fields(entry: dict) -> tuple:
+    return entry["upload_test_artifacts"], entry["test_artifact_name"], entry["test_artifact_path"]
+
+
+class AllureComponentDefaultTests(unittest.TestCase):
+    def test_component_mode_uploads_allure_results_by_default_per_language(self):
+        repo = allure_repo({
+            "java": [JAVA_BASE],
+            "python": [{"id": "py", "name": "Py", "path": "."}],
+            "node": [{"id": "web", "name": "Web", "path": "."}],
+        }, "component")
+        plan = build_plan(repo, drift=False)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual(upload_fields(plan.matrices["java"][0]), (True, "allure-results-gw", "build/allure-results"))
+        self.assertEqual(upload_fields(plan.matrices["python"][0]), (True, "allure-results-py", "allure-results"))
+        self.assertEqual(upload_fields(plan.matrices["node"][0]), (True, "allure-results-web", "allure-results"))
+
+    def test_java_default_path_follows_build_tool(self):
+        cases = (
+            ({"build_tool": "maven"}, None, "target/allure-results"),
+            ({"build_tool": "gradle"}, "pom.xml", "build/allure-results"),
+            ({}, "pom.xml", "target/allure-results"),
+            ({}, "build.gradle.kts", "build/allure-results"),
+        )
+        for extra, marker, expected in cases:
+            with self.subTest(extra=extra, marker=marker):
+                repo = allure_repo({"java": [{**JAVA_BASE, "path": "svc", **extra}]}, "component")
+                (repo / "svc").mkdir()
+                if marker:
+                    (repo / "svc" / marker).write_text("")
+                self.assertEqual(build_plan(repo, drift=False).matrices["java"][0]["test_artifact_path"], expected)
+
+    def test_explicit_upload_settings_are_kept(self):
+        explicit = {"upload_test_artifacts": True, "test_artifact_name": "allure-results-custom", "test_artifact_path": "out/allure"}
+        cases = (
+            ({"upload_test_artifacts": False}, (False, "python-test-artifacts", "test-results")),
+            ({"upload_test_artifacts": True}, (True, "python-test-artifacts", "test-results")),
+            (explicit, (True, "allure-results-custom", "out/allure")),
+        )
+        for extra, expected in cases:
+            with self.subTest(extra=extra):
+                repo = allure_repo({"python": [{"id": "py", "name": "Py", "path": ".", **extra}]}, "component")
+                self.assertEqual(upload_fields(build_plan(repo, drift=False).matrices["python"][0]), expected)
+
+    def test_non_allure_artifact_name_is_left_untouched(self):
+        cases = (
+            ({"test_artifact_name": "junit-py"}, (False, "junit-py", "test-results")),
+            ({"test_artifact_name": "allure-results-py-unit"}, (True, "allure-results-py-unit", "allure-results")),
+        )
+        for extra, expected in cases:
+            with self.subTest(extra=extra):
+                repo = allure_repo({"python": [{"id": "py", "name": "Py", "path": ".", **extra}]}, "component")
+                self.assertEqual(upload_fields(build_plan(repo, drift=False).matrices["python"][0]), expected)
+
+    def test_no_default_upload_when_tests_disabled_or_test_modules(self):
+        repo = allure_repo({
+            "python": [{"id": "py", "name": "Py", "path": ".", "run_tests": False}],
+            "java": [{**JAVA_BASE, "test_modules": [{"id": "core", "module": ":core", "results": "r"}]}],
+        }, "component")
+        plan = build_plan(repo, drift=False)
+        self.assertEqual(plan.findings, [])
+        self.assertEqual(upload_fields(plan.matrices["python"][0]), (False, "python-test-artifacts", "test-results"))
+        self.assertEqual(upload_fields(plan.matrices["java"][0]), (False, "java-test-artifacts", "test-results"))
+
+    def test_external_mode_and_repos_without_allure_keep_workflow_defaults(self):
+        declarations = {"python": [{"id": "py", "name": "Py", "path": "."}]}
+        for repo in (modules_repo(declarations), allure_repo(declarations, "external"), allure_repo(declarations, None)):
+            with self.subTest(repo=repo):
+                self.assertEqual(upload_fields(build_plan(repo, drift=False).matrices["python"][0]), (False, "python-test-artifacts", "test-results"))
+
+    def test_default_artifacts_count_toward_collisions(self):
+        java = {**JAVA_BASE, "test_modules": [{"id": "core", "module": ":core", "results": "r"}]}
+        py = {"id": "gw-core", "name": "Py", "path": "."}
+        plan = build_plan(allure_repo({"java": [java], "python": [py]}, "component"), drift=False)
+        self.assertEqual(codes(plan), ["CIK-CORE-005"])
+
+
 class CliTests(unittest.TestCase):
     def run_cli(self, *argv: str, env: dict | None = None) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()

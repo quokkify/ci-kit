@@ -11,7 +11,7 @@ import yaml
 
 from .inputs import WORKFLOWS, fill
 from .modules import MODULES
-from .test_modules import ARTIFACT_PREFIX, MAX_ALLURE_ARTIFACTS, MAX_ARTIFACT_NAME, component_artifacts
+from .test_modules import ARTIFACT_PREFIX, MAX_ALLURE_ARTIFACTS, MAX_ARTIFACT_NAME, allure_component_defaults, component_artifacts
 
 ANSWERS_RE = re.compile(r"^\.copier-answers\.([A-Za-z0-9_-]+)\.yml$")
 # ci-kit v4 has no legacy template. Legacy answers are dropped once every area the legacy
@@ -118,6 +118,16 @@ def legacy_answers_findings(repo: Path) -> list[Finding]:
     )]
 
 
+def _allure_component_mode(answers: dict[str, Path], loaded: dict[str, dict]) -> bool:
+    if "allure" not in loaded:
+        return False
+    try:
+        data = yaml.safe_load(answers["allure"].read_text())
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return False
+    return isinstance(data, dict) and data.get("allure_source") == "component"
+
+
 def _test_module_findings(loaded: dict[str, dict]) -> list[Finding]:
     findings: list[Finding] = []
     owners: dict[str, str] = {}
@@ -195,6 +205,13 @@ def build_plan(repo: Path, *, drift: bool = True, src_override: str | None = Non
         for required in MODULES[module].requires:
             if required not in loaded:
                 findings.append(Finding("CIK-CORE-003", module, f"module {module} requires module {required}", f".ci/modules/{module}.yml"))
+
+    if _allure_component_mode(answers, loaded):
+        for module in sorted(loaded):
+            if MODULES[module].language:
+                loaded[module] = {**loaded[module], "components": [
+                    allure_component_defaults(repo, module, component) for component in loaded[module].get("components", [])
+                ]}
 
     seen: dict[str, str] = {}
     for module in sorted(loaded):

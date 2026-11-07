@@ -25,13 +25,17 @@ A language declaration is `schema_version: 1` plus `components`, one mapping per
 
 The language version is optional in a declaration, but new projects pin it: the default answers of `python` and `node` set `python_version` and `node_version` to the workflow default. If a declaration omits it, the workflow default applies and can change with a ci-kit release. A docker `dockerfile` is resolved from the repository root, not from `context`.
 
-`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts. For an Allure report in component mode, every component must upload its results as `allure-results-<id>`: set `upload_test_artifacts: true`, `test_artifact_name: allure-results-<id>` and `test_artifact_path` to the Allure results directory. Modules do not add these uploads automatically. `test_artifact_path` must point at one results directory: the report reads only files directly at the artifact root, so the report job fails when any component artifact holds a `*-result.json` below the root (for example when a glob such as `**/build/allure-results` uploads nested module directories) or when the artifacts hold no `*-result.json` at all.
+`test_artifact_name` defaults to a fixed per-language name, so set a unique `test_artifact_name` per component when more than one component uploads test artifacts. For an Allure report in component mode, every component must upload its results as `allure-results-<id>`: set `upload_test_artifacts: true`, `test_artifact_name: allure-results-<id>` and `test_artifact_path` to the Allure results directory. In component mode, `ci-kit plan` adds this upload by default to a component that does not set `upload_test_artifacts` (see [default Allure upload in component mode](#default-allure-upload-in-component-mode)). `test_artifact_path` must point at one results directory: the report reads only files directly at the artifact root, so the report job fails when any component artifact holds a `*-result.json` below the root (for example when a glob such as `**/build/allure-results` uploads nested module directories) or when the artifacts hold no `*-result.json` at all.
 
 ```yaml
 schema_version: 1
 components:
   - {"id": "backend-python", "name": "Backend Python", "path": "backend", "python_version": "3.12", "run_lint": false}
 ```
+
+### Default Allure upload in component mode
+
+When the `allure` module is installed with `allure_source: component`, `ci-kit plan` turns the Allure upload on for every `java`, `python` and `node` component that does not set `upload_test_artifacts`. Such a component uploads `allure-results-<id>`, and its `test_artifact_path` defaults to `allure-results` for `python` and `node`, `build/allure-results` for Gradle and `target/allure-results` for Maven (with `build_tool: auto`, the tool is detected the way `java-ci` detects it). A `test_artifact_name` or `test_artifact_path` set in the declaration is kept. No default upload is added to a component that sets `upload_test_artifacts` (true or false), sets a `test_artifact_name` that does not start with `allure-results-`, has `test_modules`, or sets `run_tests: false`; set `upload_test_artifacts: false` for a component that writes no Allure results, because the upload fails when the directory is missing. Repositories without the `allure` module and repositories in external mode keep the workflow defaults. The defaults are applied at plan time, so the rendered declarations do not change.
 
 ### Build modules (`test_modules`)
 
