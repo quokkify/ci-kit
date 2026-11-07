@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
+
+
+### 🐛 Bug Fixes
+
+* **allure:** let trusted Pages publish the generated report again ([#560](https://github.com/quokkify/ci-kit/issues/560)) ([737ead3](https://github.com/quokkify/ci-kit/commit/737ead34ceb888eec51ea3f657f04e8e64229b10))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.221.5 ([#556](https://github.com/quokkify/ci-kit/issues/556)) ([7987fe0](https://github.com/quokkify/ci-kit/commit/7987fe0631ae66405f11bdcafa8e51d57713aaab))
+
 ## [4.3.1](https://github.com/quokkify/ci-kit/compare/v4.3.0...v4.3.1) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
