@@ -50,6 +50,7 @@ jobs:
         SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
         SOURCE_WORKFLOW_PATH: ${{ inputs.source-workflow-path }}
       with:
+        retries: 3
         script: |
           const run = context.payload.workflow_run;
           const prNumber = Number(process.env.PR_NUMBER);
@@ -140,6 +141,7 @@ jobs:
         SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
         SOURCE_WORKFLOW_PATH: ${{ inputs.source-workflow-path }}
       with:
+        retries: 3
         script: |
           const run = context.payload.workflow_run;
           const prNumber = Number(process.env.PR_NUMBER);
