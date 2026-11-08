@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.3.4](https://github.com/quokkify/ci-kit/compare/v4.3.3...v4.3.4) (2026-11-08)
+
+
+### 🐛 Bug Fixes
+
+* **actions:** retry Gradle repository 429/403 as Gradle prints them ([#570](https://github.com/quokkify/ci-kit/issues/570)) ([09a0d4d](https://github.com/quokkify/ci-kit/commit/09a0d4d37078ee131f477c00275f7e751c31dda5))
+
 ## [4.3.3](https://github.com/quokkify/ci-kit/compare/v4.3.2...v4.3.3) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
