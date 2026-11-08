@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.3.5](https://github.com/quokkify/ci-kit/compare/v4.3.4...v4.3.5) (2026-11-08)
+
+
+### 🐛 Bug Fixes
+
+* **gradle-retry:** retry transient plugin resolution failures ([#575](https://github.com/quokkify/ci-kit/issues/575)) ([74cb50a](https://github.com/quokkify/ci-kit/commit/74cb50a53ab9c5a37d2910bb6bad4b86b6c00e42))
+
+
+### 📦 Dependencies
+
+* **renovate:** update renovate to v44.222.1 ([#571](https://github.com/quokkify/ci-kit/issues/571)) ([efa17c9](https://github.com/quokkify/ci-kit/commit/efa17c977e0b1df0adced402789f2ce0f4e45ad3))
+
 ## [4.3.4](https://github.com/quokkify/ci-kit/compare/v4.3.3...v4.3.4) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
