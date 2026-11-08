@@ -30,6 +30,10 @@ class GradleRetryTests(unittest.TestCase):
                 "  rate-limit) [[ $n -lt 2 ]] && { echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 429 from server: Too Many Requests\"; exit 8; }; echo success; exit 0;;\n"
                 "  persistent-rate-limit) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 429 from server: Too Many Requests\"; exit $((20 + n));;\n"
                 "  access-denied) [[ $n -lt 2 ]] && { echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 14; }; echo success; exit 0;;\n"
+                "  gradle-rate-limit) [[ $n -lt 2 ]] && { echo \"            > Could not GET 'https://repo.maven.apache.org/maven2/org/awaitility/awaitility/4.3.0/awaitility-4.3.0.pom'.\"; echo '               > Received status code 429 from server: Too Many Requests'; exit 8; }; echo success; exit 0;;\n"
+                "  gradle-access-denied) [[ $n -lt 2 ]] && { echo \"            > Could not HEAD 'https://repo.example.invalid/missing.pom'.\"; echo '               > Received status code 403 from server: Forbidden'; exit 14; }; echo success; exit 0;;\n"
+                "  non-adjacent-status) echo \"            > Could not GET 'https://repo.example.invalid/missing.pom'.\"; echo '               > Received status code 500 from server: Internal Server Error'; echo '               > Received status code 429 from server: Too Many Requests'; exit 17;;\n"
+                "  detached-status) echo 'Received status code 429 from server: Too Many Requests'; exit 16;;\n"
                 "  persistent-access-denied) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 15;;\n"
                 "esac\n"
             )
@@ -116,6 +120,30 @@ class GradleRetryTests(unittest.TestCase):
     def test_http_500_is_not_retried(self) -> None:
         result, calls, _ = self.run_case("server-error")
         self.assertEqual(result.returncode, 13)
+        self.assertEqual(calls, 1)
+
+    def test_gradle_two_line_429_is_retried(self) -> None:
+        """Regression guard: Gradle prints the URL and the status on separate lines."""
+        result, calls, _ = self.run_case("gradle-rate-limit", max_attempts="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 2)
+        self.assertIn("HTTP 429", result.stdout)
+
+    def test_gradle_two_line_403_is_retried(self) -> None:
+        """Regression guard: Gradle prints the URL and the status on separate lines."""
+        result, calls, _ = self.run_case("gradle-access-denied", max_attempts="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 2)
+        self.assertIn("HTTP 403", result.stdout)
+
+    def test_status_without_repository_request_is_not_retried(self) -> None:
+        result, calls, _ = self.run_case("detached-status")
+        self.assertEqual(result.returncode, 16)
+        self.assertEqual(calls, 1)
+
+    def test_status_not_adjacent_to_request_is_not_retried(self) -> None:
+        result, calls, _ = self.run_case("non-adjacent-status")
+        self.assertEqual(result.returncode, 17)
         self.assertEqual(calls, 1)
 
 

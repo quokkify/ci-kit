@@ -48,10 +48,22 @@ while true; do
 
   # Match Gradle's repository diagnostic, not a bare "Forbidden" from an
   # unrelated task. The URL is deliberately constrained to a quoted value.
-  transient_status=""
-  if grep -qE "Could not (GET|HEAD) '[^']+'\. Received status code (403|429)([[:space:]]|$)" "$output_file"; then
-    transient_status="$(grep -oE "Could not (GET|HEAD) '[^']+'\. Received status code (403|429)" "$output_file" | tail -n 1 | grep -oE '(403|429)$')"
-  fi
+  # Gradle prints the request and its status on consecutive lines
+  # ("> Could not GET '<url>'." then "> Received status code 429 ...");
+  # the single-line form is accepted too. The last match wins.
+  transient_status="$(awk -v q="'" '
+    BEGIN { request = "Could not (GET|HEAD) " q "[^" q "]+" q "\\." }
+    {
+      if (pending && $0 ~ /^[[:space:]>]*Received status code (403|429)([[:space:]]|$)/) {
+        match($0, /code (403|429)/); status = substr($0, RSTART + 5, 3)
+      }
+      if ($0 ~ (request " Received status code (403|429)([[:space:]]|$)")) {
+        match($0, /code (403|429)/); status = substr($0, RSTART + 5, 3)
+      }
+      pending = ($0 ~ (request "[[:space:]]*$"))
+    }
+    END { print status }
+  ' "$output_file")"
 
   if [[ -n "$transient_status" && "$attempt" -lt "$max_attempts" ]]; then
     jitter=$(( RANDOM % (delay / 3 + 1) ))
