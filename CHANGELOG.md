@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.3.5](https://github.com/quokkify/ci-kit/compare/v4.3.4...v4.3.5) (2026-11-08)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed · 2 internal
+
+### 🐛 Fixed
+
+- **gradle-retry:** retry transient plugin resolution failures — `gradle-retry` now retries a transient Gradle plugin portal outage (`UnknownPluginException` … `could not resolve plugin artifact`) with the same bounded backoff as repository HTTP 429/403. ([#575](https://github.com/quokkify/ci-kit/pull/575))
+
+<details><summary>Internal changes (2 PRs)</summary>
+
+**Dependencies**
+
+- renovate 44.222.0 → 44.222.1 ([#571](https://github.com/quokkify/ci-kit/pull/571))
+
+**Maintenance**
+
+- update quokkify/ci-kit to v4.3.4 ([#572](https://github.com/quokkify/ci-kit/pull/572))
+
+</details>
+
 ## [4.3.4](https://github.com/quokkify/ci-kit/compare/v4.3.3...v4.3.4) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
