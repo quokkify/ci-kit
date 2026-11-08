@@ -1,5 +1,28 @@
 # Changelog
 
+## [4.3.3](https://github.com/quokkify/ci-kit/compare/v4.3.2...v4.3.3) (2026-11-08)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed · 6 internal
+
+### 🐛 Fixed
+
+- **ci:** retry transient GitHub download and API failures — CI no longer fails on short GitHub outages: actionlint and gitleaks downloads retry transient errors (such as HTTP 504), and `github-script` steps in the Allure and runner-detection workflows retry 429/5xx API responses. Consumers get the gitleaks fix through a Copier update; reusable workflows pick it up on the next version bump. ([#569](https://github.com/quokkify/ci-kit/pull/569))
+
+<details><summary>Internal changes (6 PRs)</summary>
+
+**Dependencies**
+
+- quokkify/allure-report-action v0.5.3 → v0.5.4 ([#561](https://github.com/quokkify/ci-kit/pull/561))
+- quokkify/gh-pages-subdir-action v0.1.1 → v0.1.2 ([#563](https://github.com/quokkify/ci-kit/pull/563), [#564](https://github.com/quokkify/ci-kit/pull/564))
+- renovate 44.221.5 → 44.222.0 ([#566](https://github.com/quokkify/ci-kit/pull/566), [#568](https://github.com/quokkify/ci-kit/pull/568))
+
+**Maintenance**
+
+- update quokkify/ci-kit to v4.3.2 ([#559](https://github.com/quokkify/ci-kit/pull/559))
+
+</details>
+
 ## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
