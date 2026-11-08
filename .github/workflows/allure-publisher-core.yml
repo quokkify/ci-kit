@@ -161,6 +161,7 @@ jobs:
       id: resolve
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
       with:
+        retries: 3
         script: |
           const run = context.payload.workflow_run;
           const artifactPrefix = process.env.ARTIFACT_PREFIX;
@@ -364,6 +365,7 @@ jobs:
         HISTORY_PATH: ${{ inputs.history-path }}
         PR_NUMBER: ${{ needs.resolve.outputs.pr-number }}
       with:
+        retries: 3
         script: |
           const historyPath = process.env.HISTORY_PATH;
           const prNumber = Number(process.env.PR_NUMBER);
@@ -583,6 +585,7 @@ jobs:
       env:
         PR_NUMBER: ${{ needs.resolve.outputs.pr-number }}
       with:
+        retries: 3
         script: |
           const run = context.payload.workflow_run;
           const prNumber = Number(process.env.PR_NUMBER);
