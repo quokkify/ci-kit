@@ -2,19 +2,26 @@
 
 ## [4.3.3](https://github.com/quokkify/ci-kit/compare/v4.3.2...v4.3.3) (2026-11-08)
 
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed · 6 internal
 
-### 🐛 Bug Fixes
+### 🐛 Fixed
 
-* **ci:** retry transient GitHub download and API failures ([#569](https://github.com/quokkify/ci-kit/issues/569)) ([ad1392a](https://github.com/quokkify/ci-kit/commit/ad1392ab482b461eccf499353a88dc9fd5b30923))
+- **ci:** retry transient GitHub download and API failures — CI no longer fails on short GitHub outages: actionlint and gitleaks downloads retry transient errors (such as HTTP 504), and `github-script` steps in the Allure and runner-detection workflows retry 429/5xx API responses. Consumers get the gitleaks fix through a Copier update; reusable workflows pick it up on the next version bump. ([#569](https://github.com/quokkify/ci-kit/pull/569))
 
+<details><summary>Internal changes (6 PRs)</summary>
 
-### 📦 Dependencies
+**Dependencies**
 
-* **allure-report-action:** update quokkify/allure-report-action to v0.5.4 ([#561](https://github.com/quokkify/ci-kit/issues/561)) ([e8048ba](https://github.com/quokkify/ci-kit/commit/e8048bab2b0d9caa1820244e400d9bbf94b6d41b))
-* **gh-pages-subdir-action:** update quokkify/gh-pages-subdir-action to v0.1.2 ([#563](https://github.com/quokkify/ci-kit/issues/563)) ([f459d9b](https://github.com/quokkify/ci-kit/commit/f459d9badeca335067d02e18c2e06614c82684e3))
-* **github-actions:** update quokkify/gh-pages-subdir-action action to v0.1.2 ([#564](https://github.com/quokkify/ci-kit/issues/564)) ([2bc8a57](https://github.com/quokkify/ci-kit/commit/2bc8a57c14ebce3f997d2ab0918501cf093bbd5d))
-* **renovate:** update renovate to v44.221.6 ([#566](https://github.com/quokkify/ci-kit/issues/566)) ([57fb7b2](https://github.com/quokkify/ci-kit/commit/57fb7b294d3f3f157723c6f3d7c71e67db1c00f3))
-* **renovate:** update renovate to v44.222.0 ([#568](https://github.com/quokkify/ci-kit/issues/568)) ([570203c](https://github.com/quokkify/ci-kit/commit/570203cf094bd8c1290c7c8534d8d3b325e6ac7d))
+- quokkify/allure-report-action v0.5.3 → v0.5.4 ([#561](https://github.com/quokkify/ci-kit/pull/561))
+- quokkify/gh-pages-subdir-action v0.1.1 → v0.1.2 ([#563](https://github.com/quokkify/ci-kit/pull/563), [#564](https://github.com/quokkify/ci-kit/pull/564))
+- renovate 44.221.5 → 44.222.0 ([#566](https://github.com/quokkify/ci-kit/pull/566), [#568](https://github.com/quokkify/ci-kit/pull/568))
+
+**Maintenance**
+
+- update quokkify/ci-kit to v4.3.2 ([#559](https://github.com/quokkify/ci-kit/pull/559))
+
+</details>
 
 ## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
 
