@@ -1,5 +1,21 @@
 # Changelog
 
+## [4.3.3](https://github.com/quokkify/ci-kit/compare/v4.3.2...v4.3.3) (2026-11-08)
+
+
+### 🐛 Bug Fixes
+
+* **ci:** retry transient GitHub download and API failures ([#569](https://github.com/quokkify/ci-kit/issues/569)) ([ad1392a](https://github.com/quokkify/ci-kit/commit/ad1392ab482b461eccf499353a88dc9fd5b30923))
+
+
+### 📦 Dependencies
+
+* **allure-report-action:** update quokkify/allure-report-action to v0.5.4 ([#561](https://github.com/quokkify/ci-kit/issues/561)) ([e8048ba](https://github.com/quokkify/ci-kit/commit/e8048bab2b0d9caa1820244e400d9bbf94b6d41b))
+* **gh-pages-subdir-action:** update quokkify/gh-pages-subdir-action to v0.1.2 ([#563](https://github.com/quokkify/ci-kit/issues/563)) ([f459d9b](https://github.com/quokkify/ci-kit/commit/f459d9badeca335067d02e18c2e06614c82684e3))
+* **github-actions:** update quokkify/gh-pages-subdir-action action to v0.1.2 ([#564](https://github.com/quokkify/ci-kit/issues/564)) ([2bc8a57](https://github.com/quokkify/ci-kit/commit/2bc8a57c14ebce3f997d2ab0918501cf093bbd5d))
+* **renovate:** update renovate to v44.221.6 ([#566](https://github.com/quokkify/ci-kit/issues/566)) ([57fb7b2](https://github.com/quokkify/ci-kit/commit/57fb7b294d3f3f157723c6f3d7c71e67db1c00f3))
+* **renovate:** update renovate to v44.222.0 ([#568](https://github.com/quokkify/ci-kit/issues/568)) ([570203c](https://github.com/quokkify/ci-kit/commit/570203cf094bd8c1290c7c8534d8d3b325e6ac7d))
+
 ## [4.3.2](https://github.com/quokkify/ci-kit/compare/v4.3.1...v4.3.2) (2026-11-07)
 
 <!-- project-toolkit:release-notes v2 -->
