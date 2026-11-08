@@ -21,6 +21,7 @@ class GradleRetryTests(unittest.TestCase):
                 "#!/usr/bin/env bash\n"
                 "n=0; [[ -f \"$COUNT_FILE\" ]] && n=$(<\"$COUNT_FILE\")\n"
                 "n=$((n + 1)); printf '%s' \"$n\" > \"$COUNT_FILE\"\n"
+                "plugin_unresolved() { echo \"Plugin [id: 'com.vanniktech.maven.publish', version: '0.37.0', apply: false] was not found in any of the following sources:\"; echo; echo \"- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)\"; echo '- Included Builds (No included builds contain this plugin)'; echo \"- Plugin Repositories (could not resolve plugin artifact 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.37.0')\"; echo '  Searched in the following repositories:'; echo '    Gradle Central Plugin Repository'; }\n"
                 "case \"$MODE\" in\n"
                 "  ordinary) echo 'compilation failed'; exit 9;;\n"
                 "  dsl) echo 'Could not find method implementation() for arguments'; exit 11;;\n"
@@ -34,6 +35,12 @@ class GradleRetryTests(unittest.TestCase):
                 "  gradle-access-denied) [[ $n -lt 2 ]] && { echo \"            > Could not HEAD 'https://repo.example.invalid/missing.pom'.\"; echo '               > Received status code 403 from server: Forbidden'; exit 14; }; echo success; exit 0;;\n"
                 "  non-adjacent-status) echo \"            > Could not GET 'https://repo.example.invalid/missing.pom'.\"; echo '               > Received status code 500 from server: Internal Server Error'; echo '               > Received status code 429 from server: Too Many Requests'; exit 17;;\n"
                 "  detached-status) echo 'Received status code 429 from server: Too Many Requests'; exit 16;;\n"
+                "  plugin-unresolved) [[ $n -lt 2 ]] && { plugin_unresolved; exit 18; }; echo success; exit 0;;\n"
+                "  plugin-stacktrace) [[ $n -lt 2 ]] && { echo \"org.gradle.api.plugins.UnknownPluginException: Plugin [id: 'org.example.plugin', version: '1.0'] was not found in any of the following sources:\"; echo \"- Plugin Repositories (could not resolve plugin artifact 'org.example.plugin:org.example.plugin.gradle.plugin:1.0')\"; exit 22; }; echo success; exit 0;;\n"
+                "  persistent-plugin-unresolved) plugin_unresolved; exit $((30 + n));;\n"
+                "  not-found-then-plugin) if [[ $n -eq 1 ]]; then echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7; fi; [[ $n -eq 2 && \"$*\" == *--refresh-dependencies* ]] && { plugin_unresolved; exit 18; }; [[ \"$*\" == *--refresh-dependencies* ]] && { echo success; exit 0; }; exit 99;;\n"
+                "  plugin-not-in-sources) echo \"Plugin [id: 'org.example.missing'] was not found in any of the following sources:\"; echo \"- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)\"; echo '- Plugin Repositories (plugin dependency must include a version number for this source)'; exit 20;;\n"
+                "  detached-plugin-artifact) echo \"- Plugin Repositories (could not resolve plugin artifact 'org.example:org.example.gradle.plugin:1.0')\"; exit 21;;\n"
                 "  persistent-access-denied) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 15;;\n"
                 "esac\n"
             )
@@ -144,6 +151,42 @@ class GradleRetryTests(unittest.TestCase):
     def test_status_not_adjacent_to_request_is_not_retried(self) -> None:
         result, calls, _ = self.run_case("non-adjacent-status")
         self.assertEqual(result.returncode, 17)
+        self.assertEqual(calls, 1)
+
+    def test_plugin_resolution_failure_is_retried(self) -> None:
+        """Regression guard: a plugin portal outage surfaces as UnknownPluginException without an HTTP status."""
+        result, calls, _ = self.run_case("plugin-unresolved", max_attempts="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 2)
+        self.assertIn("plugin resolution", result.stdout)
+        self.assertNotIn("refresh-dependencies", result.stdout)
+
+    def test_stacktrace_plugin_resolution_failure_is_retried(self) -> None:
+        result, calls, _ = self.run_case("plugin-stacktrace", max_attempts="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 2)
+        self.assertIn("plugin resolution", result.stdout)
+
+    def test_persistent_plugin_resolution_failure_is_bounded(self) -> None:
+        result, calls, _ = self.run_case("persistent-plugin-unresolved", max_attempts="3")
+        self.assertEqual(calls, 3)
+        self.assertEqual(result.returncode, 33)
+        self.assertIn("retry budget exhausted after 3/3 attempts", result.stdout)
+
+    def test_plugin_failure_after_refresh_is_retried(self) -> None:
+        """Regression guard: the refresh retry can itself hit a plugin portal outage."""
+        result, calls, _ = self.run_case("not-found-then-plugin", max_attempts="2")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 3)
+
+    def test_plugin_missing_without_artifact_resolution_is_not_retried(self) -> None:
+        result, calls, _ = self.run_case("plugin-not-in-sources")
+        self.assertEqual(result.returncode, 20)
+        self.assertEqual(calls, 1)
+
+    def test_plugin_artifact_line_without_unknown_plugin_header_is_not_retried(self) -> None:
+        result, calls, _ = self.run_case("detached-plugin-artifact")
+        self.assertEqual(result.returncode, 21)
         self.assertEqual(calls, 1)
 
 
