@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run a Gradle command with bounded recovery for transient resolution failures.
-# Repository HTTP 403/429 failures retain exponential retry; a dependency
-# not-found gets one refresh.
+# Repository HTTP 403/429 failures and plugin artifact resolution failures
+# retain exponential retry; a dependency not-found gets one refresh.
 set -uo pipefail
 
 command_text() {
@@ -64,11 +64,22 @@ while true; do
     }
     END { print status }
   ' "$output_file")"
+  transient_reason=""
+  if [[ -n "$transient_status" ]]; then
+    transient_reason="repository HTTP ${transient_status}"
+  # A plugin portal outage carries no HTTP status: Gradle reports an unknown
+  # plugin whose repository lookup could not resolve the plugin artifact.
+  # Both parts are required so a plugin missing from other sources, or a
+  # stray artifact line, is not retried.
+  elif grep -qE "^[[:space:]>]*(org\.gradle\.api\.plugins\.UnknownPluginException: )?Plugin \[id: '[^']+'.*\] was not found in any of the following sources:" "$output_file" \
+    && grep -qE "^[[:space:]]*- Plugin Repositories \(could not resolve plugin artifact '[^']+'\)" "$output_file"; then
+    transient_reason="plugin resolution"
+  fi
 
-  if [[ -n "$transient_status" && "$attempt" -lt "$max_attempts" ]]; then
+  if [[ -n "$transient_reason" && "$attempt" -lt "$max_attempts" ]]; then
     jitter=$(( RANDOM % (delay / 3 + 1) ))
     sleep_for=$(( delay + jitter ))
-    echo "::warning::Gradle failed with a transient repository HTTP ${transient_status} (attempt ${attempt}/${max_attempts}). Retrying in ${sleep_for}s..."
+    echo "::warning::Gradle failed with a transient ${transient_reason} failure (attempt ${attempt}/${max_attempts}). Retrying in ${sleep_for}s..."
     rm -f -- "$output_file"
     output_file=""
     sleep "$sleep_for"
@@ -77,8 +88,8 @@ while true; do
     continue
   fi
 
-  if [[ -n "$transient_status" ]]; then
-    echo "::error::Gradle transient repository HTTP ${transient_status} retry budget exhausted after ${attempt}/${max_attempts} attempts."
+  if [[ -n "$transient_reason" ]]; then
+    echo "::error::Gradle transient ${transient_reason} retry budget exhausted after ${attempt}/${max_attempts} attempts."
   fi
 
   # Gradle's dependency-resolution not-found report includes both the module

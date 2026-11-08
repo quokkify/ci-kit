@@ -13,7 +13,7 @@ Executable examples use full commit SHA pins with release comments (`@<40-charac
 - `actions/setup-java-gradle/action.yml`
   - setup-java with dependency/JDK caching and Gradle wrapper validation
 - `actions/gradle-retry/action.yml`
-  - runs a trusted Gradle command with bounded repository HTTP 403/429 backoff and one `--refresh-dependencies` recovery attempt for repository not-found failures; unrelated `Forbidden`, HTTP 500, and ordinary failures are not retried
+  - runs a trusted Gradle command with bounded backoff for repository HTTP 403/429 and Gradle plugin artifact resolution failures (`UnknownPluginException` with `could not resolve plugin artifact`), and one `--refresh-dependencies` recovery attempt for repository not-found failures; unrelated `Forbidden`, HTTP 500, and ordinary failures are not retried. A plugin version that truly does not exist prints the same diagnostic as a plugin portal outage, so it fails only after the retry budget (about two minutes with the defaults)
 - `actions/compose-up/action.yml`
   - validates safe Compose/profile/hook inputs, delegates one startup lifecycle to the standalone health action, and optionally waits for HTTP readiness
 - `actions/deploy-gh-pages-subdir/action.yml`
