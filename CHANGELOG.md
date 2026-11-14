@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.3.6](https://github.com/quokkify/ci-kit/compare/v4.3.5...v4.3.6) (2026-11-14)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 9 internal
+
+<details><summary>Internal changes (9 PRs)</summary>
+
+**Dependencies**
+
+- actions/setup-java v6.2.0 → v6.3.0 ([#585](https://github.com/quokkify/ci-kit/pull/585))
+- node 24.22.2 → 24.22.3 ([#585](https://github.com/quokkify/ci-kit/pull/585))
+- renovate 44.222.1 → 44.235.2 (6 PRs, [#576](https://github.com/quokkify/ci-kit/pull/576)–[#583](https://github.com/quokkify/ci-kit/pull/583))
+- uv 0.13.7 → 0.13.8 ([#584](https://github.com/quokkify/ci-kit/pull/584))
+
+**Maintenance**
+
+- update quokkify/ci-kit to v4.3.5 ([#577](https://github.com/quokkify/ci-kit/pull/577))
+
+</details>
+
 ## [4.3.5](https://github.com/quokkify/ci-kit/compare/v4.3.4...v4.3.5) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
