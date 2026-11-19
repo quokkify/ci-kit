@@ -1,5 +1,30 @@
 # Changelog
 
+## [4.3.6](https://github.com/quokkify/ci-kit/compare/v4.3.5...v4.3.6) (2026-11-19)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 1 fixed · 14 internal
+
+### 🐛 Fixed
+
+- **renovate:** stop pip updates failing on two-part releases like 26.3 — Renovate could not update pip to releases without a patch number (for example 26.3): the update showed up as "Errored" on the Dependency Dashboard and was retried forever. The pip version pin in generated Renovate configs now accepts both `26.3` and `26.2.2`. ([#588](https://github.com/quokkify/ci-kit/pull/588))
+
+<details><summary>Internal changes (14 PRs)</summary>
+
+**Dependencies**
+
+- actions/setup-java v6.2.0 → v6.3.0 ([#585](https://github.com/quokkify/ci-kit/pull/585))
+- node 24.22.2 → 24.22.3 ([#585](https://github.com/quokkify/ci-kit/pull/585))
+- pip 26.2.2 → 26.3 ([#589](https://github.com/quokkify/ci-kit/pull/589))
+- renovate 44.222.1 → 44.252.8 (9 PRs, [#576](https://github.com/quokkify/ci-kit/pull/576)–[#591](https://github.com/quokkify/ci-kit/pull/591))
+- uv 0.13.7 → 0.13.9 ([#584](https://github.com/quokkify/ci-kit/pull/584), [#590](https://github.com/quokkify/ci-kit/pull/590))
+
+**Maintenance**
+
+- update quokkify/ci-kit to v4.3.5 ([#577](https://github.com/quokkify/ci-kit/pull/577))
+
+</details>
+
 ## [4.3.5](https://github.com/quokkify/ci-kit/compare/v4.3.4...v4.3.5) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
