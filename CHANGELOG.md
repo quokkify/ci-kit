@@ -1,5 +1,29 @@
 # Changelog
 
+## [4.3.6](https://github.com/quokkify/ci-kit/compare/v4.3.5...v4.3.6) (2026-11-19)
+
+
+### 🐛 Bug Fixes
+
+* **renovate:** stop pip updates failing on two-part releases like 26.3 ([#588](https://github.com/quokkify/ci-kit/issues/588)) ([48c4203](https://github.com/quokkify/ci-kit/commit/48c420341b88e7067c968f1e7e44b9ef16532fde))
+
+
+### 📦 Dependencies
+
+* **github-actions:** update github actions non-major updates ([#585](https://github.com/quokkify/ci-kit/issues/585)) ([fcca878](https://github.com/quokkify/ci-kit/commit/fcca87871392b10ff663a04e6223d25ee42db2a7))
+* **pip:** update pip to v26.3 ([#589](https://github.com/quokkify/ci-kit/issues/589)) ([b385597](https://github.com/quokkify/ci-kit/commit/b385597c695ac0cafec67e22de972a6a91fae8c0))
+* **renovate:** update renovate to v44.222.2 ([#576](https://github.com/quokkify/ci-kit/issues/576)) ([386fef6](https://github.com/quokkify/ci-kit/commit/386fef69c1f51526f400e205f2645b5bddb208ac))
+* **renovate:** update renovate to v44.222.5 ([#579](https://github.com/quokkify/ci-kit/issues/579)) ([2711136](https://github.com/quokkify/ci-kit/commit/27111366f63eaf3d898e4b2a64e7b4261fa09ed5))
+* **renovate:** update renovate to v44.225.1 ([#580](https://github.com/quokkify/ci-kit/issues/580)) ([9064b52](https://github.com/quokkify/ci-kit/commit/9064b52bc9a3bf16ad970762af71dd8e86f62fe4))
+* **renovate:** update renovate to v44.227.4 ([#581](https://github.com/quokkify/ci-kit/issues/581)) ([102ce54](https://github.com/quokkify/ci-kit/commit/102ce54fc5f3accf1c5b6e22e230f5cfea17c5e1))
+* **renovate:** update renovate to v44.234.1 ([#582](https://github.com/quokkify/ci-kit/issues/582)) ([dbb9f44](https://github.com/quokkify/ci-kit/commit/dbb9f44d2e14c000ee4accef67e759e5261254ce))
+* **renovate:** update renovate to v44.235.2 ([#583](https://github.com/quokkify/ci-kit/issues/583)) ([02ac603](https://github.com/quokkify/ci-kit/commit/02ac60388a0adaa7a064d4299eeefd7d54557b98))
+* **renovate:** update renovate to v44.239.1 ([#586](https://github.com/quokkify/ci-kit/issues/586)) ([13916fc](https://github.com/quokkify/ci-kit/commit/13916fc5c22bb96ba04350a94f5055ec2aed5299))
+* **renovate:** update renovate to v44.251.0 ([#587](https://github.com/quokkify/ci-kit/issues/587)) ([12cf8ee](https://github.com/quokkify/ci-kit/commit/12cf8ee16e11f2fcaed4ec70569974196976945a))
+* **renovate:** update renovate to v44.252.8 ([#591](https://github.com/quokkify/ci-kit/issues/591)) ([42e2044](https://github.com/quokkify/ci-kit/commit/42e20448c735de31c3b87a4b7a3ce047b08d8445))
+* **uv:** update uv to v0.13.8 ([#584](https://github.com/quokkify/ci-kit/issues/584)) ([4b791e4](https://github.com/quokkify/ci-kit/commit/4b791e4026a01b01937b78cce255dddc235954ae))
+* **uv:** update uv to v0.13.9 ([#590](https://github.com/quokkify/ci-kit/issues/590)) ([3f61c81](https://github.com/quokkify/ci-kit/commit/3f61c81667386f87a2ad93fa0b44a0602a671e77))
+
 ## [4.3.5](https://github.com/quokkify/ci-kit/compare/v4.3.4...v4.3.5) (2026-11-08)
 
 <!-- project-toolkit:release-notes v2 -->
