@@ -67,8 +67,8 @@
         "/^tools/ci_kit/workflow_inputs\\.json$/"
       ],
       "matchStrings": [
-        "pip-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\"",
-        "\"pip-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+        "pip-version:\\s+description:[^\\n]*\\n\\s+(?:required: false|type: string)\\s+default:\\s*\"(?<currentValue>\\d+\\.\\d+(?:\\.\\d+)?)\"",
+        "\"pip-version\": \\{\\s*\"default\": \"(?<currentValue>\\d+\\.\\d+(?:\\.\\d+)?)\""
       ],
       "depNameTemplate": "pip",
       "datasourceTemplate": "pypi",

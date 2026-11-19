@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -121,6 +122,24 @@ class RenovateConfigTests(unittest.TestCase):
         self.assertIn('"depNameTemplate": "python"', template)
         self.assertIn('"datasourceTemplate": "python-version"', template)
         self.assertIn('"versioningTemplate": "python"', template)
+
+    def test_pip_managers_still_match_after_a_two_part_release(self) -> None:
+        # Regression guard: pip 26.3 has no patch segment; Renovate re-extracts after autoreplace and
+        # aborted the update when the pattern demanded X.Y.Z.
+        config = json.loads(CHECKED_IN_RENOVATE_PATH.read_text(encoding="utf-8"))
+        pip = next(item for item in config["customManagers"] if item.get("depNameTemplate") == "pip")
+        patterns = [re.compile(pattern.replace("(?<", "(?P<")) for pattern in pip["matchStrings"]]
+        snippets = (
+            '  pip-version:\n    description: Pip version.\n    required: false\n    default: "{}"\n',
+            '    "pip-version": {{\n      "default": "{}",\n',
+        )
+        for version in ("26.2.2", "26.3"):
+            for snippet in snippets:
+                text = snippet.format(version)
+                matches = [m["currentValue"] for p in patterns if (m := p.search(text))]
+                self.assertEqual(matches, [version], text)
+        template = TEMPLATE_RENOVATE_PATH.read_text(encoding="utf-8")
+        self.assertIn('pip-version:\\\\s*\\\\\\"(?<currentValue>\\\\d+\\\\.\\\\d+(?:\\\\.\\\\d+)?)', template)
 
     def test_own_workflows_named_like_template_workflows_stay_updatable(self) -> None:
         sources = list(ROOT.glob("modules/*/template/.github/workflows"))
