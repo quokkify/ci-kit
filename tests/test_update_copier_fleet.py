@@ -1938,6 +1938,48 @@ class ChecksVerdictTests(TestCase):
         rollup = [cancelled, self.run_of("PR contract", "2026-10-22T11:20:03Z", "SUCCESS")]
         self.assertEqual(fleet.checks_verdict(rollup, self.NOW)[0], "failed")
 
+    def test_running_replacement_waits(self) -> None:
+        running = {**self.run_of("PR contract", "2026-10-22T11:20:03Z", None), "status": "IN_PROGRESS", "completedAt": None}
+        rollup = [self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED"), running]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("waiting", "checks still running"))
+
+    def test_failed_replacement_fails(self) -> None:
+        rollup = [self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED"),
+                  self.run_of("PR contract", "2026-10-22T11:20:03Z", "FAILURE")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW)[0], "failed")
+
+    def test_skipped_or_neutral_replacement_leaves_the_cancellation_blocking(self) -> None:
+        for conclusion in ("SKIPPED", "NEUTRAL"):
+            with self.subTest(conclusion=conclusion):
+                rollup = [self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED"),
+                          self.run_of("PR contract", "2026-10-22T11:20:03Z", conclusion)]
+                self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("failed", "failed checks: PR contract / PR contract"))
+
+    def test_status_contexts_are_never_dropped_nor_replacements(self) -> None:
+        cancelled = self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED")
+        context = {"__typename": "StatusContext", "context": cancelled["name"], "workflowName": "PR contract",
+                   "state": "SUCCESS", "startedAt": "2026-10-22T11:20:03Z"}
+        self.assertEqual(fleet.checks_verdict([cancelled, context], self.NOW)[0], "failed")
+        failing = {**context, "state": "ERROR"}
+        rollup = [failing, self.run_of("PR contract", "2026-10-22T11:20:05Z", "SUCCESS")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("failed", "failed checks: PR contract / PR contract"))
+
+    def test_equal_start_times_keep_the_cancellation(self) -> None:
+        rollup = [self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED"),
+                  self.run_of("PR contract", "2026-10-22T11:20:00Z", "SUCCESS")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW)[0], "failed")
+
+    def test_cancel_cancel_success_chain_is_ready(self) -> None:
+        rollup = [self.run_of("PR contract", "2026-10-22T11:20:00Z", "CANCELLED"),
+                  self.run_of("PR contract", "2026-10-22T11:20:02Z", "CANCELLED"),
+                  self.run_of("PR contract", "2026-10-22T11:20:04Z", "SUCCESS")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("ready", "all checks green"))
+
+    def test_naive_and_aware_timestamps_compare_as_utc(self) -> None:
+        rollup = [self.run_of("PR contract", "2026-10-22T11:20:00", "CANCELLED"),
+                  self.run_of("PR contract", "2026-10-22T11:20:03Z", "SUCCESS")]
+        self.assertEqual(fleet.checks_verdict(rollup, self.NOW), ("ready", "all checks green"))
+
     def test_failure_is_not_hidden_by_a_newer_success(self) -> None:
         rollup = [self.run_of("CI", "2026-10-22T11:20:00Z", "FAILURE", name="build"),
                   self.run_of("CI", "2026-10-22T11:20:03Z", "SUCCESS", name="build")]

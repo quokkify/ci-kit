@@ -124,10 +124,14 @@ are two paths, chosen by the repository's `allow_auto_merge` setting:
   updater merges the PR itself with `gh pr merge <number> --squash
   --match-head-commit <sha>`, but only when the PR is ready (D2):
   every `statusCheckRollup` entry on the current head is completed with
-  `SUCCESS`, `NEUTRAL` or `SKIPPED`, except a `CANCELLED` check run that a
-  later-started run of the same workflow and job replaced (concurrency cancels
-  the older run when a PR receives two events at once, and GitHub counts only
-  the newer one); at least one check exists; the last one
+  `SUCCESS`, `NEUTRAL` or `SKIPPED`, except a `CANCELLED` check run replaced
+  by a later-started run of the same workflow and job that is still running or
+  finished with `SUCCESS` (concurrency cancels the older run when a PR receives
+  two events at once). The replacement is then judged on its own; a `SKIPPED`,
+  `NEUTRAL` or failed replacement leaves the cancellation blocking. The rollup
+  carries no triggering event, so a cancelled `pull_request` run and a later
+  `push` run of the same workflow and job cannot be told apart, and matrix legs
+  that share one unexpanded job name count as one job; at least one check exists; the last one
   finished at least 10 minutes ago (late-registering workflows get time to
   appear); and `mergeable` is `MERGEABLE`. If check times are missing, the PR
   waits too. Otherwise the PR waits (`waiting`, merged by a later run, for
