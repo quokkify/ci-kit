@@ -4,7 +4,7 @@ Template update changes workflow files that the Actions token cannot push.
 
 ## Cause
 
-The `Update project template` workflow (`copier-update.yml`) pushes the `automation/copier-template-update` branch. GitHub rejects any push by the repository's Actions token (`GITHUB_TOKEN`) that creates or changes a file under `.github/workflows/`, and template updates usually do: every release moves the version pins in the generated workflows. Without a `TEMPLATE_UPDATE_TOKEN` repository secret the workflow stops before the push, lists the workflow files the update changes, and pushes nothing. Updates that change no workflow file are pushed with the Actions token as before.
+The `Update project template` workflow (`copier-update.yml`) pushes the `automation/copier-template-update` branch. GitHub rejects any push by the repository's Actions token (`GITHUB_TOKEN`) that creates or changes a file under `.github/workflows/`, and template updates usually do: every release moves the version pins in the generated workflows. Without a `TEMPLATE_UPDATE_TOKEN` repository secret the `Push the update branch` job stops before the push, lists the workflow files the update changes, and pushes nothing. Updates that change no workflow file are pushed with the Actions token as before.
 
 Public Quokkify repositories are also updated by the central fleet automation, which pushes with its own credential. Private repositories rely on this workflow alone.
 
@@ -12,7 +12,7 @@ Public Quokkify repositories are also updated by the central fleet automation, w
 
 Either:
 
-- Add a `TEMPLATE_UPDATE_TOKEN` repository secret and rerun the workflow. Use a fine-grained personal access token with an expiry date, scoped to this repository only, with `Contents: Read and write` and `Workflows: Read and write` (`Metadata: Read` is added automatically). Only the workflow's final `Push the update branch` step receives it. A GitHub App installation token does not work as a stored secret: it expires after one hour.
+- Add a `TEMPLATE_UPDATE_TOKEN` repository secret and rerun the workflow. Use a fine-grained personal access token with an expiry date, scoped to this repository only, with `Contents: Read and write` and `Workflows: Read and write` (`Metadata: Read` is added automatically). Only the workflow's `push` job receives it; the job that runs the template never does. A GitHub App installation token does not work as a stored secret: it expires after one hour.
 
   ```bash
   gh secret set TEMPLATE_UPDATE_TOKEN --repo <owner>/<repo>

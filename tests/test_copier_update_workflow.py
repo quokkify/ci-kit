@@ -37,10 +37,9 @@ def production_script(workflow: Path = WORKFLOW, index: int = 0) -> str:
     return script.replace("{% raw %}", "").replace("{% endraw %}", "")
 
 
-def rendered_steps() -> dict[str, dict]:
+def rendered_workflow() -> dict:
     content = WORKFLOW.read_text(encoding="utf-8").replace("{% raw %}", "").replace("{% endraw %}", "")
-    workflow = yaml.safe_load(content.replace("{{ toolkit_version }}", "v9.8.7"))
-    return {step["name"]: step for step in workflow["jobs"]["update"]["steps"]}
+    return yaml.safe_load(content.replace("{{ toolkit_version }}", "v9.8.7"))
 
 
 def step_outputs(path: Path) -> dict[str, str]:
@@ -99,7 +98,15 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             "mkdir -p .github/workflows && printf 'name: Validate\\n' > .github/workflows/validate.yml\n"
             if getattr(self, "ci_kit_changes_workflow", False) else ""
         )
-        update = "" if getattr(self, "ci_kit_noop", False) else (
+        # Template code may tamper with anything the job can reach; none of it may reach the push job.
+        tamper = (
+            "git config url.file:///nonexistent.pushInsteadOf https://github.com/fixture/project.git\n"
+            "mkdir -p \"$RUNNER_TEMP/evil\" && printf '#!/usr/bin/env bash\\nexit 99\\n' > \"$RUNNER_TEMP/evil/git\"\n"
+            "chmod +x \"$RUNNER_TEMP/evil/git\" && printf '%s\\n' \"$RUNNER_TEMP/evil\" >> \"$GITHUB_PATH\"\n"
+            "printf 'GIT_SSL_NO_VERIFY=1\\nHTTPS_PROXY=http://127.0.0.1:9\\n' >> \"$GITHUB_ENV\"\n"
+            if getattr(self, "ci_kit_tampers", False) else ""
+        )
+        update = tamper + "" if getattr(self, "ci_kit_noop", False) else tamper + (
             "printf 'module update\\n' > .ci-kit-updated\n" + workflow_change +
             "git add --all && git -c user.name=t -c user.email=t@example.com commit -q -m 'chore(ci-kit): update core'\n"
         )
@@ -115,21 +122,15 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             f"exec {shutil.which('python3') or sys.executable} \"$@\"\n",
             encoding="utf-8",
         )
-        if getattr(self, "workflow_diff_fails", False):
-            (bin_dir / "git").write_text(
-                "#!/usr/bin/env bash\n"
-                "if [[ \" $* \" == *\" diff --no-renames \"* ]]; then printf 'fatal: diff failed\\n' >&2; exit 128; fi\n"
-                f"exec {shutil.which('git')} \"$@\"\n",
-                encoding="utf-8",
-            )
-            (bin_dir / "git").chmod(0o755)
         for tool in (bin_dir / "gh", bin_dir / "copier", bin_dir / "ci-kit", bin_dir / "python"):
             tool.chmod(0o755)
         return bin_dir
 
-    def execute(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5", token_set: str = "false") -> subprocess.CompletedProcess[str]:
+    def run_update(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5") -> subprocess.CompletedProcess[str]:
         release_file = temporary / "release.json"
         release_file.write_text(json.dumps(release), encoding="utf-8")
+        runner_temp = temporary / "runner-temp"
+        runner_temp.mkdir(exist_ok=True)
         env = {
             **os.environ,
             "PATH": f"{self.fake_tools(temporary)}:{os.environ['PATH']}",
@@ -139,28 +140,57 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             "CI_KIT_LOG": str(temporary / "ci-kit.log"),
             "PIP_LOG": str(temporary / "pip.log"),
             "GITHUB_STEP_SUMMARY": str(temporary / "summary.md"),
+            "GITHUB_OUTPUT": str(temporary / "output"),
+            "GITHUB_PATH": str(temporary / "github-path"),
+            "GITHUB_ENV": str(temporary / "github-env"),
+            "RUNNER_TEMP": str(runner_temp),
+            "BRANCH": "automation/copier-template-update",
+        }
+        return subprocess.run(["bash", "-c", self.script], cwd=checkout, env=env, text=True, capture_output=True)
+
+    def run_push(self, bare: Path, temporary: Path, outputs: dict[str, str], token_set: str = "false", diff_fails: bool = False) -> subprocess.CompletedProcess[str]:
+        """A fresh job: new clone of the default branch, the artifact, and none of the update job's state."""
+        fresh = temporary / "push-checkout"
+        run_git("clone", "-q", "--branch", "main", str(bare), str(fresh), cwd=temporary)
+        run_git("config", f"url.{bare}.insteadOf", "https://github.com/fixture/project.git", cwd=fresh)
+        artifact = temporary / "artifact"
+        artifact.mkdir()
+        shutil.copy2(temporary / "runner-temp/update.bundle", artifact / "update.bundle")
+        path = os.environ["PATH"]
+        if diff_fails:
+            fake = temporary / "push-bin"
+            fake.mkdir()
+            (fake / "git").write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \" $* \" == *\" diff --no-renames \"* ]]; then printf 'fatal: diff failed\\n' >&2; exit 128; fi\n"
+                f"exec {shutil.which('git')} \"$@\"\n",
+                encoding="utf-8",
+            )
+            (fake / "git").chmod(0o755)
+            path = f"{fake}:{path}"
+        env = {
+            "PATH": path,
+            "HOME": os.environ.get("HOME", str(temporary)),
+            "PUSH_TOKEN": "fixture-token",
+            "TEMPLATE_UPDATE_TOKEN_SET": token_set,
+            "REF": outputs["ref"],
+            "BASE": outputs["base"],
+            "BUNDLE": str(artifact / "update.bundle"),
+            "BRANCH": "automation/copier-template-update",
+            "DEFAULT_BRANCH": "main",
             "GITHUB_SERVER_URL": "https://github.com",
             "GITHUB_REPOSITORY": "fixture/project",
-            "DEFAULT_BRANCH": "main",
-            "BRANCH": "automation/copier-template-update",
-            "TEMPLATE_UPDATE_TOKEN_SET": token_set,
-            "GITHUB_OUTPUT": str(temporary / "output"),
+            "GITHUB_STEP_SUMMARY": str(temporary / "summary.md"),
         }
-        # Pushes go to the step's explicit repository URL; point it at the fixture remote.
-        bare = run_git("config", "--get", "remote.origin.url", cwd=checkout)
-        run_git("config", "--add", f"url.{bare}.insteadOf", "https://github.com/fixture/project.git", cwd=checkout)
-        update = subprocess.run(
-            ["bash", "-c", self.script], cwd=checkout, env=env, text=True, capture_output=True
-        )
+        return subprocess.run(["bash", "-c", self.push_script], cwd=fresh, env=env, text=True, capture_output=True)
+
+    def execute(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5", token_set: str = "false") -> subprocess.CompletedProcess[str]:
+        update = self.run_update(checkout, temporary, release, template_ref)
         outputs = step_outputs(temporary / "output")
         if update.returncode or outputs.get("push") != "true":
             return update
-        push_env = {**env, "PUSH_TOKEN": "fixture-token", "REF": outputs["ref"]}
-        for key in ("TEMPLATE_REF", "TEMPLATE_UPDATE_TOKEN_SET", "GITHUB_OUTPUT"):
-            push_env.pop(key)
-        push = subprocess.run(
-            ["bash", "-c", self.push_script], cwd=checkout, env=push_env, text=True, capture_output=True
-        )
+        bare = Path(run_git("config", "--get", "remote.origin.url", cwd=checkout))
+        push = self.run_push(bare, temporary, outputs, token_set, getattr(self, "workflow_diff_fails", False))
         return subprocess.CompletedProcess(push.args, push.returncode, update.stdout + push.stdout, update.stderr + push.stderr)
 
     def test_yaml_dependency_is_in_test_setup_not_generated_update_workflow(self) -> None:
@@ -202,29 +232,102 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
             self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "2")
 
-    def test_only_the_push_step_holds_a_push_credential(self) -> None:
-        steps = rendered_steps()
-        checkout, setup, update, push = steps.values()
+    def test_template_code_and_push_credential_run_in_separate_jobs(self) -> None:
+        workflow = rendered_workflow()
+        self.assertEqual(workflow["permissions"], {"contents": "read"})
+        update, push = workflow["jobs"]["update"], workflow["jobs"]["push"]
+        self.assertEqual(set(workflow["jobs"]), {"update", "push"})
+
+        self.assertEqual(update["permissions"], {"contents": "read"})
+        self.assertNotIn("secrets.", yaml.safe_dump(update))
+        self.assertEqual(update["outputs"], {
+            "push": "${{ steps.update.outputs.push }}",
+            "ref": "${{ steps.update.outputs.ref }}",
+            "base": "${{ steps.update.outputs.base }}",
+        })
+        checkout, _, apply, upload = update["steps"]
         self.assertEqual(checkout["uses"], "quokkify/ci-kit/actions/checkout@v9.8.7")
         self.assertIs(checkout["with"]["persist-credentials"], False)
-        self.assertNotIn("token", checkout["with"])
-        self.assertEqual(update["id"], "update")
-        self.assertEqual(update["env"]["TEMPLATE_UPDATE_TOKEN_SET"], "${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}")
-        self.assertEqual(update["env"]["GH_TOKEN"], "${{ github.token }}")
-        for name in ("PUSH_TOKEN", "TEMPLATE_UPDATE_TOKEN"):
-            self.assertNotIn(name, update["env"])
-        for step in (checkout, setup, update):
-            self.assertNotIn("secrets.TEMPLATE_UPDATE_TOKEN ||", yaml.safe_dump(step))
-        self.assertNotIn("extraheader", self.script)
-        self.assertNotIn("git push", self.script)
-        self.assertNotIn("ls-remote", self.script)
-        self.assertEqual(push["name"], "Push the update branch")
-        self.assertEqual(push["if"], "steps.update.outputs.push == 'true'")
-        self.assertEqual(push["env"]["PUSH_TOKEN"], "${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}")
-        self.assertEqual(push["env"]["REF"], "${{ steps.update.outputs.ref }}")
+        self.assertEqual(apply["id"], "update")
+        self.assertEqual(upload["if"], "steps.update.outputs.push == 'true'")
+        self.assertRegex(upload["uses"], r"^actions/upload-artifact@[0-9a-f]{40}$")
+        self.assertEqual(upload["with"]["path"], "${{ runner.temp }}/update.bundle")
+        self.assertEqual(upload["with"]["retention-days"], 1)
+        self.assertEqual(upload["with"]["if-no-files-found"], "error")
+        for forbidden in ("extraheader", "git push", "ls-remote", "TEMPLATE_UPDATE_TOKEN_SET"):
+            self.assertNotIn(forbidden, self.script)
+
+        self.assertEqual(push["needs"], "update")
+        self.assertEqual(push["if"], "needs.update.outputs.push == 'true'")
+        self.assertEqual(push["permissions"], {"contents": "write"})
+        dumped = yaml.safe_dump(push)
+        for forbidden in ("pip install", "copier ", "ci-kit update --repo", "setup-python", "steps.update"):
+            self.assertNotIn(forbidden, dumped)
+        fresh, download, step = push["steps"]
+        self.assertEqual(fresh["uses"], "quokkify/ci-kit/actions/checkout@v9.8.7")
+        self.assertIs(fresh["with"]["persist-credentials"], False)
+        self.assertNotIn("ref", fresh["with"])
+        self.assertRegex(download["uses"], r"^actions/download-artifact@[0-9a-f]{40}$")
+        self.assertEqual(download["with"]["name"], upload["with"]["name"])
+        self.assertEqual(step["env"]["PUSH_TOKEN"], "${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}")
+        self.assertEqual(step["env"]["TEMPLATE_UPDATE_TOKEN_SET"], "${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}")
+        self.assertEqual(step["env"]["REF"], "${{ needs.update.outputs.ref }}")
+        self.assertEqual(step["env"]["BASE"], "${{ needs.update.outputs.base }}")
+        self.assertEqual(step["env"]["BUNDLE"], "${{ runner.temp }}/template-update/update.bundle")
         self.assertIn("::add-mask::", self.push_script)
         self.assertIn("core.hooksPath", self.push_script)
         self.assertLess(self.push_script.index("::add-mask::"), self.push_script.index("ls-remote"))
+        self.assertLess(self.push_script.index("CIK-CORE-031"), self.push_script.index("ls-remote"))
+
+    def test_update_job_bundles_every_new_commit_on_top_of_the_start(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.legacy_checkout(temporary, self.handed_off(LEGACY_AREAS))
+            start = run_git("rev-parse", "HEAD", cwd=checkout)
+            result = self.run_update(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            outputs = step_outputs(temporary / "output")
+            self.assertEqual(outputs, {"push": "true", "ref": "v2.21.5", "base": start})
+            bundle = temporary / "runner-temp/update.bundle"
+            verify = subprocess.run(["git", "bundle", "verify", str(bundle)], cwd=checkout, text=True, capture_output=True)
+            self.assertEqual(verify.returncode, 0, verify.stderr)
+            self.assertIn(start, verify.stdout + verify.stderr)
+            heads = run_git("bundle", "list-heads", str(bundle), cwd=checkout)
+            self.assertEqual(heads, f"{run_git('rev-parse', 'HEAD', cwd=checkout)} refs/heads/automation/copier-template-update")
+            self.assertEqual(run_git("rev-list", "--count", f"{start}..HEAD", cwd=checkout), "2")
+
+    def test_push_refuses_a_bundle_that_does_not_build_on_the_checked_out_base(self) -> None:
+        for case in ("default branch moved", "base output forged"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as raw:
+                temporary = Path(raw)
+                checkout, bare = self.make_checkout(temporary)
+                result = self.run_update(checkout, temporary, STABLE)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs = step_outputs(temporary / "output")
+                other = temporary / "other"
+                run_git("clone", "-q", str(bare), str(other), cwd=temporary)
+                (other / "moved").write_text("moved\n", encoding="utf-8")
+                run_git("add", ".", cwd=other)
+                run_git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "moved", cwd=other)
+                run_git("push", "-q", "origin", "HEAD:refs/heads/main", cwd=other)
+                if case == "base output forged":
+                    outputs["base"] = run_git("rev-parse", "HEAD", cwd=other)
+                push = self.run_push(bare, temporary, outputs)
+                self.assertEqual(push.returncode, 1)
+                self.assertIn("Refusing to push the template update: the bundle", push.stderr)
+                self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
+
+    def test_update_job_state_cannot_reach_the_push_job(self) -> None:
+        self.ci_kit_tampers = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("pushinsteadof", run_git("config", "--list", cwd=checkout).lower())
+            self.assertIn("evil", (temporary / "github-path").read_text(encoding="utf-8"))
+            files = run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", "automation/copier-template-update", cwd=temporary)
+            self.assertIn(".ci-kit-updated", files.splitlines())
 
     def test_push_step_sends_the_token_and_keeps_it_out_of_git_config(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -234,7 +337,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             header = base64.b64encode(b"x-access-token:fixture-token").decode()
             self.assertIn(f"::add-mask::{header}\n", result.stdout)
-            config = run_git("config", "--list", "--show-origin", cwd=checkout)
+            config = run_git("config", "--list", "--show-origin", cwd=temporary / "push-checkout")
             self.assertNotIn(header, config)
             self.assertNotIn("fixture-token", config)
             summary = (temporary / "summary.md").read_text(encoding="utf-8")
@@ -250,7 +353,6 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             result = self.execute(checkout, temporary, STABLE)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("fatal: diff failed", result.stderr)
-            self.assertNotIn("push", step_outputs(temporary / "output"))
             self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
 
     def test_no_op_update_does_not_run_the_push(self) -> None:
@@ -282,7 +384,6 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             checkout, bare = self.make_checkout(temporary)
             result = self.execute(checkout, temporary, STABLE)
             self.assertEqual(result.returncode, 1)
-            self.assertNotIn("push", step_outputs(temporary / "output"))
             self.assertIn("CIK-CORE-031", result.stderr)
             self.assertIn("  .github/workflows/validate.yml\n", result.stderr)
             self.assertNotIn(".ci-kit-updated", result.stderr)
