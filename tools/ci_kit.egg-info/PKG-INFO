@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: ci-kit
-Version: 0.0.0
-Requires-Python: >=3.12
-License-File: LICENSE
-Requires-Dist: PyYAML==6.0.3
-Requires-Dist: jsonschema==4.26.0
-Requires-Dist: copier==9.19.1
-Dynamic: license-file
