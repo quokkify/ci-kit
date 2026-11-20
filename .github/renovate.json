@@ -47,15 +47,15 @@
       "pinDigests": true
     },
     {
-      "description": "Re-enable updates in ci-kit's own workflows that share a name with template-owned consumer workflows; the shared base preset disables those names for consumers.",
-      "matchFileNames": [".github/workflows/codeql.yml", ".github/workflows/pr-contract.yml", ".github/workflows/release.yml", ".github/workflows/validate.yml"],
-      "enabled": true
-    },
-    {
       "description": "Bump the ci-kit runtime pins in pyproject.toml, workflows and templates together with requirements/fleet.in and its regenerated lock, so the fleet lock never disagrees with pyproject.toml.",
       "matchManagers": ["custom.regex", "pip-compile"],
       "matchPackageNames": ["/^(?:PyYAML|pyyaml|copier|jsonschema)$/"],
       "groupName": "ci-kit runtime dependencies"
+    },
+    {
+      "description": "Re-enable updates in ci-kit's own workflows that share a name with template-owned consumer workflows; the shared base preset disables those names for consumers.",
+      "matchFileNames": [".github/workflows/codeql.yml", ".github/workflows/pr-contract.yml", ".github/workflows/release.yml", ".github/workflows/validate.yml"],
+      "enabled": true
     }
   ],
   "customManagers": [
