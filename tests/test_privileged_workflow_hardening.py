@@ -181,5 +181,64 @@ class ReleaseFleetSecretTests(unittest.TestCase):
             self.assertEqual(step_named(update, name)["env"]["GH_TOKEN"], "${{ secrets.FLEET_UPDATE_TOKEN }}")
 
 
+class ReleasePleaseLeastPrivilegeTests(unittest.TestCase):
+    """Regression guard: every job of the reusable workflow declares only what it uses."""
+
+    EXPECTED = {
+        "validate": {"contents": "read"},
+        # release-please-action creates release PRs, labels, tags and releases through the API.
+        "single": {"contents": "write", "pull-requests": "write"},
+        "manifest": {"contents": "write", "pull-requests": "write"},
+        # `gh release edit` rewrites component release notes; no pull request is touched.
+        "sync-component-releases": {"contents": "write"},
+        # Pushes the enriched CHANGELOG commit and PATCHes the release PR body.
+        "enrich": {"contents": "write", "pull-requests": "write"},
+    }
+
+    def setUp(self) -> None:
+        self.workflow = load(RELEASE_PLEASE_WORKFLOW)
+
+    def test_default_token_is_read_only(self) -> None:
+        self.assertEqual(self.workflow["permissions"], {"contents": "read"})
+
+    def test_each_job_declares_its_minimal_permissions(self) -> None:
+        jobs = self.workflow["jobs"]
+        self.assertEqual(set(jobs), set(self.EXPECTED))
+        for name, permissions in self.EXPECTED.items():
+            with self.subTest(job=name):
+                self.assertEqual(jobs[name].get("permissions"), permissions)
+
+    def test_callers_grant_everything_the_jobs_request(self) -> None:
+        template = (ROOT / "modules/release/template/.github/workflows/release.yml.jinja").read_text(encoding="utf-8")
+        caller = yaml.safe_load(re.sub(r"\{\{.*?\}\}", "x", re.sub(r"\{%-?.*?%\}", "", template)))
+        granted = caller["permissions"]
+        ranks = {"none": 0, "read": 1, "write": 2}
+        for name, permissions in self.EXPECTED.items():
+            for scope, level in permissions.items():
+                with self.subTest(job=name, scope=scope):
+                    self.assertGreaterEqual(ranks[granted.get(scope, "none")], ranks[level])
+        self.assertLessEqual(
+            {"contents", "pull-requests"}, set(load(RELEASE_WORKFLOW)["permissions"])
+        )
+
+    def test_no_checkout_persists_the_job_token(self) -> None:
+        for name, job in self.workflow["jobs"].items():
+            for step in job["steps"]:
+                if str(step.get("uses", "")).startswith(CHECKOUT):
+                    with self.subTest(job=name, step=step.get("name")):
+                        self.assertIs(step.get("with", {}).get("persist-credentials"), False)
+
+    def test_enrich_supplies_a_git_credential_only_to_the_push(self) -> None:
+        enrich = self.workflow["jobs"]["enrich"]
+        prepare = step_named(enrich, "Prepare enriched release notes")
+        update = step_named(enrich, "Update the existing Release Please pull request")
+        self.assertNotIn("credential", prepare["run"])
+        pushes = [line.strip() for line in update["run"].splitlines() if " push " in line]
+        self.assertEqual(
+            pushes, ["git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD"]
+        )
+        self.assertEqual(update["env"]["GH_TOKEN"], "${{ github.token }}")
+
+
 if __name__ == "__main__":
     unittest.main()

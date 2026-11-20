@@ -47,9 +47,9 @@ on:
         description: Tag Release Please created, empty when no release was cut.
         value: ${{ jobs.single.outputs.tag-name || jobs.manifest.outputs.tag-name }}
 
+# Each job declares what it uses; the default leaves new jobs read-only.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   validate:
@@ -101,6 +101,10 @@ jobs:
     if: ${{ inputs.mode == 'single' }}
     needs: validate
     runs-on: ubuntu-latest
+    # release-please-action opens and labels release PRs and creates tags and releases through the API.
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       releases-created: ${{ steps.release.outputs.releases_created }}
       tag-name: ${{ steps.release.outputs.tag_name }}
@@ -109,6 +113,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run Release Please for one package
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -123,6 +129,10 @@ jobs:
     if: ${{ inputs.mode == 'manifest' }}
     needs: validate
     runs-on: ubuntu-latest
+    # release-please-action opens and labels release PRs and creates tags and releases through the API.
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
       releases-created: ${{ steps.release.outputs.releases_created }}
       tag-name: ${{ steps.release.outputs.tag_name || steps.release.outputs['.--tag_name'] }}
@@ -132,6 +142,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run Release Please in manifest mode
         id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
@@ -149,6 +161,9 @@ jobs:
     needs: manifest
     runs-on: ubuntu-latest
     continue-on-error: true
+    # `gh release edit` rewrites release notes; no pull request is read or written.
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -191,11 +206,18 @@ jobs:
             (needs.manifest.outputs.release-prs != '' || needs.manifest.outputs.releases-created != 'true'))) }}
     needs: [single, manifest]
     runs-on: ubuntu-latest
+    # Pushes the enriched CHANGELOG commit to the release branch and updates the release PR body.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
+      # The enrichment script is repository code: it gets no Git credential in .git/config.
+      # `gh pr checkout` authenticates its own fetch, and only the push below gets one.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Prepare enriched release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -243,7 +265,7 @@ jobs:
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add -- "${changelogs[@]}"
             git commit -m "chore(release): enrich release notes"
-            git push origin HEAD
+            git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD
           fi
           if [[ "$(jq -r '.body_changed' "$OUTPUT_DIRECTORY/metadata.json")" == true ]]; then
             release_pr="$(jq -r '.release_pr' "$OUTPUT_DIRECTORY/metadata.json")"

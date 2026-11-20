@@ -1549,9 +1549,28 @@ call = docker[on_key]["workflow_call"]
 check(call["inputs"]["push"]["default"] is False, "Docker push default must be false")
 release = yaml.safe_load((ROOT / ".github/workflows/release-please.yml").read_text())
 check(
-    release.get("permissions") == {"contents": "write", "pull-requests": "write"},
-    "Release workflow permissions must be exactly contents:write and pull-requests:write",
+    release.get("permissions") == {"contents": "read"},
+    "Reusable Release Please default permissions must be exactly contents:read; jobs declare their own",
 )
+RELEASE_PLEASE_JOB_PERMISSIONS = {
+    "validate": {"contents": "read"},
+    "single": {"contents": "write", "pull-requests": "write"},
+    "manifest": {"contents": "write", "pull-requests": "write"},
+    "sync-component-releases": {"contents": "write"},
+    "enrich": {"contents": "write", "pull-requests": "write"},
+}
+for job_name, job in (release.get("jobs") or {}).items():
+    check(
+        job.get("permissions") == RELEASE_PLEASE_JOB_PERMISSIONS.get(job_name),
+        f"Reusable Release Please job {job_name} must declare exactly "
+        f"{RELEASE_PLEASE_JOB_PERMISSIONS.get(job_name)!r} permissions",
+    )
+    for step in job.get("steps") or []:
+        if str(step.get("uses", "")).startswith("actions/checkout@"):
+            check(
+                (step.get("with") or {}).get("persist-credentials") is False,
+                f"Reusable Release Please job {job_name} must not persist checkout credentials",
+            )
 release_manifest = json.loads((ROOT / ".github/release-please/manifest.json").read_text())
 check(
     not release_manifest_errors(release_manifest),
