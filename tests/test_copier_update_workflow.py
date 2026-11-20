@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import json
 import os
 import shutil
@@ -19,11 +20,33 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "modules/core/template/.github/workflows/copier-update.yml.jinja"
 
 
-def production_script(workflow: Path = WORKFLOW) -> str:
-    content = workflow.read_text(encoding="utf-8")
-    run_block = content.split("        run: |\n", 1)[1]
-    script = textwrap.dedent(run_block)
+def run_blocks(content: str) -> list[str]:
+    blocks = []
+    for chunk in content.split("        run: |\n")[1:]:
+        lines = []
+        for line in chunk.splitlines(keepends=True):
+            if line.strip() and not line.startswith("          "):
+                break
+            lines.append(line)
+        blocks.append("".join(lines))
+    return blocks
+
+
+def production_script(workflow: Path = WORKFLOW, index: int = 0) -> str:
+    script = textwrap.dedent(run_blocks(workflow.read_text(encoding="utf-8"))[index])
     return script.replace("{% raw %}", "").replace("{% endraw %}", "")
+
+
+def rendered_steps() -> dict[str, dict]:
+    content = WORKFLOW.read_text(encoding="utf-8").replace("{% raw %}", "").replace("{% endraw %}", "")
+    workflow = yaml.safe_load(content.replace("{{ toolkit_version }}", "v9.8.7"))
+    return {step["name"]: step for step in workflow["jobs"]["update"]["steps"]}
+
+
+def step_outputs(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
 
 
 def run_git(*args: str, cwd: Path) -> str:
@@ -42,6 +65,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.script = production_script()
+        self.push_script = production_script(index=1)
 
     def make_checkout(self, temporary: Path) -> tuple[Path, Path]:
         bare = temporary / "remote.git"
@@ -91,6 +115,14 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             f"exec {shutil.which('python3') or sys.executable} \"$@\"\n",
             encoding="utf-8",
         )
+        if getattr(self, "workflow_diff_fails", False):
+            (bin_dir / "git").write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \" $* \" == *\" diff --no-renames \"* ]]; then printf 'fatal: diff failed\\n' >&2; exit 128; fi\n"
+                f"exec {shutil.which('git')} \"$@\"\n",
+                encoding="utf-8",
+            )
+            (bin_dir / "git").chmod(0o755)
         for tool in (bin_dir / "gh", bin_dir / "copier", bin_dir / "ci-kit", bin_dir / "python"):
             tool.chmod(0o755)
         return bin_dir
@@ -112,10 +144,24 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             "DEFAULT_BRANCH": "main",
             "BRANCH": "automation/copier-template-update",
             "TEMPLATE_UPDATE_TOKEN_SET": token_set,
+            "GITHUB_OUTPUT": str(temporary / "output"),
         }
-        return subprocess.run(
+        # Pushes go to the step's explicit repository URL; point it at the fixture remote.
+        bare = run_git("config", "--get", "remote.origin.url", cwd=checkout)
+        run_git("config", "--add", f"url.{bare}.insteadOf", "https://github.com/fixture/project.git", cwd=checkout)
+        update = subprocess.run(
             ["bash", "-c", self.script], cwd=checkout, env=env, text=True, capture_output=True
         )
+        outputs = step_outputs(temporary / "output")
+        if update.returncode or outputs.get("push") != "true":
+            return update
+        push_env = {**env, "PUSH_TOKEN": "fixture-token", "REF": outputs["ref"]}
+        for key in ("TEMPLATE_REF", "TEMPLATE_UPDATE_TOKEN_SET", "GITHUB_OUTPUT"):
+            push_env.pop(key)
+        push = subprocess.run(
+            ["bash", "-c", self.push_script], cwd=checkout, env=push_env, text=True, capture_output=True
+        )
+        return subprocess.CompletedProcess(push.args, push.returncode, update.stdout + push.stdout, update.stderr + push.stderr)
 
     def test_yaml_dependency_is_in_test_setup_not_generated_update_workflow(self) -> None:
         self.assertNotIn("pip install --disable-pip-version-check --quiet PyYAML==6.0.3", self.script)
@@ -156,16 +202,67 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
             self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "2")
 
-    def test_push_credential_comes_from_the_optional_secret(self) -> None:
-        content = WORKFLOW.read_text(encoding="utf-8").replace("{% raw %}", "").replace("{% endraw %}", "")
-        workflow = yaml.safe_load(content.replace("{{ toolkit_version }}", "v9.8.7"))
-        checkout, _, update = workflow["jobs"]["update"]["steps"]
+    def test_only_the_push_step_holds_a_push_credential(self) -> None:
+        steps = rendered_steps()
+        checkout, setup, update, push = steps.values()
         self.assertEqual(checkout["uses"], "quokkify/ci-kit/actions/checkout@v9.8.7")
-        self.assertEqual(checkout["with"]["token"], "${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}")
-        self.assertNotIn("persist-credentials", checkout["with"])
+        self.assertIs(checkout["with"]["persist-credentials"], False)
+        self.assertNotIn("token", checkout["with"])
+        self.assertEqual(update["id"], "update")
         self.assertEqual(update["env"]["TEMPLATE_UPDATE_TOKEN_SET"], "${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}")
-        self.assertNotIn("TEMPLATE_UPDATE_TOKEN", update["env"])
+        self.assertEqual(update["env"]["GH_TOKEN"], "${{ github.token }}")
+        for name in ("PUSH_TOKEN", "TEMPLATE_UPDATE_TOKEN"):
+            self.assertNotIn(name, update["env"])
+        for step in (checkout, setup, update):
+            self.assertNotIn("secrets.TEMPLATE_UPDATE_TOKEN ||", yaml.safe_dump(step))
         self.assertNotIn("extraheader", self.script)
+        self.assertNotIn("git push", self.script)
+        self.assertNotIn("ls-remote", self.script)
+        self.assertEqual(push["name"], "Push the update branch")
+        self.assertEqual(push["if"], "steps.update.outputs.push == 'true'")
+        self.assertEqual(push["env"]["PUSH_TOKEN"], "${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}")
+        self.assertEqual(push["env"]["REF"], "${{ steps.update.outputs.ref }}")
+        self.assertIn("::add-mask::", self.push_script)
+        self.assertIn("core.hooksPath", self.push_script)
+        self.assertLess(self.push_script.index("::add-mask::"), self.push_script.index("ls-remote"))
+
+    def test_push_step_sends_the_token_and_keeps_it_out_of_git_config(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            header = base64.b64encode(b"x-access-token:fixture-token").decode()
+            self.assertIn(f"::add-mask::{header}\n", result.stdout)
+            config = run_git("config", "--list", "--show-origin", cwd=checkout)
+            self.assertNotIn(header, config)
+            self.assertNotIn("fixture-token", config)
+            summary = (temporary / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("Updated to v2.21.5 and pushed automation/copier-template-update.", summary)
+            self.assertIn("https://github.com/fixture/project/compare/main...automation/copier-template-update?expand=1", summary)
+
+    def test_failed_workflow_diff_stops_before_the_push(self) -> None:
+        self.ci_kit_changes_workflow = True
+        self.workflow_diff_fails = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("fatal: diff failed", result.stderr)
+            self.assertNotIn("push", step_outputs(temporary / "output"))
+            self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
+
+    def test_no_op_update_does_not_run_the_push(self) -> None:
+        self.ci_kit_noop = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("push", step_outputs(temporary / "output"))
+            self.assertIn("Already up to date with v2.21.5", (temporary / "summary.md").read_text(encoding="utf-8"))
+            self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
 
     def test_workflow_changes_are_pushed_with_the_secret(self) -> None:
         self.ci_kit_changes_workflow = True
@@ -185,6 +282,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             checkout, bare = self.make_checkout(temporary)
             result = self.execute(checkout, temporary, STABLE)
             self.assertEqual(result.returncode, 1)
+            self.assertNotIn("push", step_outputs(temporary / "output"))
             self.assertIn("CIK-CORE-031", result.stderr)
             self.assertIn("  .github/workflows/validate.yml\n", result.stderr)
             self.assertNotIn(".ci-kit-updated", result.stderr)
@@ -348,11 +446,10 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
         self.assertNotIn("|| true", section)
 
     def test_module_update_has_no_expression_interpolation_in_run(self) -> None:
-        content = WORKFLOW.read_text(encoding="utf-8")
-        run_block = content.split("        run: |\n", 1)[1]
-        stripped = re.sub(r"\{% raw %\}\$\{#\w+\[@\]\}\{% endraw %\}", "", run_block)
-        self.assertNotIn("${{", stripped)
-        self.assertNotIn("{{", stripped)
+        for run_block in run_blocks(WORKFLOW.read_text(encoding="utf-8")):
+            stripped = run_block.replace("{% raw %}${#rejected[@]}{% endraw %}", "")
+            self.assertNotIn("${{", stripped)
+            self.assertNotIn("{{", stripped)
 
     def test_module_update_runs_ci_kit_not_copier(self) -> None:
         # core renders this workflow, so .copier-answers.core.yml always exists; the module

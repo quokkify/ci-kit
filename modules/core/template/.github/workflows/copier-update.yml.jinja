@@ -25,7 +25,7 @@ jobs:
         uses: quokkify/ci-kit/actions/checkout@{{ toolkit_version }}
         with:
           fetch-depth: 0
-          token: {% raw %}${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}{% endraw %}
+          persist-credentials: false
 
       - name: Set up Python and Copier
         uses: quokkify/ci-kit/actions/setup-python@{{ toolkit_version }}
@@ -35,11 +35,11 @@ jobs:
           cache-dependencies: "false"
           install-command: python -m pip install copier==9.19.1
 
-      - name: Apply the template and push the update branch
+      - name: Apply the template
+        id: update
         env:
           TEMPLATE_REF: {% raw %}${{ inputs.template-ref }}{% endraw %}
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
-          DEFAULT_BRANCH: {% raw %}${{ github.event.repository.default_branch }}{% endraw %}
           BRANCH: automation/copier-template-update
           TEMPLATE_UPDATE_TOKEN_SET: {% raw %}${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}{% endraw %}
         run: |
@@ -158,20 +158,40 @@ jobs:
           # GitHub rejects a push by the Actions token that creates or changes a workflow file.
           # Without TEMPLATE_UPDATE_TOKEN, stop here with the way out instead of that rejection.
           if [[ "${TEMPLATE_UPDATE_TOKEN_SET:-false}" != true ]]; then
-            mapfile -t workflows < <(git diff --no-renames --name-only "$base" HEAD -- .github/workflows)
-            if (( {% raw %}${#workflows[@]}{% endraw %} )); then
+            workflows="$(git diff --no-renames --name-only "$base" HEAD -- .github/workflows)"
+            if [[ -n "$workflows" ]]; then
               printf 'Refusing to push the template update: CIK-CORE-031 the Actions token cannot push changes to workflow files:\n' >&2
-              printf '  %s\n' "${workflows[@]}" >&2
+              while IFS= read -r file; do printf '  %s\n' "$file"; done <<<"$workflows" >&2
               printf 'Add a TEMPLATE_UPDATE_TOKEN repository secret (a fine-grained token with Contents and Workflows read and write on this repository) and rerun, or run ci-kit update locally and open the pull request by hand. See https://github.com/quokkify/ci-kit/blob/main/docs/errors/CIK-CORE-031.md\n' >&2
               exit 1
             fi
           fi
 
-          remote="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"
+          printf 'push=true\nref=%s\n' "$ref" >> "$GITHUB_OUTPUT"
+
+      # The push credential reaches only this step: the checkout persists no credential, and
+      # the template code above (Copier, ci-kit and their dependencies) never sees the token.
+      - name: Push the update branch
+        if: steps.update.outputs.push == 'true'
+        env:
+          PUSH_TOKEN: {% raw %}${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}{% endraw %}
+          REF: {% raw %}${{ steps.update.outputs.ref }}{% endraw %}
+          DEFAULT_BRANCH: {% raw %}${{ github.event.repository.default_branch }}{% endraw %}
+          BRANCH: automation/copier-template-update
+        run: |
+          set -euo pipefail
+          header="$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 | tr -d '\n')"
+          printf '::add-mask::%s\n' "$header"
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+          export GIT_CONFIG_KEY_1="http.$GITHUB_SERVER_URL/.extraheader" GIT_CONFIG_VALUE_1="AUTHORIZATION: basic $header"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+
+          remote="$(git ls-remote --heads "$url" "refs/heads/$BRANCH" | cut -f1)"
           if [[ -n "$remote" ]]; then
-            git push "--force-with-lease=refs/heads/$BRANCH:$remote" origin "HEAD:refs/heads/$BRANCH"
+            git push "--force-with-lease=refs/heads/$BRANCH:$remote" "$url" "HEAD:refs/heads/$BRANCH"
           else
-            git push origin "HEAD:refs/heads/$BRANCH"
+            git push "$url" "HEAD:refs/heads/$BRANCH"
           fi
 
           # This workflow deliberately stops at the branch. A pull request opened with
@@ -180,7 +200,7 @@ jobs:
           # hand costs one click and keeps every check honest.
           {
             printf '## Template update ready\n\n'
-            printf 'Updated to %s and pushed %s.\n\n' "$ref" "$BRANCH"
+            printf 'Updated to %s and pushed %s.\n\n' "$REF" "$BRANCH"
             printf 'Open the pull request yourself so the checks actually run:\n\n'
             printf '%s/%s/compare/%s...%s?expand=1\n' \
               "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$DEFAULT_BRANCH" "$BRANCH"

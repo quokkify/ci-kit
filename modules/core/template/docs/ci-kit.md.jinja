@@ -33,7 +33,7 @@ ci-kit doctor --repo .
 
 ## Update to a newer toolkit release
 
-Run the `Update project template` workflow; it updates every module to the latest release and pushes a branch for review. GitHub does not let the workflow's own token push changes to `.github/workflows/`, and most updates change them, so add a `TEMPLATE_UPDATE_TOKEN` repository secret: a fine-grained token for this repository with `Contents` and `Workflows` read and write. Without it, an update that changes workflow files stops with [`CIK-CORE-031`](https://github.com/quokkify/ci-kit/blob/{{ toolkit_version }}/docs/errors/CIK-CORE-031.md) before pushing. Public Quokkify repositories also receive updates from the ci-kit fleet automation and do not need the secret. To update by hand:
+Run the `Update project template` workflow; it updates every module to the latest release and pushes a branch for review. GitHub does not let the workflow's own token push changes to `.github/workflows/`, and most updates change them, so add a `TEMPLATE_UPDATE_TOKEN` repository secret: a fine-grained personal access token with an expiry date, for this repository only, with `Contents` and `Workflows` read and write. Without it, an update that changes workflow files stops with [`CIK-CORE-031`](https://github.com/quokkify/ci-kit/blob/{{ toolkit_version }}/docs/errors/CIK-CORE-031.md) before pushing. Public Quokkify repositories also receive updates from the ci-kit fleet automation and do not need the secret. To update by hand:
 
 ```bash
 git switch main && git pull --ff-only

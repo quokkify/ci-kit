@@ -12,7 +12,7 @@ Public Quokkify repositories are also updated by the central fleet automation, w
 
 Either:
 
-- Add a `TEMPLATE_UPDATE_TOKEN` repository secret and rerun the workflow. Use a fine-grained personal access token (or a GitHub App token) scoped to this repository with `Contents: Read and write` and `Workflows: Read and write` (`Metadata: Read` is added automatically). The workflow checks out and pushes with it.
+- Add a `TEMPLATE_UPDATE_TOKEN` repository secret and rerun the workflow. Use a fine-grained personal access token with an expiry date, scoped to this repository only, with `Contents: Read and write` and `Workflows: Read and write` (`Metadata: Read` is added automatically). Only the workflow's final `Push the update branch` step receives it. A GitHub App installation token does not work as a stored secret: it expires after one hour.
 
   ```bash
   gh secret set TEMPLATE_UPDATE_TOKEN --repo <owner>/<repo>
