@@ -20,6 +20,8 @@ Release notes are built from merged pull requests: their title, their labels and
 - Everything else in the body (`## Description`, test plans, tables) is for reviewers.
 - To change a published note, edit the merged PR's title, body or labels; the open release PR is regenerated on the next push to the default branch. Do not edit the release PR body.
 
+Projects created before v4.3.0 still have the old pull request template (`## Description`, `## Release notes`, `## Highlight`, ...), because `.github/pull_request_template.md` is written once and never updated. Their PRs keep working: the release-notes helper and the `PR contract` check read `## Release notes` and `## Highlight` as `## Release note`. To switch to the current sections, replace `.github/pull_request_template.md` with the template from the latest release: `gh api -H 'Accept: application/vnd.github.raw' "repos/quokkify/ci-kit/contents/modules/core/template/.github/pull_request_template.md.jinja?ref=$TOOLKIT_REF" > .github/pull_request_template.md` (`TOOLKIT_REF` is set in the update steps below), then re-apply any local edits.
+
 The `PR contract` check reads only the PR event: it re-runs when the title, body or labels change, skips PRs opened by bots (GitHub Apps), and prints the exact section to add. It reports problems as warnings until the toolkit switches it to `enforce`.
 
 ## Check the installation

@@ -175,6 +175,7 @@ class PrContractTests(TestCase):
             "## Usage example\n````md\n```java\n## Migration\n```\n````\n## Migration\nApply.\n",
             "## Highlight\nLegacy.\n## Breaking changes\nOld alias.\n## Checklist\n- [ ] x\n",
             "## Release note\nfirst\n## Release note\nduplicate\n",
+            "## Release notes\nLegacy plural.\n## Release note\nCurrent.\n",
             "## Description\nReviewer only.\n",
         ]
         for body in corpus:
