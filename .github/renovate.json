@@ -4,11 +4,15 @@
     "github>quokkify/ci-kit//renovate/default.json",
     "github>quokkify/renovate-presets//presets/github-actions/default#v0.4.0"
   ],
-  "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper"],
+  "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper", "pip-compile"],
   "semanticCommits": "enabled",
   "semanticCommitType": "{{#if (equals depName 'quokkify/ci-kit')}}docs{{else}}deps{{/if}}",
   "github-actions": {
     "managerFilePatterns": ["/^examples/[^/]+\\.ya?ml$/"]
+  },
+  "pip-compile": {
+    "description": "Regenerate the hash-locked fleet requirements from the uv command in each lock header; the default weekly lock file maintenance refreshes transitive pins.",
+    "managerFilePatterns": ["/^requirements/fleet(?:-build)?\\.lock$/"]
   },
   "packageRules": [
     {
@@ -46,14 +50,20 @@
       "description": "Re-enable updates in ci-kit's own workflows that share a name with template-owned consumer workflows; the shared base preset disables those names for consumers.",
       "matchFileNames": [".github/workflows/codeql.yml", ".github/workflows/pr-contract.yml", ".github/workflows/release.yml", ".github/workflows/validate.yml"],
       "enabled": true
+    },
+    {
+      "description": "Bump the ci-kit runtime pins in pyproject.toml, workflows and templates together with requirements/fleet.in and its regenerated lock, so the fleet lock never disagrees with pyproject.toml.",
+      "matchManagers": ["custom.regex", "pip-compile"],
+      "matchPackageNames": ["/^(?:PyYAML|pyyaml|copier|jsonschema)$/"],
+      "groupName": "ci-kit runtime dependencies"
     }
   ],
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Update Python runtime versions in workflows.",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
-      "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\""],
+      "description": "Update Python runtime versions in workflows and the target Python recorded in the fleet lock headers.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/", "/^requirements/fleet(?:-build)?\\.lock$/"],
+      "matchStrings": ["python-version:\\s*\\\"(?<currentValue>3\\.\\d+)\\\"", "--python-version=(?<currentValue>3\\.\\d+)"],
       "depNameTemplate": "python",
       "datasourceTemplate": "python-version",
       "versioningTemplate": "python"
@@ -98,7 +108,7 @@
     },
     {
       "customType": "regex",
-      "description": "Update pinned Python validation dependencies in pyproject.toml and every workflow that installs them, including the module templates; the fleet workflow must match pyproject exactly.",
+      "description": "Update pinned Python validation dependencies in pyproject.toml and every workflow that installs them, including the module templates; requirements/fleet.in belongs to the pip-compile manager and is grouped with these pins.",
       "managerFilePatterns": [
         "/^pyproject\\.toml$/",
         "/^\\.github/workflows/[^/]+\\.ya?ml$/",

@@ -75,7 +75,11 @@ jobs:
           python-version: "3.15"
           package-manager: pip
           cache-dependencies: "false"
-          install-command: python -m pip install PyYAML==6.0.3 jsonschema==4.26.0 copier==9.19.1
+          # The next steps hold FLEET_UPDATE_TOKEN, so every installed file is hash-locked,
+          # including the tools that build an sdist (PyYAML has no wheel for this Python yet).
+          install-command: >-
+            python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock
+            && python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock
 
       - name: Update Copier fleet
         id: update

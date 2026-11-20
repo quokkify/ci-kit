@@ -208,6 +208,53 @@ def _version_tuple(value: str) -> tuple[int, int, int] | None:
     return (major, minor, patch)
 
 
+FLEET_LOCKS = {
+    "requirements/fleet-build.lock": "requirements/fleet-build.in",
+    "requirements/fleet.lock": "requirements/fleet.in",
+}
+FLEET_INSTALL_COMMAND = (
+    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock"
+    " && python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock"
+)
+
+
+def fleet_lock_errors(python_version: str) -> list[str]:
+    """Require each fleet lock to be fully hashed and regenerable by Renovate's pip-compile manager."""
+    errors: list[str] = []
+    for lock, source in FLEET_LOCKS.items():
+        try:
+            text = (ROOT / lock).read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"{lock}: cannot read the fleet lock: {exc}")
+            continue
+        header = re.match(r"(?:#.*\n)*?#    (uv pip compile .*)\n", text)
+        expected = (
+            "uv pip compile --universal --generate-hashes "
+            f"--python-version={python_version} --output-file={lock} {source}"
+        )
+        if not header or header.group(1) != expected:
+            errors.append(f"{lock}: header must record exactly `{expected}` so Renovate can regenerate it")
+        requirement: str | None = None
+        hashed: set[str] = set()
+        names: list[str] = []
+        for line in text.splitlines():
+            if not line or line.lstrip().startswith("#"):
+                continue
+            if not line.startswith(" "):
+                requirement = line.split(" ", 1)[0]
+                names.append(requirement)
+                if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*==[^=\s]+", requirement):
+                    errors.append(f"{lock}: {requirement!r} is not an exact name==version pin")
+            elif requirement and line.strip().startswith("--hash=sha256:"):
+                hashed.add(requirement)
+        if not names:
+            errors.append(f"{lock}: lock has no requirements")
+        for name in names:
+            if name not in hashed:
+                errors.append(f"{lock}: {name} has no --hash")
+    return errors
+
+
 def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[str]:
     """Validate a Copier fleet workflow and its pin."""
 
@@ -260,19 +307,22 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
         return errors
 
     install_command = with_block.get("install-command")
-    require(isinstance(install_command, str), "setup step must pin Copier via install-command")
-    if not isinstance(install_command, str):
-        return errors
+    require(
+        install_command == FLEET_INSTALL_COMMAND,
+        f"install-command must install only the hash-locked fleet requirements ({FLEET_INSTALL_COMMAND}); "
+        "the following steps hold FLEET_UPDATE_TOKEN",
+    )
+    errors.extend(fleet_lock_errors(str(with_block.get("python-version", ""))))
 
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    expected_pins = " ".join(project["project"]["dependencies"])
+    fleet_in = (ROOT / "requirements/fleet.in").read_text().split()
     require(
-        install_command == f"python -m pip install {expected_pins}",
-        "install-command must pin exactly the ci_kit runtime dependencies from pyproject.toml "
-        f"(python -m pip install {expected_pins}); the fleet imports ci_kit",
+        sorted(fleet_in) == sorted(project["project"]["dependencies"]),
+        "requirements/fleet.in must pin exactly the ci_kit runtime dependencies from pyproject.toml; "
+        "the fleet imports ci_kit",
     )
-    match = re.search(r"(?:^|\s)copier==(\d+\.\d+\.\d+)(?:\s|$)", install_command)
-    require(bool(match), "install-command must pin copier==X.Y.Z")
+    match = re.search(r"(?:^|\s)copier==(\d+\.\d+\.\d+)(?:\s|$)", " ".join(fleet_in))
+    require(bool(match), "requirements/fleet.in must pin copier==X.Y.Z")
     if not match:
         return errors
 
