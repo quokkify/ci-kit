@@ -107,6 +107,10 @@ class SectionTests(TestCase):
             {"release note": "Legacy.\n\nCurrent."},
         )
         self.assertEqual(notes.extract_rich_sections("## Release notes\nfirst\n## Release notes\nduplicate\n"), {"release note": "first"})
+        self.assertEqual(
+            notes.extract_rich_sections("## Highlight\nBold.\n## Release notes\nPlural.\n"),
+            {"highlight": "Bold.", "release note": "Plural."},
+        )
 
     def test_migration_and_breaking_change_headings_are_both_kept(self):
         sections = notes.extract_rich_sections("## Migration\nStep one.\n## Breaking changes\nStep two.\n")

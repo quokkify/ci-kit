@@ -176,6 +176,7 @@ class PrContractTests(TestCase):
             "## Highlight\nLegacy.\n## Breaking changes\nOld alias.\n## Checklist\n- [ ] x\n",
             "## Release note\nfirst\n## Release note\nduplicate\n",
             "## Release notes\nLegacy plural.\n## Release note\nCurrent.\n",
+            "## Highlight\nLegacy.\n## Release notes\nLegacy plural.\n",
             "## Description\nReviewer only.\n",
         ]
         for body in corpus:
