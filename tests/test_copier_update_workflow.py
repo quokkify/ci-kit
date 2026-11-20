@@ -305,7 +305,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 outputs = step_outputs(temporary / "output")
                 other = temporary / "other"
-                run_git("clone", "-q", str(bare), str(other), cwd=temporary)
+                run_git("clone", "-q", "--branch", "main", str(bare), str(other), cwd=temporary)
                 (other / "moved").write_text("moved\n", encoding="utf-8")
                 run_git("add", ".", cwd=other)
                 run_git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "moved", cwd=other)
