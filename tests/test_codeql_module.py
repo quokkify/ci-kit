@@ -13,7 +13,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from module_test_support import ROOT, mkdtemp, modules_repo, render, render_tree, shared_template_repo
+from module_test_support import ROOT, git, mkdtemp, modules_repo, render, render_tree, shared_template_repo
 
 PIN = "v99.0.0"
 REUSABLE = ROOT / ".github/workflows/codeql-analysis.yml"
@@ -78,8 +78,10 @@ def select_languages(override: str, planned: str) -> list[str]:
     result, decision = run_step("override", {"OVERRIDE": override})
     if result.returncode != 0:
         raise AssertionError(result.stdout + result.stderr)
+    plan_needed = decision["plan"] == "true"
     result, outputs = run_step("languages", {
-        "OVERRIDE": override, "PLAN_NEEDED": decision["plan"], "PLANNED": planned if decision["plan"] == "true" else "",
+        "OVERRIDE": override, "PLAN_NEEDED": decision["plan"], "PLANNED": planned if plan_needed else "",
+        "BASE_NEEDED": "false" if plan_needed else "", "BASE_PLANNED": "",
     })
     if result.returncode != 0:
         raise AssertionError(result.stdout + result.stderr)
@@ -101,6 +103,61 @@ def analyze_category(job: dict) -> str:
 
 def reusable_analyze() -> dict:
     return yaml.safe_load(REUSABLE.read_text())["jobs"]["analyze"]
+
+
+DECLARED = {
+    "python": {"id": "app-python", "name": "App Python", "path": "."},
+    "node": {"id": "web-node", "name": "Web Node", "path": "web"},
+    "java": {"id": "api-java", "name": "Api Java", "path": "api", "java_version": "21"},
+}
+
+
+def write_state(repo: Path, modules: list[str], files: dict[str, str]) -> None:
+    """Replace the working tree with core plus `modules` and the given source files."""
+    for path in repo.iterdir():
+        if path.name != ".git":
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+    (repo / ".ci/modules").mkdir(parents=True)
+    for module in ("core", *modules):
+        (repo / f".copier-answers.{module}.yml").write_text(f"module: {module}\n")
+        data: dict = {"schema_version": 1}
+        if module != "core":
+            data["components"] = [DECLARED[module]]
+        (repo / f".ci/modules/{module}.yml").write_text(yaml.safe_dump(data))
+    for name, content in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(content)
+
+
+def pull_request_repo(base: list[str], base_files: dict[str, str], head: list[str], head_files: dict[str, str]) -> tuple[Path, str]:
+    """A checkout of a pull request head whose base commit declares other modules."""
+    repo = mkdtemp("codeql-pr-")
+    git(repo, "init", "-q", "-b", "main")
+    write_state(repo, base, base_files)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    base_sha = git(repo, "rev-parse", "HEAD")
+    write_state(repo, head, head_files)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "head")
+    return repo, base_sha
+
+
+def planned_languages(repo: Path, event: str, base_sha: str) -> tuple[subprocess.CompletedProcess[str], list[str] | None]:
+    """Run the plan job's scripts the way a `pull_request`/`push` run executes them."""
+    head_result, head = run_step("plan", {}, cwd=repo)
+    if head_result.returncode != 0:
+        raise AssertionError(head_result.stdout + head_result.stderr)
+    base_result, base = run_step("base-plan", {"EVENT_NAME": event, "BASE_SHA": base_sha}, cwd=repo)
+    if base_result.returncode != 0:
+        return base_result, None
+    result, outputs = run_step("languages", {
+        "OVERRIDE": "[]", "PLAN_NEEDED": "true", "PLANNED": head["codeql"],
+        "BASE_NEEDED": base.get("needed", ""), "BASE_PLANNED": base.get("codeql", ""),
+    }, cwd=repo)
+    if result.returncode != 0:
+        return result, None
+    return result, json.loads(outputs["languages"])
 
 
 class CodeqlLanguageTests(unittest.TestCase):
@@ -202,6 +259,69 @@ class CodeqlLanguageTests(unittest.TestCase):
         self.assertEqual(caller["jobs"]["codeql"]["uses"], f"quokkify/ci-kit/.github/workflows/codeql-analysis.yml@{PIN}")
         self.assertEqual(caller["jobs"]["codeql"]["permissions"], reusable_analyze()["permissions"])
         self.assertEqual(caller["jobs"]["codeql"]["with"], {"languages-override": "[]"})
+
+
+class CodeqlBaseLanguageTests(unittest.TestCase):
+    def test_pull_request_deleting_answers_keeps_base_language(self) -> None:
+        # Regression guard: a pull request that deleted .copier-answers.python.yml and kept
+        # Python code was analyzed for `actions` only, and the CodeQL check still passed.
+        repo, base_sha = pull_request_repo(["python"], {"app.py": "print(1)\n"}, [], {"app.py": "print(2)\n"})
+        result, languages = planned_languages(repo, "pull_request", base_sha)
+        self.assertEqual(languages, ["actions", "python"], result.stdout + result.stderr)
+
+    def test_pull_request_adding_module_plans_it(self) -> None:
+        # Regression guard: base-commit planning must not drop a language the head adds.
+        repo, base_sha = pull_request_repo(["python"], {"app.py": "1\n"}, ["python", "node"], {"app.py": "1\n", "web/app.js": "1\n"})
+        result, languages = planned_languages(repo, "pull_request", base_sha)
+        self.assertEqual(languages, ["actions", "python", "javascript-typescript"], result.stdout + result.stderr)
+
+    def test_push_plans_the_checkout_only(self) -> None:
+        # Regression guard: only pull requests consult the base commit.
+        repo, base_sha = pull_request_repo(["python"], {"app.py": "1\n"}, [], {"app.py": "1\n"})
+        for event in ("push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                result, languages = planned_languages(repo, event, base_sha)
+                self.assertEqual(languages, ["actions"], result.stdout + result.stderr)
+                self.assertEqual(run_step("base-plan", {"EVENT_NAME": event, "BASE_SHA": ""}, cwd=repo)[1], {"needed": "false"})
+
+    def test_unreadable_base_fails_closed(self) -> None:
+        # Regression guard: without the base plan the job must fail, not analyze the head alone.
+        repo, _ = pull_request_repo(["python"], {"app.py": "1\n"}, [], {"app.py": "1\n"})
+        for base_sha in ("0123456789abcdef0123456789abcdef01234567", "", "not-a-sha"):
+            with self.subTest(base_sha=base_sha):
+                result, languages = planned_languages(repo, "pull_request", base_sha)
+                self.assertIsNone(languages)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("base commit", result.stdout + result.stderr)
+
+    def test_missing_base_plan_output_fails_selection(self) -> None:
+        result, outputs = run_step("languages", {
+            "OVERRIDE": "[]", "PLAN_NEEDED": "true", "PLANNED": '["actions"]', "BASE_NEEDED": "true", "BASE_PLANNED": "",
+        })
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("languages", outputs)
+
+    def test_shallow_checkout_fetches_the_base_commit(self) -> None:
+        origin, base_sha = pull_request_repo(["java"], {"api/App.java": "class App {}\n"}, [], {"api/App.java": "class App {}\n"})
+        git(origin, "config", "uploadpack.allowAnySHA1InWant", "true")
+        clone = mkdtemp("codeql-shallow-") / "repo"
+        git(origin.parent, "clone", "-q", "--depth=1", f"file://{origin}", str(clone))
+        with self.assertRaises(subprocess.CalledProcessError):
+            git(clone, "cat-file", "-e", f"{base_sha}^{{commit}}")
+        result, languages = planned_languages(clone, "pull_request", base_sha)
+        self.assertEqual(languages, ["actions", "java-kotlin"], result.stdout + result.stderr)
+
+    def test_removed_module_without_source_is_not_analyzed(self) -> None:
+        # Regression guard: a pull request removing a module and all of its code must stay
+        # mergeable; CodeQL fails a language that has no source files.
+        repo, base_sha = pull_request_repo(
+            ["python", "node"], {"app.py": "1\n", "web/app.ts": "1\n"}, [], {"README.md": "docs\n", "web/data.json": "{}\n"},
+        )
+        result, languages = planned_languages(repo, "pull_request", base_sha)
+        self.assertEqual(languages, ["actions"], result.stdout + result.stderr)
+        self.assertIn("::notice", result.stdout)
+        self.assertIn("python", result.stdout)
+        self.assertIn("javascript-typescript", result.stdout)
 
 
 class SecurityModuleTests(unittest.TestCase):
