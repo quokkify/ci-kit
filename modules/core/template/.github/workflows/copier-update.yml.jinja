@@ -207,6 +207,10 @@ jobs:
           BRANCH: automation/copier-template-update
         run: |
           set -euo pipefail
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'Refusing to push the template update: the update job reported a template ref that is not an exact release tag.\n' >&2
+            exit 1
+          fi
           header="$(printf 'x-access-token:%s' "$PUSH_TOKEN" | base64 | tr -d '\n')"
           printf '::add-mask::%s\n' "$header"
           export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null

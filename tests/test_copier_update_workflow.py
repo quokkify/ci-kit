@@ -317,6 +317,20 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
                 self.assertIn("Refusing to push the template update: the bundle", push.stderr)
                 self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
 
+    def test_push_refuses_a_ref_that_is_not_a_release_tag(self) -> None:
+        for ref in ("main", "v1.2.3\n## Injected", "v1.2", ""):
+            with self.subTest(ref=ref), tempfile.TemporaryDirectory() as raw:
+                temporary = Path(raw)
+                checkout, bare = self.make_checkout(temporary)
+                result = self.run_update(checkout, temporary, STABLE)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs = {**step_outputs(temporary / "output"), "ref": ref}
+                push = self.run_push(bare, temporary, outputs)
+                self.assertEqual(push.returncode, 1)
+                self.assertIn("not an exact release tag", push.stderr)
+                self.assertFalse((temporary / "summary.md").exists())
+                self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
+
     def test_update_job_state_cannot_reach_the_push_job(self) -> None:
         self.ci_kit_tampers = True
         with tempfile.TemporaryDirectory() as raw:

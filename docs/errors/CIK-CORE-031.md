@@ -14,6 +14,8 @@ Either:
 
 - Add a `TEMPLATE_UPDATE_TOKEN` repository secret and rerun the workflow. Use a fine-grained personal access token with an expiry date, scoped to this repository only, with `Contents: Read and write` and `Workflows: Read and write` (`Metadata: Read` is added automatically). Only the workflow's `push` job receives it; the job that runs the template never does. A GitHub App installation token does not work as a stored secret: it expires after one hour.
 
+  Setting the token has a trade-off. Unlike a push with the Actions token, a push with this token starts `on: push` workflows on the update branch at once, before review ([GitHub docs](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)). A compromised ci-kit release could add a push-triggered workflow that runs with this repository's secrets. Keep secret-bearing workflows behind `branches: [<default branch>]` filters or protected environments, or prefer the manual path below.
+
   ```bash
   gh secret set TEMPLATE_UPDATE_TOKEN --repo <owner>/<repo>
   ```
