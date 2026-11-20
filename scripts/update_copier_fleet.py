@@ -1431,9 +1431,29 @@ def parse_check_time(value: object) -> datetime | None:
         return None
 
 
+def superseded_cancellation(entry: dict[str, Any], entries: Sequence[dict[str, Any]]) -> bool:
+    """A cancelled check run that a later-started run of the same workflow and job replaced.
+
+    Concurrency cancels the older run of a workflow when a pull request gets two events at once; the
+    cancelled run stays on the head forever, while GitHub itself only counts the newer run.
+    """
+    if entry.get("__typename") == "StatusContext" or entry.get("conclusion") != "CANCELLED":
+        return False
+    started = parse_check_time(entry.get("startedAt"))
+    if started is None:
+        return False
+    for other in entries:
+        other_started = parse_check_time(other.get("startedAt"))
+        if (other.get("__typename") != "StatusContext" and other.get("workflowName") == entry.get("workflowName")
+                and other.get("name") == entry.get("name") and other_started is not None and other_started > started):
+            return True
+    return False
+
+
 def checks_verdict(rollup: object, now: datetime) -> tuple[str, str]:
     """Classify a statusCheckRollup as ready, waiting or failed, with a human reason."""
     entries = [entry for entry in rollup if isinstance(entry, dict)] if isinstance(rollup, list) else []
+    entries = [entry for entry in entries if not superseded_cancellation(entry, entries)]
     if not entries:
         return "waiting", "no checks reported yet"
     failed: list[str] = []
