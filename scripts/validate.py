@@ -1964,6 +1964,8 @@ with tempfile.TemporaryDirectory(prefix="project-toolkit-validation-") as tmp:
     run(["git", "config", "user.name", "Fixture"], template_source)
     run(["git", "config", "commit.gpgsign", "false"], template_source)
     run(["git", "config", "core.hooksPath", "/dev/null"], template_source)
+    # Copier clones this repo by local path; see #470 and SUITE_GIT_CONFIG in scripts/run_test_suites.py.
+    run(["git", "config", "maintenance.auto", "false"], template_source)
     run(["git", "add", "."], template_source)
     run(["git", "commit", "--no-verify", "-qm", "candidate template"], template_source)
 

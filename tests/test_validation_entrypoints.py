@@ -189,6 +189,25 @@ class SuiteRunnerTests(TestCase):
         self.assertEqual(sum(shard.count("test_brand_new.py") for shard in layout), 1)
 
 
+class FixtureRepoMaintenanceTests(TestCase):
+    """Regression guard for #470 outside the suite runner: copier clones these repos by local path."""
+
+    def test_fixture_template_repos_disable_auto_maintenance(self) -> None:
+        for path in ("tests/module_test_support.py", "scripts/validate_modules_fixture.py"):
+            with self.subTest(helper=path):
+                spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
+                assert spec and spec.loader
+                helper = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(helper)
+                with tempfile.TemporaryDirectory() as raw:
+                    repo = helper.make_template_repo(Path(raw))
+                    setting = subprocess.run(
+                        ["git", "config", "--local", "--get", "maintenance.auto"],
+                        cwd=repo, check=True, capture_output=True, text=True,
+                    ).stdout.strip()
+                self.assertEqual(setting, "false")
+
+
 class RenderedWorkflowEvidenceTests(TestCase):
     def setUp(self) -> None:
         spec = importlib.util.spec_from_file_location("render_codeql_workflows", ROOT / "scripts/render_codeql_workflows.py")

@@ -37,6 +37,8 @@ def make_template_repo(tmp: Path) -> Path:
     repo = tmp / "ci-kit"
     shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns(*EXCLUDED))
     require(["git", "init", "-q"], repo)
+    # Copier clones this repo by local path; see #470 and SUITE_GIT_CONFIG in scripts/run_test_suites.py.
+    require(["git", "config", "maintenance.auto", "false"], repo)
     require(["git", "add", "-A"], repo)
     require(["git", "commit", "-q", "-m", "snapshot"], repo)
     require(["git", "tag", TAG], repo)
