@@ -175,13 +175,47 @@ python scripts/update_copier_fleet.py --write --auto-merge --merge-ready --org q
 ```
 
 `--merge-ready` requires `--write --auto-merge` and is rejected with
-`--dry-run` and `--template-ref`. Copier does not run and nothing
-is pushed: for each repository it takes the open PR from the automation
-branch, checks that the template source is trusted and that the module
-versions satisfy the same rules as above, and merges it by the direct path
-when it is ready. `rollout_copier_fleet.py` accepts `--auto-merge` (forwarded
-to every stage) and passes `--merge-ready` straight to the updater without the
-pilot gate.
+`--dry-run` and `--template-ref`. Nothing is pushed: for each repository it
+takes the open PR from the automation branch, checks that the template source
+is trusted and that the module versions satisfy the same rules as above,
+verifies that the PR head is the updater's own commit, and then merges it
+(direct path) or keeps or requests auto-merge (native path) when it is ready.
+`rollout_copier_fleet.py` accepts `--auto-merge` (forwarded to every stage)
+and passes `--merge-ready` straight to the updater without the pilot gate.
+
+The head is the updater's own commit only when both hold:
+
+1. **Shape.** The write path clones the default branch tip and pushes the
+   update as exactly one commit on it. So the head must be exactly one
+   single-parent commit whose parent is the current default branch tip (GitHub
+   compare `<default>...<head>`: ahead 1, behind 0). The empty-legacy-answers
+   drop is a second commit, but merge-ready already skips any repository
+   whose default branch still has `.copier-answers.yml`, so no other shape is
+   accepted.
+2. **Content.** The head tree equals a fresh render of the target release on
+   that same tip: merge-ready clones the default branch, runs the same render
+   as the write path (`ci-kit update` plus the project-owned toolkit reference
+   bump), and compares `git write-tree` with the head's tree. This costs one
+   shallow clone and one render per open update PR, after the cheaper checks
+   pass.
+
+The commit author is shown in the reason but never trusted, because anyone who
+can push to the branch can set it. Otherwise the PR is `skipped`, and auto-merge
+armed on it is disabled:
+
+- `head not produced by updater: …` — extra commits, a different parent, or a
+  tree that differs from the render (for example an added file).
+- `<default> moved N commits since the update was pushed; …` — the base moved
+  after the write run pushed; the next write run (Monday) refreshes the branch,
+  and a later pass merges it. `… moved while the head was verified` is the same
+  race during the check.
+- `could not compare the head with <default>: …` or
+  `could not render <tag> to verify the head: …` — the check could not run;
+  merge-ready fails closed and never merges an unverified head.
+
+Do not push fixes onto the automation branch. A maintainer who does so (for
+example to resolve a conflict) now owns that PR: the fleet stops merging it,
+and the maintainer reviews and merges it by hand.
 
 ### Daily schedule
 

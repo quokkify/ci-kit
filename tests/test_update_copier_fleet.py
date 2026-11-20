@@ -2582,27 +2582,189 @@ class MergeReadyTests(TestCase):
         self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "pull request head not yet updated"})
         self.assertFalse(any("merge" in call.args[0] for call in run_mock.call_args_list))
 
-    def real_merge_ready(self, rollup, *, mergeable="MERGEABLE"):
+    BASE_TIP = "a" * 40
+    TREE = "d" * 40
+
+    def comparison(self, *, commits=None, behind=0, tree=None, parents=None):
+        """The compare payload for main...HEAD: by default one updater commit on the base tip."""
+        commits = commits or [{
+            "sha": self.HEAD,
+            "parents": [{"sha": parent} for parent in (parents or [self.BASE_TIP])],
+            "commit": {"tree": {"sha": tree or self.TREE}, "author": {"name": "quokkify-copier[bot]"}},
+        }]
+        return {"ahead_by": len(commits), "behind_by": behind, "merge_base_commit": {"sha": self.BASE_TIP}, "commits": commits}
+
+    def real_merge_ready(self, rollup, *, mergeable="MERGEABLE", comparison=None, rendered_tree=None,
+                         render_error=None, auto_merge=False, armed=False, clone_tip=None):
         pull = {"state": "OPEN", "baseRefName": "main", "mergeable": mergeable, "headRefOid": self.HEAD,
-                "autoMergeRequest": None, "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH,
-                "statusCheckRollup": rollup}
+                "autoMergeRequest": {"enabledAt": "2020-01-01T00:00:00Z"} if armed else None,
+                "isCrossRepository": False, "headRefName": fleet.DEFAULT_BRANCH, "statusCheckRollup": rollup}
+        comparison = self.comparison() if comparison is None else comparison
 
         def fake_gh_json(arguments, **_):
             if arguments[:2] == ["pr", "list"]:
                 return [{"url": self.URL, "headRefOid": self.HEAD}]
             if arguments[:2] == ["pr", "view"]:
                 return pull
-            return {"allow_auto_merge": False, "allow_squash_merge": True}
+            if arguments[0] == "api" and "/compare/" in arguments[1]:
+                self.assertEqual(arguments[1], f"repos/quokkify/example/compare/main...{self.HEAD}")
+                return comparison
+            return {"allow_auto_merge": auto_merge, "allow_squash_merge": True}
 
+        def fake_run(command, **_):
+            if command[:3] == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(command, 0, (clone_tip or self.BASE_TIP) + "\n", "")
+            if command[:2] == ["git", "write-tree"]:
+                return subprocess.CompletedProcess(command, 0, (rendered_tree or self.TREE) + "\n", "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        def fake_render(destination, template_ref, **_):
+            self.rendered_refs.append(template_ref)
+            if render_error:
+                raise fleet.FleetUpdateError(render_error)
+            return []
+
+        self.rendered_refs = []
         parsed = {"main": self.answers(self.BASE), self.HEAD: self.answers(self.UPDATED)}
         with mock.patch.object(fleet, "gh_json", side_effect=fake_gh_json), \
              mock.patch.object(fleet, "answers_at", side_effect=lambda _, ref, **__: parsed[ref]), \
-             mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run_mock, \
+             mock.patch.object(fleet, "clone_repository") as self.clone_mock, \
+             mock.patch.object(fleet, "render_update", side_effect=fake_render), \
+             mock.patch.object(fleet, "run", side_effect=fake_run) as run_mock, \
              mock.patch.object(fleet.time, "sleep"):
             result = fleet.merge_ready_repository(
                 self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY,
             )
-        return result, [call.args[0] for call in run_mock.call_args_list]
+        return result, [call.args[0] for call in run_mock.call_args_list if call.args[0][0] == "gh"]
+
+    GREEN = {"__typename": "CheckRun", "name": "ci / gate", "status": "COMPLETED", "conclusion": "SUCCESS", "completedAt": "2020-01-01T00:00:00Z"}
+
+    def test_head_matching_a_fresh_render_is_merged(self) -> None:
+        # Regression guard: an updater commit whose tree equals the render is merged as before.
+        result, commands = self.real_merge_ready([self.GREEN])
+        self.assertEqual(result.auto_merge, {"state": "merged", "reason": f"merged {self.HEAD}"})
+        self.assertEqual(commands, [["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--squash", "--match-head-commit", self.HEAD]])
+        self.assertEqual(self.rendered_refs, ["v3.3.0"])
+        self.assertEqual(self.clone_mock.call_args.args[0], self.REPOSITORY)
+
+    def test_head_with_files_outside_the_render_is_skipped(self) -> None:
+        # Regression guard: a head whose tree differs from the render (an added file) is never merged.
+        result, commands = self.real_merge_ready([self.GREEN], rendered_tree="f" * 40)
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertIn("head not produced by updater: tree differs from a fresh render of v3.3.0", result.auto_merge["reason"])
+        self.assertIn("quokkify-copier[bot]", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+
+    def test_extra_commit_on_top_of_the_updater_commit_is_skipped(self) -> None:
+        # Regression guard: the updater pushes exactly one commit; anything stacked on it is not its own.
+        updater = {"sha": "b" * 40, "parents": [{"sha": self.BASE_TIP}], "commit": {"tree": {"sha": self.TREE}, "author": {"name": "quokkify-copier[bot]"}}}
+        extra = {"sha": self.HEAD, "parents": [{"sha": "b" * 40}], "commit": {"tree": {"sha": "e" * 40}, "author": {"name": "someone"}}}
+        result, commands = self.real_merge_ready([self.GREEN], comparison=self.comparison(commits=[updater, extra]))
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertIn("head not produced by updater: 2 commits on top of main, expected 1", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+        self.assertEqual(self.rendered_refs, [])
+
+    def test_merge_commit_head_is_skipped(self) -> None:
+        # Regression guard: the updater never creates merge commits.
+        result, commands = self.real_merge_ready([self.GREEN], comparison=self.comparison(parents=[self.BASE_TIP, "b" * 40]))
+        self.assertIn("head not produced by updater: head is not a single-parent commit on main", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+
+    def test_stale_base_is_skipped_without_merging_or_raising(self) -> None:
+        # Regression guard: the base moved after the updater pushed; the next write run refreshes the branch.
+        result, commands = self.real_merge_ready([self.GREEN], comparison=self.comparison(behind=3))
+        self.assertEqual((result.status, result.detail), ("pull-request", self.URL))
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertIn("main moved 3 commits since the update was pushed", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+        self.assertEqual(self.rendered_refs, [])
+
+    def test_base_moving_during_the_check_is_stale(self) -> None:
+        # Regression guard: the clone saw a newer base tip than the comparison; never render against a different base.
+        result, commands = self.real_merge_ready([self.GREEN], clone_tip="9" * 40)
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertIn("main moved while the head was verified", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+        self.assertEqual(self.rendered_refs, [])
+
+    def test_head_on_another_parent_is_skipped(self) -> None:
+        # Regression guard: one commit whose parent is not the base tip is not the updater's shape.
+        result, commands = self.real_merge_ready([self.GREEN], comparison=self.comparison(parents=["9" * 40]))
+        self.assertIn("head not produced by updater: head is not a single-parent commit on main", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+
+    def test_render_failure_is_skipped(self) -> None:
+        # Regression guard: when the comparison render cannot run, fail closed.
+        result, commands = self.real_merge_ready([self.GREEN], render_error="ci-kit update failed: exit 1")
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertIn("could not render v3.3.0 to verify the head: ci-kit update failed: exit 1", result.auto_merge["reason"])
+        self.assertEqual(commands, [])
+
+    def test_armed_auto_merge_on_a_tampered_head_is_disarmed(self) -> None:
+        # Regression guard: GitHub keeps auto-merge armed across pushes, so a foreign head must disarm it.
+        result, commands = self.real_merge_ready([self.GREEN], rendered_tree="f" * 40, auto_merge=True, armed=True)
+        self.assertEqual(result.auto_merge["state"], "skipped")
+        self.assertTrue(result.auto_merge["reason"].endswith("; existing auto-merge disabled"))
+        self.assertEqual(commands, [["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--disable-auto"]])
+
+    def test_armed_auto_merge_on_a_verified_head_stays_armed(self) -> None:
+        result, commands = self.real_merge_ready([self.GREEN], auto_merge=True, armed=True)
+        self.assertEqual(result.auto_merge, {"state": "enabled", "reason": "auto-merge already enabled"})
+        self.assertEqual(commands, [])
+
+    def test_head_provenance_compares_real_git_trees(self) -> None:
+        # Regression guard: the rendered tree is computed by git from the working tree, untracked files included.
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source"
+            source.mkdir()
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(source)], check=True)
+            (source / "README.md").write_text("base\n", encoding="utf-8")
+            subprocess.run([*git, "-C", str(source), "add", "--all"], check=True)
+            subprocess.run([*git, "-C", str(source), "commit", "-q", "-m", "base"], check=True)
+            base_sha = subprocess.run(["git", "-C", str(source), "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+
+            def head_tree(files):
+                for name, text in files.items():
+                    (source / name).write_text(text, encoding="utf-8")
+                subprocess.run([*git, "-C", str(source), "add", "--all"], check=True)
+                tree = subprocess.run(["git", "-C", str(source), "write-tree"], check=True, capture_output=True, text=True).stdout.strip()
+                subprocess.run([*git, "-C", str(source), "reset", "-q", "--hard", base_sha], check=True)
+                subprocess.run(["git", "-C", str(source), "clean", "-qfd"], check=True)
+                return tree
+
+            rendered = {"ci.yml": "rendered\n"}
+            honest = head_tree(rendered)
+            tampered = head_tree({**rendered, "extra.sh": "echo extra\n"})
+
+            def fake_clone(_repository, destination, **_):
+                subprocess.run(["git", "clone", "-q", str(source), str(destination)], check=True)
+
+            def fake_render(destination, template_ref, **_):
+                for name, text in rendered.items():
+                    (destination / name).write_text(text, encoding="utf-8")
+                return []
+
+            outcomes = {}
+            for label, tree in (("honest", honest), ("tampered", tampered)):
+                payload = {"ahead_by": 1, "behind_by": 0, "merge_base_commit": {"sha": base_sha}, "commits": [
+                    {"sha": self.HEAD, "parents": [{"sha": base_sha}], "commit": {"tree": {"sha": tree}, "author": {"name": "x"}}}]}
+                with mock.patch.object(fleet, "gh_json", return_value=payload), \
+                     mock.patch.object(fleet, "clone_repository", side_effect=fake_clone), \
+                     mock.patch.object(fleet, "render_update", side_effect=fake_render):
+                    outcomes[label] = fleet.head_provenance(
+                        self.REPOSITORY, self.HEAD, "v3.3.0", expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY, env=dict(os.environ),
+                    )
+        self.assertIsNone(outcomes["honest"])
+        self.assertIn("tree differs from a fresh render of v3.3.0", outcomes["tampered"])
+
+    def test_head_provenance_fails_closed_on_an_unreadable_comparison(self) -> None:
+        with mock.patch.object(fleet, "gh_json", side_effect=fleet.FleetUpdateError("HTTP 502")), \
+             mock.patch.object(fleet, "clone_repository") as clone_mock:
+            reason = fleet.head_provenance(self.REPOSITORY, self.HEAD, "v3.3.0", expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY, env={})
+        self.assertEqual(reason, "could not compare the head with main: HTTP 502")
+        clone_mock.assert_not_called()
 
     def test_direct_path_merges_green_pull_request_with_pinned_head(self) -> None:
         green = {"__typename": "CheckRun", "name": "ci / gate", "status": "COMPLETED", "conclusion": "SUCCESS", "completedAt": "2020-01-01T00:00:00Z"}

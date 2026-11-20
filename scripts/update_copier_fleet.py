@@ -1240,7 +1240,24 @@ def apply_module_updates(repository_path: Path, template_ref: str, *, env: dict[
     return rows
 
 
-TOOLKIT_REFERENCE_PREFIX = r"quokkify/ci-kit/(?:\.github/workflows|actions)/[^@\s]+@"
+def render_update(repository_path: Path, template_ref: str, *, template_repository: str, env: dict[str, str]) -> list[dict[str, str]]:
+    """Render the update into the working tree: the module update plus the project-owned toolkit refs.
+
+    The write path commits this render and merge-ready re-renders it to verify the pushed head.
+    """
+    rows = apply_module_updates(repository_path, template_ref, env=env)
+    if RELEASE_TAG_PATTERN.fullmatch(template_ref):
+        # Left uncommitted, the moved references join the module update in one commit
+        # (after the separate legacy drop commit, if any), as the consumer contract needs.
+        bump_project_owned_toolkit_refs(
+            repository_path,
+            template_ref,
+            resolve_commit=lambda: resolve_template_commit(template_repository, template_ref, env=env),
+        )
+    return rows
+
+
+TOOLKIT_REFERENCE_PREFIX =r"quokkify/ci-kit/(?:\.github/workflows|actions)/[^@\s]+@"
 TOOLKIT_TAG_REFERENCE = re.compile(rf"({TOOLKIT_REFERENCE_PREFIX})v\d+\.\d+\.\d+")
 TOOLKIT_DIGEST_REFERENCE = re.compile(
     rf"({TOOLKIT_REFERENCE_PREFIX})[0-9a-f]{{40}}([ \t]+#[ \t]*)v\d+\.\d+\.\d+"
@@ -1529,8 +1546,13 @@ def enable_auto_merge(
     modules: Sequence[dict[str, str]] = (),
     disarmed: bool = False,
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    verify_head: Callable[[str], str | None] | None = None,
 ) -> dict[str, str]:
-    """Squash-merge the automation PR: through GitHub auto-merge when the repository allows it, directly once checks are green otherwise."""
+    """Squash-merge the automation PR: through GitHub auto-merge when the repository allows it, directly once checks are green otherwise.
+
+    verify_head, when given, returns why the confirmed head must not be merged; a reason skips the
+    pull request and disarms auto-merge that is already armed on it.
+    """
     number = pull_request_number(repository, url)
     if number is None:
         return {"state": "failed", "reason": "pull request URL does not belong to the repository"}
@@ -1591,6 +1613,10 @@ def enable_auto_merge(
             pull_request = view()
         if pull_request.get("headRefOid") != expected:
             return "skipped", "pull request head not yet updated"
+        if verify_head is not None:
+            problem = verify_head(expected)
+            if problem:
+                return "skipped", problem
         if direct:
             if pull_request.get("mergeable") != "MERGEABLE":
                 return "waiting", "mergeability not yet computed"
@@ -1651,6 +1677,59 @@ def trusted_answers_source(file: str, answers: dict[str, Any], expected_template
     return bool(TRUSTED_SRC_RE.fullmatch(source))
 
 
+def head_provenance(
+    repository: Repository,
+    head_oid: str,
+    template_ref: str,
+    *,
+    expected_template: str,
+    env: dict[str, str],
+) -> str | None:
+    """Why head_oid is not the updater's own commit, or None when it is.
+
+    The write path clones the default branch tip, renders the update and pushes it as exactly one
+    commit on that tip; the legacy-answers drop is a second commit, but merge-ready already skips
+    any repository that still has the legacy answers file. So only that one shape is accepted, and
+    the head tree must equal a fresh render of the same release on the same base. The commit author
+    is reported, never trusted: anyone who can push to the branch can set it.
+    """
+    base = repository.default_branch
+    try:
+        comparison = gh_json(["api", f"repos/{repository.name_with_owner}/compare/{base}...{head_oid}"], env=env)
+    except FleetUpdateError as exc:
+        return f"could not compare the head with {base}: {sanitize_text(str(exc))}"
+    commits = comparison.get("commits") if isinstance(comparison, dict) else None
+    ahead, behind = (comparison.get("ahead_by"), comparison.get("behind_by")) if isinstance(comparison, dict) else (None, None)
+    if not isinstance(commits, list) or not isinstance(ahead, int) or not isinstance(behind, int):
+        return f"could not compare the head with {base}: comparison is unreadable"
+    if behind:
+        return f"{base} moved {behind} commits since the update was pushed; the next write run refreshes the branch"
+    head = commits[-1] if commits and isinstance(commits[-1], dict) else {}
+    author = ((head.get("commit") or {}).get("author") or {}).get("name")
+    by = f" (commit author: {sanitize_text(author)})" if isinstance(author, str) and author else ""
+    if ahead != 1 or len(commits) != 1 or head.get("sha") != head_oid:
+        return f"head not produced by updater: {ahead} commits on top of {base}, expected 1{by}"
+    base_sha = (comparison.get("merge_base_commit") or {}).get("sha")
+    parents = [parent.get("sha") for parent in head.get("parents") or [] if isinstance(parent, dict)]
+    if not isinstance(base_sha, str) or parents != [base_sha]:
+        return f"head not produced by updater: head is not a single-parent commit on {base}{by}"
+    head_tree = ((head.get("commit") or {}).get("tree") or {}).get("sha")
+    with tempfile.TemporaryDirectory(prefix="copier-fleet-provenance-") as temporary:
+        destination = Path(temporary) / "repository"
+        try:
+            clone_repository(repository, destination, env=env)
+            if git_head(destination) != base_sha:
+                return f"{base} moved while the head was verified; the next pass retries"
+            render_update(destination, template_ref, template_repository=normalize_template_source(expected_template) or expected_template, env=env)
+            run(["git", "add", "--all"], cwd=destination)
+            rendered_tree = run(["git", "write-tree"], cwd=destination).stdout.strip()
+        except Exception as exc:  # fail closed: an unverifiable head is never merged
+            return f"could not render {template_ref} to verify the head: {sanitize_text(str(exc) or type(exc).__name__)}"
+    if head_tree != rendered_tree:
+        return f"head not produced by updater: tree differs from a fresh render of {template_ref}{by}"
+    return None
+
+
 def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str, str], expected_template: str) -> Result:
     """Evaluate and merge the open automation PR without running Copier or pushing."""
     name = repository.name_with_owner
@@ -1709,6 +1788,7 @@ def merge_ready_repository(repository: Repository, *, branch: str, env: dict[str
         requested_template_ref=None,
         env=env,
         modules=rows,
+        verify_head=lambda sha: head_provenance(repository, sha, target or "", expected_template=expected_template, env=env),
     )
     return Result(name, "pull-request", url, auto_merge=merge)
 
@@ -1791,16 +1871,7 @@ def process_repository(
             if not template_ref:
                 raise FleetUpdateError("module update requires a resolved template ref")
             primary = "core" if "core" in modules else modules[0]
-            rows = apply_module_updates(destination, template_ref, env=env)
-            if RELEASE_TAG_PATTERN.fullmatch(template_ref):
-                # Left uncommitted, the moved references join the module update in one commit
-                # (after the separate legacy drop commit, if any), as the consumer contract needs.
-                template_repository = normalized_expected or expected_template
-                bump_project_owned_toolkit_refs(
-                    destination,
-                    template_ref,
-                    resolve_commit=lambda: resolve_template_commit(template_repository, template_ref, env=env),
-                )
+            rows = render_update(destination, template_ref, template_repository=normalized_expected or expected_template, env=env)
             paths = sorted(set(paths) | set(changed_paths(destination)))
             target = parse_answers(
                 (destination / f".copier-answers.{primary}.yml").read_text(encoding="utf-8")
@@ -2034,7 +2105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not env.get("GH_TOKEN"):
         print("GH_TOKEN or GITHUB_TOKEN is required", file=sys.stderr)
         return 2
-    for command in ("gh",) if args.merge_ready else ("copier", "gh", "git"):
+    # merge-ready re-renders each open update to verify its head, so it needs Copier and git too.
+    for command in ("copier", "gh", "git"):
         if shutil.which(command, path=env.get("PATH")) is None:
             print(f"required command is unavailable: {command}", file=sys.stderr)
             return 2
