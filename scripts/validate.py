@@ -88,7 +88,10 @@ def release_fleet_follow_up_errors(job: object, rel: Path) -> list[str]:
         job.get("with") == {"template-ref": "${{ needs.release.outputs.tag-name }}"},
         "must pass exactly the tag Release Please created as template-ref",
     )
-    require(job.get("secrets") == "inherit", "must inherit secrets for the write-mode token")
+    require(
+        job.get("secrets") == {"FLEET_UPDATE_TOKEN": "${{ secrets.FLEET_UPDATE_TOKEN }}"},
+        "must pass only FLEET_UPDATE_TOKEN, never secrets: inherit",
+    )
     return errors
 
 
@@ -365,6 +368,16 @@ def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
     require(
         permissions == {"contents": "read"},
         f"top-level permissions must be exactly contents: read, found {permissions!r}",
+    )
+    triggers = workflow.get("on", workflow.get(True))
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    call_secrets = call.get("secrets") if isinstance(call, dict) else None
+    require(
+        isinstance(call_secrets, dict)
+        and set(call_secrets) == {"FLEET_UPDATE_TOKEN"}
+        and isinstance(call_secrets["FLEET_UPDATE_TOKEN"], dict)
+        and call_secrets["FLEET_UPDATE_TOKEN"].get("required") is False,
+        "workflow_call must declare only the optional FLEET_UPDATE_TOKEN secret, so callers never inherit all secrets",
     )
     require(
         workflow.get("concurrency")

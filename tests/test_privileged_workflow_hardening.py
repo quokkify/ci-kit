@@ -157,5 +157,29 @@ class FleetLockedInstallTests(unittest.TestCase):
                 self.assertTrue(any(matcher.search(text) for matcher in matchers))
 
 
+class ReleaseFleetSecretTests(unittest.TestCase):
+    """Regression guard: the release driver hands the fleet updater only FLEET_UPDATE_TOKEN."""
+
+    def test_release_passes_only_the_fleet_token(self) -> None:
+        job = load(RELEASE_WORKFLOW)["jobs"]["fleet-update"]
+        self.assertEqual(job["secrets"], {"FLEET_UPDATE_TOKEN": "${{ secrets.FLEET_UPDATE_TOKEN }}"})
+
+    def test_no_toolkit_workflow_inherits_all_secrets(self) -> None:
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            with self.subTest(path=path.name):
+                for job in (load(path).get("jobs") or {}).values():
+                    self.assertNotEqual(job.get("secrets"), "inherit")
+
+    def test_fleet_workflow_declares_its_optional_call_secret(self) -> None:
+        workflow = load(FLEET_WORKFLOW)
+        secrets = triggers(workflow)["workflow_call"]["secrets"]
+        self.assertEqual(set(secrets), {"FLEET_UPDATE_TOKEN"})
+        # Optional: dry runs never need it, and write mode fails fast with an explicit message.
+        self.assertIs(secrets["FLEET_UPDATE_TOKEN"]["required"], False)
+        update = workflow["jobs"]["update"]
+        for name in ("Update Copier fleet", "Merge ready template updates"):
+            self.assertEqual(step_named(update, name)["env"]["GH_TOKEN"], "${{ secrets.FLEET_UPDATE_TOKEN }}")
+
+
 if __name__ == "__main__":
     unittest.main()

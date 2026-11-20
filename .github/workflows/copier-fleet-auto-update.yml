@@ -25,6 +25,10 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      FLEET_UPDATE_TOKEN:
+        description: Write-mode credential installed on public quokkify repositories only; dry runs do not need it.
+        required: false
   workflow_dispatch:
     inputs:
       repository:
