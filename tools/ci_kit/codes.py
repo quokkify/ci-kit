@@ -17,5 +17,6 @@ CODES: dict[str, str] = {
     "CIK-CORE-013": "Build-module test artifacts exceed a report limit",
     "CIK-CORE-020": "Gate found a failing or missing module job",
     "CIK-CORE-030": "Legacy answers still render files",
+    "CIK-CORE-031": "Template update changes workflow files that the Actions token cannot push",
     "CIK-UPDATE-001": "Module update failed or left conflicts",
 }

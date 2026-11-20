@@ -25,6 +25,7 @@ jobs:
         uses: quokkify/ci-kit/actions/checkout@{{ toolkit_version }}
         with:
           fetch-depth: 0
+          token: {% raw %}${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}{% endraw %}
 
       - name: Set up Python and Copier
         uses: quokkify/ci-kit/actions/setup-python@{{ toolkit_version }}
@@ -40,6 +41,7 @@ jobs:
           GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
           DEFAULT_BRANCH: {% raw %}${{ github.event.repository.default_branch }}{% endraw %}
           BRANCH: automation/copier-template-update
+          TEMPLATE_UPDATE_TOKEN_SET: {% raw %}${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}{% endraw %}
         run: |
           set -euo pipefail
           ref="${TEMPLATE_REF:-}"
@@ -151,6 +153,18 @@ jobs:
           elif [[ "$dropped" != true ]]; then
             printf 'Already up to date with %s; nothing to push.\n' "$ref" >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+
+          # GitHub rejects a push by the Actions token that creates or changes a workflow file.
+          # Without TEMPLATE_UPDATE_TOKEN, stop here with the way out instead of that rejection.
+          if [[ "${TEMPLATE_UPDATE_TOKEN_SET:-false}" != true ]]; then
+            mapfile -t workflows < <(git diff --no-renames --name-only "$base" HEAD -- .github/workflows)
+            if (( {% raw %}${#workflows[@]}{% endraw %} )); then
+              printf 'Refusing to push the template update: CIK-CORE-031 the Actions token cannot push changes to workflow files:\n' >&2
+              printf '  %s\n' "${workflows[@]}" >&2
+              printf 'Add a TEMPLATE_UPDATE_TOKEN repository secret (a fine-grained token with Contents and Workflows read and write on this repository) and rerun, or run ci-kit update locally and open the pull request by hand. See https://github.com/quokkify/ci-kit/blob/main/docs/errors/CIK-CORE-031.md\n' >&2
+              exit 1
+            fi
           fi
 
           remote="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"

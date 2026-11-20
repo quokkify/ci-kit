@@ -13,6 +13,8 @@ import tomllib
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / "modules/core/template/.github/workflows/copier-update.yml.jinja"
 
@@ -69,8 +71,12 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             "#!/usr/bin/env bash\nprintf 'copier-called\\n' >> \"$COPIER_LOG\"\n",
             encoding="utf-8",
         )
+        workflow_change = (
+            "mkdir -p .github/workflows && printf 'name: Validate\\n' > .github/workflows/validate.yml\n"
+            if getattr(self, "ci_kit_changes_workflow", False) else ""
+        )
         update = "" if getattr(self, "ci_kit_noop", False) else (
-            "printf 'module update\\n' > .ci-kit-updated\n"
+            "printf 'module update\\n' > .ci-kit-updated\n" + workflow_change +
             "git add --all && git -c user.name=t -c user.email=t@example.com commit -q -m 'chore(ci-kit): update core'\n"
         )
         (bin_dir / "ci-kit").write_text(
@@ -89,7 +95,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             tool.chmod(0o755)
         return bin_dir
 
-    def execute(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5") -> subprocess.CompletedProcess[str]:
+    def execute(self, checkout: Path, temporary: Path, release: dict, template_ref: str = "v2.21.5", token_set: str = "false") -> subprocess.CompletedProcess[str]:
         release_file = temporary / "release.json"
         release_file.write_text(json.dumps(release), encoding="utf-8")
         env = {
@@ -105,6 +111,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             "GITHUB_REPOSITORY": "fixture/project",
             "DEFAULT_BRANCH": "main",
             "BRANCH": "automation/copier-template-update",
+            "TEMPLATE_UPDATE_TOKEN_SET": token_set,
         }
         return subprocess.run(
             ["bash", "-c", self.script], cwd=checkout, env=env, text=True, capture_output=True
@@ -148,6 +155,53 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
             branch = "automation/copier-template-update"
             self.assertIn(".ci-kit-updated", run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", branch, cwd=temporary).splitlines())
             self.assertEqual(run_git("--git-dir", str(bare), "rev-list", "--count", branch, cwd=temporary), "2")
+
+    def test_push_credential_comes_from_the_optional_secret(self) -> None:
+        content = WORKFLOW.read_text(encoding="utf-8").replace("{% raw %}", "").replace("{% endraw %}", "")
+        workflow = yaml.safe_load(content.replace("{{ toolkit_version }}", "v9.8.7"))
+        checkout, _, update = workflow["jobs"]["update"]["steps"]
+        self.assertEqual(checkout["uses"], "quokkify/ci-kit/actions/checkout@v9.8.7")
+        self.assertEqual(checkout["with"]["token"], "${{ secrets.TEMPLATE_UPDATE_TOKEN || github.token }}")
+        self.assertNotIn("persist-credentials", checkout["with"])
+        self.assertEqual(update["env"]["TEMPLATE_UPDATE_TOKEN_SET"], "${{ secrets.TEMPLATE_UPDATE_TOKEN != '' }}")
+        self.assertNotIn("TEMPLATE_UPDATE_TOKEN", update["env"])
+        self.assertNotIn("extraheader", self.script)
+
+    def test_workflow_changes_are_pushed_with_the_secret(self) -> None:
+        self.ci_kit_changes_workflow = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE, token_set="true")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("CIK-CORE-031", result.stderr)
+            files = run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", "automation/copier-template-update", cwd=temporary)
+            self.assertIn(".github/workflows/validate.yml", files.splitlines())
+
+    def test_workflow_changes_without_the_secret_stop_before_the_push(self) -> None:
+        self.ci_kit_changes_workflow = True
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("CIK-CORE-031", result.stderr)
+            self.assertIn("  .github/workflows/validate.yml\n", result.stderr)
+            self.assertNotIn(".ci-kit-updated", result.stderr)
+            self.assertIn("TEMPLATE_UPDATE_TOKEN", result.stderr)
+            self.assertIn("ci-kit update", result.stderr)
+            self.assertIn("docs/errors/CIK-CORE-031.md", result.stderr)
+            self.assertEqual(run_git("--git-dir", str(bare), "branch", "--list", "automation/*", cwd=temporary), "")
+
+    def test_changes_outside_workflows_are_pushed_without_the_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            temporary = Path(raw)
+            checkout, bare = self.make_checkout(temporary)
+            result = self.execute(checkout, temporary, STABLE)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("CIK-CORE-031", result.stderr)
+            files = run_git("--git-dir", str(bare), "ls-tree", "-r", "--name-only", "automation/copier-template-update", cwd=temporary)
+            self.assertIn(".ci-kit-updated", files.splitlines())
 
     def legacy_checkout(self, temporary: Path, answers: str) -> tuple[Path, Path]:
         checkout, bare = self.make_checkout(temporary)
@@ -296,7 +350,7 @@ class CopierUpdateWorkflowTests(unittest.TestCase):
     def test_module_update_has_no_expression_interpolation_in_run(self) -> None:
         content = WORKFLOW.read_text(encoding="utf-8")
         run_block = content.split("        run: |\n", 1)[1]
-        stripped = run_block.replace("{% raw %}${#rejected[@]}{% endraw %}", "")
+        stripped = re.sub(r"\{% raw %\}\$\{#\w+\[@\]\}\{% endraw %\}", "", run_block)
         self.assertNotIn("${{", stripped)
         self.assertNotIn("{{", stripped)
 

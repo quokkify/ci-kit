@@ -24,6 +24,8 @@ The credential needs `Contents` read and write to clone and push the branch, `Pu
 
 The workflow itself needs no elevated rights on this repository, so it requests `contents: read`; every write travels through the separate token. A repository guard keeps the schedule from running on forks. Private consumers are outside this automation entirely and are updated by a maintainer from a short-lived local `gh` session, so no credential with private access is stored in this public repository.
 
+A consumer's own `Update project template` workflow can push workflow-file changes only with the optional `TEMPLATE_UPDATE_TOKEN` secret stored in that consumer repository. It should be a fine-grained token (or GitHub App token) scoped to that one repository with `Contents` and `Workflows` read and write. It is used only by the checkout and the branch push; the update script itself sees whether the secret is set, not its value. Without it the workflow stops with [CIK-CORE-031](errors/CIK-CORE-031.md) before a push that GitHub would reject.
+
 ## Fork pull requests
 
 GitHub normally withholds repository secrets from workflows triggered by untrusted fork pull requests. Keep PR validation read-only, do not use `pull_request_target` to execute fork code with write tokens, and keep push/release paths on trusted branch events.

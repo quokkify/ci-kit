@@ -1,0 +1,2 @@
+[console_scripts]
+ci-kit = ci_kit.cli:main
