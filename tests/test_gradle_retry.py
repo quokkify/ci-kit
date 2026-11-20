@@ -15,7 +15,7 @@ ACTION = ROOT / "actions/gradle-retry/action.yml"
 
 
 class GradleRetryTests(unittest.TestCase):
-    def run_case(self, mode: str, *, max_attempts: str | None = "3", persistent: bool = False, delay: str | None = "0") -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
+    def run_case(self, mode: str, *, max_attempts: str | None = "3", persistent: bool = False, delay: str | None = "0", runner_temp: Path | None = None) -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
         """Run the script against a fake Gradle; ``None`` leaves an input unset so the script default applies.
 
         A ``sleep`` shim on PATH records each requested delay in ``self.sleeps`` instead of waiting,
@@ -68,6 +68,9 @@ class GradleRetryTests(unittest.TestCase):
                 "  central-url-without-not-found) echo 'compilation failed'; echo '       - https://repo.maven.apache.org/maven2/org/example/a/1.0/a-1.0.pom'; exit 9;;\n"
                 "  compile-error) echo \"/w/src/main/java/A.java:3: error: cannot find symbol\"; echo \"Execution failed for task ':compileJava'.\"; echo '> Compilation failed; see the compiler output below.'; exit 1;;\n"
                 "  test-failure) echo 'ATest > works() FAILED'; echo \"Execution failed for task ':test'.\"; echo '> There were failing tests. See the report at: file:///w/build/reports/tests/test/index.html'; exit 1;;\n"
+                "  test-failure-and-central-not-found) echo 'ATest > works() FAILED'; echo \"Execution failed for task ':test'.\"; echo '> There were failing tests. See the report at: file:///w/build/reports/tests/test/index.html'; central_not_found; exit 1;;\n"
+                "  compile-error-and-rate-limit) echo \"Execution failed for task ':compileJava'.\"; echo '> Compilation failed; see the compiler output below.'; echo \"            > Could not GET 'https://repo.maven.apache.org/maven2/org/example/a/1.0/a-1.0.pom'.\"; echo '               > Received status code 429 from server: Too Many Requests'; exit 1;;\n"
+                "  checkstyle-and-plugin-unresolved) echo \"Execution failed for task ':checkstyleMain'.\"; echo '> Checkstyle rule violations were found. See the report at: file:///w/build/reports/checkstyle/main.html'; plugin_unresolved; exit 1;;\n"
                 "  persistent-access-denied) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 15;;\n"
                 "esac\n"
             )
@@ -81,6 +84,7 @@ class GradleRetryTests(unittest.TestCase):
                 "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
                 "SLEEP_FILE": str(sleep_log),
             }
+            env["RUNNER_TEMP"] = str(runner_temp or root)
             env.pop("GRADLE_RETRY_INITIAL_DELAY_SECONDS", None)
             env.pop("GRADLE_RETRY_MAX_ATTEMPTS", None)
             if delay is not None:
@@ -282,6 +286,17 @@ class GradleRetryTests(unittest.TestCase):
                 self.assertEqual(self.sleeps, [])
                 self.assertNotIn("refresh-dependencies", result.stdout)
 
+    def test_genuine_task_failure_alongside_repository_failure_is_not_retried(self) -> None:
+        """With --continue, a real task failure next to a repository failure must not re-run the build and mask a flaky test."""
+        for mode in ("test-failure-and-central-not-found", "compile-error-and-rate-limit", "checkstyle-and-plugin-unresolved"):
+            with self.subTest(mode=mode):
+                result, calls, _ = self.run_case(mode, max_attempts=None, delay=None)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(calls, 1)
+                self.assertEqual(self.sleeps, [])
+                self.assertEqual(self.calls_args, ["--task test"])
+                self.assertIn("not retried", result.stdout)
+
     def test_default_backoff_outlasts_a_four_minute_throttle_window(self) -> None:
         """Regression guard (q4j #901): 429 windows lasted 3+ minutes, longer than the old 30s + 90s budget."""
         result, calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None)
@@ -292,6 +307,28 @@ class GradleRetryTests(unittest.TestCase):
             self.assertGreaterEqual(sleep, base)
             self.assertLessEqual(sleep, base + base // 3)
         self.assertGreaterEqual(sum(self.sleeps), 240)
+
+    def test_retry_steps_in_one_job_share_one_wait_budget(self) -> None:
+        """Lint, test and build retry steps share a job timeout, so their combined waits are capped at one step's schedule."""
+        with tempfile.TemporaryDirectory(prefix="gradle-retry-job-") as job_temp:
+            runner_temp = Path(job_temp)
+            first, first_calls, _ = self.run_case("rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertEqual(first_calls, 2)
+            first_sleep = sum(self.sleeps)
+            second, second_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(second_calls, 4)
+            self.assertEqual(second.returncode, 24)
+            self.assertLessEqual(first_sleep + sum(self.sleeps), 26 + 80 + 240)
+            third, third_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(third.returncode, 20 + third_calls)
+            self.assertIn("retry wait budget; not retrying", third.stdout)
+            self.assertIn("Received status code 429", third.stdout.split("::error::Gradle retry steps")[0])
+            self.assertEqual((runner_temp / "gradle-retry-waited-seconds").read_text(), "346")
+            fourth, fourth_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(fourth_calls, 1)
+            self.assertEqual(fourth.returncode, 21)
+            self.assertEqual(self.sleeps, [])
 
     def test_action_defaults_match_script_defaults(self) -> None:
         inputs = yaml.safe_load(ACTION.read_text())["inputs"]
