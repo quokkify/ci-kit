@@ -80,6 +80,31 @@ class SuiteRunnerTests(TestCase):
             self.assertIn(f"{tag} out", result.stderr)
             self.assertIn(f"{tag} err", result.stderr)
 
+    def test_suites_run_without_git_auto_maintenance(self) -> None:
+        # Regression guard for #470: `git commit` in a fixture repo spawned a detached
+        # `git maintenance run --auto` whose repack deleted loose objects while copier's
+        # local `git clone` was copying them ("fatal: failed to copy file ... No such file").
+        # The commit-graph task is forced due and run in the foreground, so a commit leaves a
+        # commit-graph behind exactly when auto maintenance runs.
+        (self.root / "tests/test_maintenance.py").write_text(
+            "import pathlib, subprocess, tempfile, unittest\n"
+            "class Maintenance(unittest.TestCase):\n"
+            "    def test_commit_skips_auto_maintenance(self):\n"
+            "        with tempfile.TemporaryDirectory() as repo:\n"
+            "            git = lambda *a: subprocess.run(['git', *a], cwd=repo, check=True, capture_output=True)\n"
+            "            git('init', '-q')\n"
+            "            for key, value in (('maintenance.auto', 'true'), ('maintenance.autoDetach', 'false'),\n"
+            "                               ('maintenance.commit-graph.enabled', 'true'), ('maintenance.commit-graph.auto', '-1')):\n"
+            "                git('config', key, value)\n"
+            "            git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--allow-empty', '-m', 'x')\n"
+            "            info = pathlib.Path(repo, '.git/objects/info')\n"
+            "            self.assertEqual(sorted(p.name for p in info.glob('commit-graph*')), [])\n"
+            "        print('maintenance stayed off')\n"
+        )
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("maintenance stayed off", result.stdout)
+
     def test_empty_suite_set_fails(self) -> None:
         self.assertNotEqual(self.run_runner().returncode, 0)
 

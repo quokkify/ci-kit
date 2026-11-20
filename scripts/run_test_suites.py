@@ -29,6 +29,26 @@ SUITE_WEIGHTS: dict[str, int] = {
     "test_release_notes_config.py": 7,
 }
 DEFAULT_WEIGHT = 3
+# Suites commit to fixture repos and copier then clones them by local path, which
+# copies loose object files. Since Git 2.54 each commit can start a detached
+# geometric repack that deletes those files mid-clone (#470), so suites run
+# without automatic maintenance.
+SUITE_GIT_CONFIG: dict[str, str] = {"maintenance.auto": "false"}
+
+
+def with_git_config(env: dict[str, str], config: dict[str, str]) -> dict[str, str]:
+    """Append config through GIT_CONFIG_COUNT, keeping entries the caller already passes."""
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT") or 0)
+    except ValueError:
+        raise ValueError("GIT_CONFIG_COUNT must be an integer") from None
+    env = dict(env)
+    for key, value in config.items():
+        env[f"GIT_CONFIG_KEY_{count}"] = key
+        env[f"GIT_CONFIG_VALUE_{count}"] = value
+        count += 1
+    env["GIT_CONFIG_COUNT"] = str(count)
+    return env
 
 
 def discover_suites(root: Path) -> list[Path]:
@@ -89,10 +109,10 @@ def run_suites(root: Path = ROOT, shard: tuple[int, int] | None = None) -> int:
             suites = shard_suites(suites, shard[1])[shard[0] - 1]
             if not suites:
                 raise ValueError(f"shard {shard[0]}/{shard[1]} is empty")
+        env = with_git_config({**os.environ, NESTED_MARKER: "1"}, SUITE_GIT_CONFIG)
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    env = {**os.environ, NESTED_MARKER: "1"}
     failures = []
     for path in suites:
         print(f"+ unittest suite {path.relative_to(root)}", flush=True)
