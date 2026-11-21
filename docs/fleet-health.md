@@ -135,13 +135,14 @@ merges it (or the maintainer merges it). GitHub still enforces rulesets on a
 direct merge; a merge that a ruleset rejects is reported as `failed` with
 GitHub's message and does not fail the run.
 
-Why never auto-merge: an armed GitHub auto-merge request is not bound to the
-head that was checked. `--match-head-commit` is only verified when auto-merge
-is enabled, and GitHub disables auto-merge on a later push only when the
-pusher lacks write access
+Why never auto-merge: `--match-head-commit` is only verified when auto-merge
+is enabled, and GitHub documents disabling auto-merge on a later push only
+when the pusher lacks write permissions
 ([Automatically merging a pull request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
-A push to the automation branch by anyone with write access would therefore
-be merged under the fleet's authority once checks pass. Never run `gh pr merge
+It does not state what happens after a push by someone with write access, so
+the fleet does not rely on an armed request staying bound to the verified
+head: such a push could otherwise be merged under the fleet's authority once
+checks pass. Never run `gh pr merge
 --auto` at all: canary testing also showed that where `allow_auto_merge` is
 off, it merges immediately and ignores checks.
 
