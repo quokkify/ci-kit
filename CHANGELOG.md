@@ -1,5 +1,31 @@
 # Changelog
 
+## [4.3.7](https://github.com/quokkify/ci-kit/compare/v4.3.6...v4.3.7) (2026-11-21)
+
+
+### 🐛 Bug Fixes
+
+* **core:** let template updates push workflow changes via a secret ([#601](https://github.com/quokkify/ci-kit/issues/601)) ([eb9df4c](https://github.com/quokkify/ci-kit/commit/eb9df4c6ab7ee8766db248392ca3164f4bb73091))
+* **fleet:** merge only verified template PRs, never via auto-merge ([#604](https://github.com/quokkify/ci-kit/issues/604)) ([916788d](https://github.com/quokkify/ci-kit/commit/916788d0e8212d73dfbcdb7b5e4ff5688c2bc168))
+* **fleet:** merge template PRs held back by a replaced cancelled check ([#599](https://github.com/quokkify/ci-kit/issues/599)) ([ebd2ad4](https://github.com/quokkify/ci-kit/commit/ebd2ad46e319da078734af22fc2d3b01e928d14c))
+* **gradle-retry:** ride out Maven Central throttling ([#597](https://github.com/quokkify/ci-kit/issues/597)) ([5bfbc47](https://github.com/quokkify/ci-kit/commit/5bfbc47f9dfa33eef141f31307e2c5bc6c5eaacf))
+* **release:** publish legacy Release notes PR sections ([#600](https://github.com/quokkify/ci-kit/issues/600)) ([9118c2a](https://github.com/quokkify/ci-kit/commit/9118c2a960e5b9c4063d04783c397199035c771c))
+* **security:** keep scanning languages a PR's base branch declares ([#602](https://github.com/quokkify/ci-kit/issues/602)) ([3849222](https://github.com/quokkify/ci-kit/commit/38492224b89baee17ed4a330582cbdc0efc97fc1))
+* **security:** lock fleet installs and narrow release token permissions ([#603](https://github.com/quokkify/ci-kit/issues/603)) ([0fe9434](https://github.com/quokkify/ci-kit/commit/0fe9434eea048a63d9f92a3af1f48658b9206e6a))
+* **validate:** keep pull request modules out of Validate's plan job ([#608](https://github.com/quokkify/ci-kit/issues/608)) ([1c89f5a](https://github.com/quokkify/ci-kit/commit/1c89f5a8e274fe672f9a69898c678e7900366404))
+
+
+### 📦 Dependencies
+
+* **allure-report-action:** update quokkify/allure-report-action to v0.5.5 ([#613](https://github.com/quokkify/ci-kit/issues/613)) ([9acd08e](https://github.com/quokkify/ci-kit/commit/9acd08e9d2c9b587598cac07b740ffe18c0b76e0))
+* **gh-pages-subdir-action:** update quokkify/gh-pages-subdir-action to v0.1.3 ([#614](https://github.com/quokkify/ci-kit/issues/614)) ([eb4931e](https://github.com/quokkify/ci-kit/commit/eb4931ed67f5bca569d1c2849bbaff44956a9204))
+* **github-actions:** update github actions non-major updates ([#615](https://github.com/quokkify/ci-kit/issues/615)) ([9eb0c39](https://github.com/quokkify/ci-kit/commit/9eb0c39e46746fdbb8b9c63c271789cc2c98cced))
+* **github-actions:** update github/codeql-action digest to 1bd86f2 ([#610](https://github.com/quokkify/ci-kit/issues/610)) ([71072d9](https://github.com/quokkify/ci-kit/commit/71072d9c468154c02a6a0150b99160db882ed685))
+* **pyyaml:** update pyyaml to v6.0.4 ([#611](https://github.com/quokkify/ci-kit/issues/611)) ([ad8cac5](https://github.com/quokkify/ci-kit/commit/ad8cac5169a1552031af32b0954564aaa80cd619))
+* **renovate:** update renovate to v44.255.1 ([#593](https://github.com/quokkify/ci-kit/issues/593)) ([dccefbd](https://github.com/quokkify/ci-kit/commit/dccefbd57af1814a123b561bd61986aa43cd9f86))
+* **renovate:** update renovate to v44.255.2 ([#607](https://github.com/quokkify/ci-kit/issues/607)) ([37e5046](https://github.com/quokkify/ci-kit/commit/37e5046362f3d67cd975b612236dfbf3028e26cc))
+* **renovate:** update renovate to v44.256.1 ([#609](https://github.com/quokkify/ci-kit/issues/609)) ([bf5d76d](https://github.com/quokkify/ci-kit/commit/bf5d76d6c5b1550c074029e21fe80c7621035ea2))
+
 ## [4.3.6](https://github.com/quokkify/ci-kit/compare/v4.3.5...v4.3.6) (2026-11-19)
 
 <!-- project-toolkit:release-notes v2 -->
