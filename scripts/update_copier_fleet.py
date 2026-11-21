@@ -1426,14 +1426,39 @@ def parse_check_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def superseded_cancellation(entry: dict[str, Any], entries: Sequence[dict[str, Any]]) -> bool:
+    """A cancelled check run that a later-started run of the same workflow and job replaced.
+
+    Concurrency cancels the older run of a workflow when a pull request gets two events at once, and the
+    cancelled run stays on the head. Only a replacement that is still running or completed with SUCCESS
+    supersedes it; the replacement is then judged on its own. The rollup carries no triggering event, so a
+    cancelled pull_request run and a later push run of the same workflow and job are indistinguishable, and
+    matrix legs that share one unexpanded name count as the same job.
+    """
+    if entry.get("__typename") == "StatusContext" or entry.get("conclusion") != "CANCELLED":
+        return False
+    started = parse_check_time(entry.get("startedAt"))
+    if started is None:
+        return False
+    for other in entries:
+        other_started = parse_check_time(other.get("startedAt"))
+        if (other.get("__typename") != "StatusContext" and other.get("workflowName") == entry.get("workflowName")
+                and other.get("name") == entry.get("name") and other_started is not None and other_started > started
+                and (other.get("status") != "COMPLETED" or other.get("conclusion") == "SUCCESS")):
+            return True
+    return False
 
 
 def checks_verdict(rollup: object, now: datetime) -> tuple[str, str]:
     """Classify a statusCheckRollup as ready, waiting or failed, with a human reason."""
     entries = [entry for entry in rollup if isinstance(entry, dict)] if isinstance(rollup, list) else []
+    entries = [entry for entry in entries if not superseded_cancellation(entry, entries)]
     if not entries:
         return "waiting", "no checks reported yet"
     failed: list[str] = []
