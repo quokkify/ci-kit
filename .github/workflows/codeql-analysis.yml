@@ -29,7 +29,7 @@ jobs:
         env:
           OVERRIDE: ${{ inputs.languages-override }}
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
           import json
           import os
 
@@ -61,16 +61,21 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
+      # From here on Python runs isolated (-I) and outside the checkout, so
+      # modules in the pull request (a root json.py, pip/, yaml.py) are never
+      # imported in place of the interpreter's or the toolkit's own.
       - name: Install ci-kit
         if: steps.override.outputs.plan == 'true'
-        run: python -m pip install ./.toolkit
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install "$GITHUB_WORKSPACE/.toolkit"
       # Languages come from the module declarations alone. Drift and other
       # findings belong to Validate; they must not stop security scanning.
       - name: Plan modules
         id: plan
         if: steps.override.outputs.plan == 'true'
+        working-directory: ${{ runner.temp }}
         run: |
-          if ! ci-kit plan --repo . --no-drift --github-output "$GITHUB_OUTPUT"; then
+          if ! ci-kit plan --repo "$GITHUB_WORKSPACE" --no-drift --github-output "$GITHUB_OUTPUT"; then
             echo "::warning title=ci-kit plan::ci-kit plan reported findings; CodeQL still analyzes the planned languages. Validate reports the findings."
           fi
       # A pull request controls its own module files, so it could drop a
@@ -80,11 +85,13 @@ jobs:
       - name: Plan base commit modules
         id: base-plan
         if: steps.override.outputs.plan == 'true'
+        working-directory: ${{ runner.temp }}
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
+          import json
           import os
           import re
           import subprocess
@@ -103,7 +110,7 @@ jobs:
 
 
           def git(*args):
-              return subprocess.run(["git", *args], capture_output=True)
+              return subprocess.run(["git", "-C", os.environ["GITHUB_WORKSPACE"], *args], capture_output=True)
 
 
           if os.environ["EVENT_NAME"] not in ("pull_request", "pull_request_target"):
@@ -141,9 +148,20 @@ jobs:
               capture_output=True, text=True,
           )
           planned = dict(line.split("=", 1) for line in plan_output.read_text(encoding="utf-8").splitlines()) if plan_output.exists() else {}
+          try:
+              codes = json.loads(planned.get("codes", "[]"))
+          except json.JSONDecodeError:
+              codes = []
+          # Exit 1 with finding codes is a plan with findings, which Validate reports;
+          # any other non-zero exit is a failure.
+          if plan.returncode != 0 and not (plan.returncode == 1 and codes):
+              print(plan.stdout + plan.stderr)
+              fail(f"ci-kit plan failed with exit code {plan.returncode} for the pull request base commit {base}")
           if not planned.get("codeql"):
               print(plan.stdout + plan.stderr)
               fail(f"ci-kit plan produced no codeql output for the pull request base commit {base}")
+          if plan.returncode:
+              print(f"::warning title=ci-kit plan::the pull request base commit has plan findings {codes}; CodeQL still analyzes its languages.")
           print(f"Base commit {base} plans CodeQL languages {planned['codeql']}")
           output("codeql", planned["codeql"])
           PY
@@ -155,18 +173,70 @@ jobs:
           PLANNED: ${{ steps.plan.outputs.codeql }}
           BASE_NEEDED: ${{ steps.base-plan.outputs.needed }}
           BASE_PLANNED: ${{ steps.base-plan.outputs.codeql }}
+        working-directory: ${{ runner.temp }}
         run: |
-          python3 - <<'PY'
+          python3 -I - <<'PY'
           import json
           import os
+          import re
           import subprocess
 
-          # File types CodeQL extracts with `build-mode: none`; it fails a language without any.
+          # CodeQL fails a language without source, so a language only the base commit
+          # declares is skipped when the pull request has none of the files CodeQL would
+          # read for it; this exists only so removing a module with all its code stays
+          # mergeable. When in doubt it is analyzed. File types are those of CodeQL 2.27.4
+          # (the bundle of the pinned codeql-action, src/defaults.json): FileType JS,
+          # TYPESCRIPT and HTML in
+          # javascript/extractor/src/com/semmle/js/extractor/FileExtractor.java,
+          # PY_EXTENSIONS in python/extractor/semmle/util.py plus .pyi stubs, and .java
+          # for Java with `build-mode: none`.
           SOURCE_SUFFIXES = {
-              "python": (".py",),
-              "javascript-typescript": (".js", ".jsx", ".es", ".es6", ".mjs", ".ts", ".tsx", ".html", ".htm", ".xhtm", ".xhtml", ".vue"),
+              "python": (".py", ".pyw", ".pyi"),
+              "javascript-typescript": (
+                  ".js", ".jsx", ".mjs", ".cjs", ".es6", ".es", ".xsjs", ".xsjslib",
+                  ".ts", ".tsx", ".mts", ".cts",
+                  ".htm", ".html", ".xhtm", ".xhtml", ".vue", ".hbs", ".ejs", ".njk", ".erb", ".jsp", ".dot",
+              ),
               "java-kotlin": (".java",),
           }
+          # Extension-less scripts: the JavaScript extractor reads those whose shebang
+          # matches FileExtractor.JS_INVOCATION; Python scripts are treated the same way.
+          SHEBANGS = {
+              "python": re.compile(rb"\bpython[0-9.]*\b"),
+              "javascript-typescript": re.compile(rb"\b(node(js)?|bun|tsx)\b"),
+          }
+
+
+          def git(*args, stdin=None):
+              return subprocess.run(
+                  ["git", "-C", os.environ["GITHUB_WORKSPACE"], *args], input=stdin, check=True, capture_output=True,
+              ).stdout
+
+
+          def first_lines(entries):
+              """The first line of each extension-less regular file, read from the git index."""
+              oids = [oid for mode, oid, name in entries if mode in ("100644", "100755") and not os.path.splitext(os.path.basename(name))[1]]
+              if not oids:
+                  return []
+              data = git("cat-file", "--batch", stdin="".join(f"{oid}\n" for oid in oids).encode())
+              lines, position = [], 0
+              while position < len(data):
+                  header_end = data.index(b"\n", position)
+                  size = int(data[position:header_end].split()[2])
+                  content = data[header_end + 1:header_end + 1 + size]
+                  lines.append(content.split(b"\n", 1)[0])
+                  position = header_end + 1 + size + 1
+              return lines
+
+
+          def has_source(language, entries, shebang_lines):
+              suffixes = SOURCE_SUFFIXES.get(language)
+              if suffixes is None:
+                  return True
+              if any(name.lower().endswith(suffixes) for _, _, name in entries):
+                  return True
+              pattern = SHEBANGS.get(language)
+              return bool(pattern) and any(line.startswith(b"#!") and pattern.search(line) for line in shebang_lines)
 
           languages = json.loads(os.environ["OVERRIDE"])
           if os.environ["PLAN_NEEDED"] == "true":
@@ -180,10 +250,15 @@ jobs:
                       raise SystemExit("the base commit plan produced no codeql output")
                   base_only = [language for language in json.loads(os.environ["BASE_PLANNED"]) if language not in languages]
                   if base_only:
-                      files = subprocess.run(["git", "ls-files", "-z"], check=True, capture_output=True).stdout.decode("utf-8", "surrogateescape").split("\0")
+                      entries = []
+                      for record in git("ls-files", "-s", "-z").decode("utf-8", "surrogateescape").split("\0"):
+                          if record:
+                              meta, _, name = record.partition("\t")
+                              mode, oid, _ = meta.split()
+                              entries.append((mode, oid, name))
+                      shebang_lines = first_lines(entries)
                   for language in base_only:
-                      suffixes = SOURCE_SUFFIXES.get(language)
-                      if suffixes is None or any(name.lower().endswith(suffixes) for name in files):
+                      if has_source(language, entries, shebang_lines):
                           print(f"::notice title=CodeQL languages::{language} is analyzed because the pull request base commit declares its module.")
                           languages.append(language)
                       else:
