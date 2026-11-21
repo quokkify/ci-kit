@@ -102,48 +102,49 @@ evidence. A narrower token simply produces an unknown observation.
 python scripts/update_copier_fleet.py --write --repo quokkify/skills --auto-merge
 ```
 
-`--auto-merge` (off by default; rejected with `--dry-run`)
-merges each template-update PR the run created or refreshed, once the PR is
-eligible. Write-mode workflow runs (release-triggered and the Monday run) pass
-it, but they always pin `--template-ref`, and a PR from a run with an explicit
-template ref is never merged ("target is not a release tag resolved by the
-run"). So write runs create or refresh PRs and report; only the daily
-`--merge-ready` pass merges, and a merge can lag the PR by up to a day. There
-are two paths, chosen by the repository's `allow_auto_merge` setting:
+`--auto-merge` (off by default; rejected with `--dry-run`) allows the fleet to
+merge template-update PRs itself; the name is kept for compatibility, but the
+updater never arms GitHub auto-merge. Write-mode workflow runs
+(release-triggered and the Monday run) pass it, but they always pin
+`--template-ref`, and a PR from a run with an explicit template ref is never
+merged ("target is not a release tag resolved by the run"). So write runs
+create or refresh PRs and report; only the daily `--merge-ready` pass merges,
+and a merge can lag the PR by up to a day.
 
-- **Native path** (`allow_auto_merge` on): `gh pr merge <number> --repo <repo>
-  --auto --squash --match-head-commit <sha>`. The sha is the commit this run
-  pushed, or the PR's current head when the branch already carried the same
-  change. GitHub checks `--match-head-commit` only when auto-merge is enabled
-  and keeps it armed across later pushes, so whenever the updater pushes a new
-  head onto an existing automation PR that has auto-merge armed, it disables it
-  (`--disable-auto`), with or without the flag, and then, with the flag, sends
-  a fresh request bound to the new head. GitHub enforces the repository's
-  rulesets and required checks at merge time.
-- **Direct path** (`allow_auto_merge` off; no repository setting needed): the
-  updater merges the PR itself with `gh pr merge <number> --squash
-  --match-head-commit <sha>`, but only when the PR is ready (D2):
-  every `statusCheckRollup` entry on the current head is completed with
-  `SUCCESS`, `NEUTRAL` or `SKIPPED`, except a `CANCELLED` check run replaced
-  by a later-started run of the same workflow and job that is still running or
-  finished with `SUCCESS` (concurrency cancels the older run when a PR receives
-  two events at once). The replacement is then judged on its own; a `SKIPPED`,
-  `NEUTRAL` or failed replacement leaves the cancellation blocking. The rollup
-  carries no triggering event, so a cancelled `pull_request` run and a later
-  `push` run of the same workflow and job cannot be told apart, and matrix legs
-  that share one unexpanded job name count as one job; at least one check exists; the last one
-  finished at least 10 minutes ago (late-registering workflows get time to
-  appear); and `mergeable` is `MERGEABLE`. If check times are missing, the PR
-  waits too. Otherwise the PR waits (`waiting`, merged by a later run, for
-  example `mergeability not yet computed`, running checks or
-  `check times unavailable`) or is skipped with a reason such as
-  `failed checks: ...`, which is reported as a PR with failed CI. GitHub still
-  enforces rulesets on a direct merge.
+The fleet merges the PR itself with `gh pr merge <number> --squash
+--match-head-commit <sha>`, whatever the repository's `allow_auto_merge`
+setting, and only when the PR is ready (D2):
+every `statusCheckRollup` entry on the current head is completed with
+`SUCCESS`, `NEUTRAL` or `SKIPPED`, except a `CANCELLED` check run replaced
+by a later-started run of the same workflow and job that is still running or
+finished with `SUCCESS` (concurrency cancels the older run when a PR receives
+two events at once). The replacement is then judged on its own; a `SKIPPED`,
+`NEUTRAL` or failed replacement leaves the cancellation blocking. The rollup
+carries no triggering event, so a cancelled `pull_request` run and a later
+`push` run of the same workflow and job cannot be told apart, and matrix legs
+that share one unexpanded job name count as one job; at least one check exists; the last one
+finished at least 10 minutes ago (late-registering workflows get time to
+appear); and `mergeable` is `MERGEABLE`. If check times are missing, the PR
+waits too. Otherwise the PR waits (`waiting`, merged by a later run, for
+example `mergeability not yet computed`, running checks or
+`check times unavailable`) or is skipped with a reason such as
+`failed checks: ...`, which is reported as a PR with failed CI. A PR whose
+review decision is `REVIEW_REQUIRED` or `CHANGES_REQUESTED` waits with
+`needs maintainer approval; …`: once a maintainer approves, a later pass
+merges it (or the maintainer merges it). GitHub still enforces rulesets on a
+direct merge; a merge that a ruleset rejects is reported as `failed` with
+GitHub's message and does not fail the run.
 
-Never run `gh pr merge --auto` on a repository where `allow_auto_merge` cannot
-be armed: canary testing showed it then merges immediately and ignores
-checks. The updater therefore uses the direct path, with its own readiness
-check, instead.
+Why never auto-merge: `--match-head-commit` is only verified when auto-merge
+is enabled, and GitHub documents disabling auto-merge on a later push only
+when the pusher lacks write permissions
+([Automatically merging a pull request](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/automatically-merging-a-pull-request)).
+It does not state what happens after a push by someone with write access, so
+the fleet does not rely on an armed request staying bound to the verified
+head: such a push could otherwise be merged under the fleet's authority once
+checks pass. Never run `gh pr merge
+--auto` at all: canary testing also showed that where `allow_auto_merge` is
+off, it merges immediately and ignores checks.
 
 The updater only reuses an open PR whose head branch lives in the repository
 itself, never a fork's.
@@ -164,9 +165,13 @@ the reason in `repositories[].auto_merge.reason`:
 5. the PR is open, targets the default branch, is not `CONFLICTING`, and its
    head already shows the pushed commit (re-read up to three times).
 
-If a skipped or failed PR still has auto-merge armed, the updater disables it
-and says so in the reason. A rerun does not request auto-merge again when it
-is already enabled.
+Auto-merge armed on a fleet PR by an earlier version of the updater is
+disabled (`--disable-auto`) as the first action for that repository in
+`--merge-ready`, before anything else can return or fail, and the reason ends
+with `existing auto-merge disabled`. A disable that fails, or an auto-merge
+state that cannot be read, makes the result `failed` and nothing else is
+evaluated. A write run disables it on the existing PR whether or not it pushed
+a new head.
 
 ### `--merge-ready`
 
@@ -175,13 +180,57 @@ python scripts/update_copier_fleet.py --write --auto-merge --merge-ready --org q
 ```
 
 `--merge-ready` requires `--write --auto-merge` and is rejected with
-`--dry-run` and `--template-ref`. Copier does not run and nothing
-is pushed: for each repository it takes the open PR from the automation
-branch, checks that the template source is trusted and that the module
-versions satisfy the same rules as above, and merges it by the direct path
-when it is ready. `rollout_copier_fleet.py` accepts `--auto-merge` (forwarded
-to every stage) and passes `--merge-ready` straight to the updater without the
-pilot gate.
+`--dry-run` and `--template-ref`. Nothing is pushed: it resolves the latest
+release tag, and for each repository it takes the open PR from the automation
+branch, checks that the template source is trusted, that the module versions
+satisfy the same rules as above and that the PR targets exactly that release
+(`target vX is not the latest release vY` otherwise; the next write run
+refreshes it), verifies that the PR head is the updater's own commit, and
+then merges it when it is ready.
+`rollout_copier_fleet.py` accepts `--auto-merge` (forwarded to every stage)
+and passes `--merge-ready` straight to the updater without the pilot gate.
+
+The head is the updater's own commit only when both hold:
+
+1. **Shape.** The write path clones the default branch tip and pushes the
+   update as exactly one commit on it. So the head must be exactly one
+   single-parent commit ahead of its merge base with the default branch, and
+   that parent must be the merge base (GitHub compare `<default>...<head>`:
+   ahead 1). The default branch may have moved on since (behind N is
+   allowed). The empty-legacy-answers drop is a second commit, but merge-ready
+   already skips any repository whose default branch still has
+   `.copier-answers.yml`, so no other shape is accepted.
+2. **Content.** The head tree equals a fresh render of the target release on
+   that parent: merge-ready clones the default branch, fetches and checks out
+   the parent commit when the branch has moved, runs the same render as the
+   write path (`ci-kit update` plus the project-owned toolkit reference bump),
+   and compares `git write-tree` with the head's tree. This costs one shallow
+   clone and one render per open update PR, after the cheaper checks pass;
+   the clone and fetch time out after 5 minutes and the render after the
+   `ci-kit update` limit, and either is a skip.
+
+Whether a verified update still applies to a moved default branch is decided
+by the existing gates: GitHub's mergeability (`CONFLICTING` is skipped) and the
+checks on the PR head. Squash-merging it applies only the updater's own diff
+against its parent, the same merge GitHub would perform for a maintainer.
+
+The commit author is shown in the reason but never trusted, because anyone who
+can push to the branch can set it. Otherwise the PR is `skipped`:
+
+- `head not produced by updater: …`: extra commits, a parent that is not the
+  merge base, or a tree that differs from the render (for example an added
+  file).
+- `could not compare the head with <default>: …` or
+  `could not render <tag> to verify the head: …`: the check could not run,
+  including when the parent cannot be checked out; merge-ready fails closed and
+  never merges an unverified head.
+
+A head that changes while it is checked is not merged either: the merge is
+bound to the verified commit with `--match-head-commit`.
+
+Do not push fixes onto the automation branch. A maintainer who does so (for
+example to resolve a conflict) now owns that PR: the fleet stops merging it,
+and the maintainer reviews and merges it by hand.
 
 ### Daily schedule
 
@@ -195,13 +244,14 @@ To run the merge pass by hand, dispatch the workflow with `merge-ready: true`
 and `dry-run: true`. The first step then stays a read-only audit, and the
 second step merges whatever is ready.
 
-To stop one PR, close it, or disarm a native auto-merge with
-`gh pr merge <url> --disable-auto`. A repository is excluded from fleet runs
-with `--exclude`.
+To stop one PR, close it or push a commit of your own to its branch (the fleet
+then no longer merges it). A repository is excluded from fleet runs with
+`--exclude`.
 
 The JSON report adds `run.auto_merge` (`true`/`false`) and, for PRs evaluated
 with the flag or disarmed after a push, `repositories[].auto_merge` with
-`state` (`enabled`, `merged`, `waiting`, `skipped` or `failed`) and `reason`.
+`state` (`merged`, `waiting`, `skipped` or `failed`; `enabled` appears only in
+reports from older versions that armed auto-merge) and `reason`.
 These fields are additive and the schema version is unchanged. A `failed`
-state is an attention row but does not change the exit code; `enabled`,
-`merged` and `waiting` are counted in the context line; `skipped` stays quiet.
+state is an attention row but does not change the exit code; `merged` and
+`waiting` are counted in the context line; `skipped` stays quiet.
