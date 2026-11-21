@@ -2,29 +2,48 @@
 
 ## [4.3.7](https://github.com/quokkify/ci-kit/compare/v4.3.6...v4.3.7) (2026-11-21)
 
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 8 fixed · 11 internal
 
-### 🐛 Bug Fixes
+### 🐛 Fixed
 
-* **core:** let template updates push workflow changes via a secret ([#601](https://github.com/quokkify/ci-kit/issues/601)) ([eb9df4c](https://github.com/quokkify/ci-kit/commit/eb9df4c6ab7ee8766db248392ca3164f4bb73091))
-* **fleet:** merge only verified template PRs, never via auto-merge ([#604](https://github.com/quokkify/ci-kit/issues/604)) ([916788d](https://github.com/quokkify/ci-kit/commit/916788d0e8212d73dfbcdb7b5e4ff5688c2bc168))
-* **fleet:** merge template PRs held back by a replaced cancelled check ([#599](https://github.com/quokkify/ci-kit/issues/599)) ([ebd2ad4](https://github.com/quokkify/ci-kit/commit/ebd2ad46e319da078734af22fc2d3b01e928d14c))
-* **gradle-retry:** ride out Maven Central throttling ([#597](https://github.com/quokkify/ci-kit/issues/597)) ([5bfbc47](https://github.com/quokkify/ci-kit/commit/5bfbc47f9dfa33eef141f31307e2c5bc6c5eaacf))
-* **release:** publish legacy Release notes PR sections ([#600](https://github.com/quokkify/ci-kit/issues/600)) ([9118c2a](https://github.com/quokkify/ci-kit/commit/9118c2a960e5b9c4063d04783c397199035c771c))
-* **security:** keep scanning languages a PR's base branch declares ([#602](https://github.com/quokkify/ci-kit/issues/602)) ([3849222](https://github.com/quokkify/ci-kit/commit/38492224b89baee17ed4a330582cbdc0efc97fc1))
-* **security:** lock fleet installs and narrow release token permissions ([#603](https://github.com/quokkify/ci-kit/issues/603)) ([0fe9434](https://github.com/quokkify/ci-kit/commit/0fe9434eea048a63d9f92a3af1f48658b9206e6a))
-* **validate:** keep pull request modules out of Validate's plan job ([#608](https://github.com/quokkify/ci-kit/issues/608)) ([1c89f5a](https://github.com/quokkify/ci-kit/commit/1c89f5a8e274fe672f9a69898c678e7900366404))
+- **core:** let template updates push workflow changes via a secret — The `Update project template` workflow can now push updates that change workflow files: set a `TEMPLATE_UPDATE_TOKEN` repository secret. Without it, such an update stops before the push with `CIK-CORE-031`, naming the files and the fix, instead of GitHub's push rejection. ([#601](https://github.com/quokkify/ci-kit/pull/601))
 
+  > **Migration**
+  >
+  > Only repositories that run `Update project template` themselves (private repositories; public ones are also served by the fleet automation) need to act:
+  >
+  > 1. Create a fine-grained personal access token with an expiry date, for that one repository only, with `Contents: Read and write` and `Workflows: Read and write`. (A GitHub App installation token expires after an hour and cannot be stored as a secret.)
+  > 2. Store it as the repository secret `TEMPLATE_UPDATE_TOKEN` (`gh secret set TEMPLATE_UPDATE_TOKEN --repo <owner>/<repo>`).
+  > 3. The current consumer workflow cannot push its own update, so take this release once by hand (`ci-kit update --repo . --to <release>`, then open the PR) or rerun the workflow after adding the secret once this version is installed.
+  >
+  > Repositories that skip this keep working; updates that change workflow files fail with `CIK-CORE-031` and a pointer to these steps.
+- **fleet:** merge only verified template PRs, never via auto-merge — The daily fleet merge pass now merges a template-update PR only when its head is exactly the commit the updater produced, and merges it itself instead of arming GitHub auto-merge. PRs whose branch carries other commits or files are skipped; maintainers merge those by hand. ([#604](https://github.com/quokkify/ci-kit/pull/604))
+- **fleet:** merge template PRs held back by a replaced cancelled check — The daily fleet merge pass no longer skips a template-update PR because of a check run that was cancelled and then replaced by a newer, successful run. Such PRs were reported as having failed CI and were never merged. ([#599](https://github.com/quokkify/ci-kit/pull/599))
+- **gradle-retry:** ride out Maven Central throttling — `gradle-retry` now rides out Maven Central throttling. `--refresh-dependencies` is used on only one retry, and a `Could not find` from Central or the Plugin Portal is retried with backoff. Defaults change to 4 attempts with a 20 s initial delay, about 4.5–6 minutes of waiting. ([#597](https://github.com/quokkify/ci-kit/pull/597))
+- **release:** publish legacy Release notes PR sections — A PR section titled `## Release notes` (the heading of pre-v4.3.0 pull request templates) is now published in the release notes instead of being dropped silently. ([#600](https://github.com/quokkify/ci-kit/pull/600))
+- **security:** keep scanning languages a PR's base branch declares — On pull requests, CodeQL now also analyzes the languages whose modules the base branch declares, so removing a module's Copier answers file in a pull request no longer removes that language from analysis. If the base commit cannot be read, the CodeQL plan job fails. ([#602](https://github.com/quokkify/ci-kit/pull/602))
+- **security:** lock fleet installs and narrow release token permissions — The reusable Release Please workflow now gives each job only the token permissions it uses and no longer leaves the job token in the checkout's Git config. Callers keep granting `contents: write` and `pull-requests: write`; nothing changes for them. ([#603](https://github.com/quokkify/ci-kit/pull/603))
+- **validate:** keep pull request modules out of Validate's plan job — Validate's `plan` job now installs and runs ci-kit with Python's isolated mode outside the pull request checkout, so modules committed to a pull request can no longer change which components Validate runs or what `ci / gate` requires. ([#608](https://github.com/quokkify/ci-kit/pull/608))
 
-### 📦 Dependencies
+<details><summary>Internal changes (11 PRs)</summary>
 
-* **allure-report-action:** update quokkify/allure-report-action to v0.5.5 ([#613](https://github.com/quokkify/ci-kit/issues/613)) ([9acd08e](https://github.com/quokkify/ci-kit/commit/9acd08e9d2c9b587598cac07b740ffe18c0b76e0))
-* **gh-pages-subdir-action:** update quokkify/gh-pages-subdir-action to v0.1.3 ([#614](https://github.com/quokkify/ci-kit/issues/614)) ([eb4931e](https://github.com/quokkify/ci-kit/commit/eb4931ed67f5bca569d1c2849bbaff44956a9204))
-* **github-actions:** update github actions non-major updates ([#615](https://github.com/quokkify/ci-kit/issues/615)) ([9eb0c39](https://github.com/quokkify/ci-kit/commit/9eb0c39e46746fdbb8b9c63c271789cc2c98cced))
-* **github-actions:** update github/codeql-action digest to 1bd86f2 ([#610](https://github.com/quokkify/ci-kit/issues/610)) ([71072d9](https://github.com/quokkify/ci-kit/commit/71072d9c468154c02a6a0150b99160db882ed685))
-* **pyyaml:** update pyyaml to v6.0.4 ([#611](https://github.com/quokkify/ci-kit/issues/611)) ([ad8cac5](https://github.com/quokkify/ci-kit/commit/ad8cac5169a1552031af32b0954564aaa80cd619))
-* **renovate:** update renovate to v44.255.1 ([#593](https://github.com/quokkify/ci-kit/issues/593)) ([dccefbd](https://github.com/quokkify/ci-kit/commit/dccefbd57af1814a123b561bd61986aa43cd9f86))
-* **renovate:** update renovate to v44.255.2 ([#607](https://github.com/quokkify/ci-kit/issues/607)) ([37e5046](https://github.com/quokkify/ci-kit/commit/37e5046362f3d67cd975b612236dfbf3028e26cc))
-* **renovate:** update renovate to v44.256.1 ([#609](https://github.com/quokkify/ci-kit/issues/609)) ([bf5d76d](https://github.com/quokkify/ci-kit/commit/bf5d76d6c5b1550c074029e21fe80c7621035ea2))
+**Dependencies**
+
+- github/codeql-action 33d7b85 → 1bd86f2 ([#610](https://github.com/quokkify/ci-kit/pull/610))
+- pyyaml 6.0.3 → 6.0.4 ([#611](https://github.com/quokkify/ci-kit/pull/611))
+- quokkify/allure-report-action v0.5.4 → v0.5.5 ([#613](https://github.com/quokkify/ci-kit/pull/613))
+- quokkify/compose-health-check-action v2.4.0 → v2.4.1 ([#615](https://github.com/quokkify/ci-kit/pull/615))
+- quokkify/gh-pages-subdir-action v0.1.2 → v0.1.3 ([#614](https://github.com/quokkify/ci-kit/pull/614), [#615](https://github.com/quokkify/ci-kit/pull/615))
+- renovate 44.252.8 → 44.256.1 ([#593](https://github.com/quokkify/ci-kit/pull/593), [#607](https://github.com/quokkify/ci-kit/pull/607), [#609](https://github.com/quokkify/ci-kit/pull/609))
+
+**Maintenance**
+
+- **renovate:** adopt the supply-chain hardening and stack grouping presets ([#612](https://github.com/quokkify/ci-kit/pull/612))
+- **suites:** stop unit tests failing when Git repacks a fixture mid-clone ([#598](https://github.com/quokkify/ci-kit/pull/598))
+- update quokkify/ci-kit to v4.3.6 ([#592](https://github.com/quokkify/ci-kit/pull/592))
+
+</details>
 
 ## [4.3.6](https://github.com/quokkify/ci-kit/compare/v4.3.5...v4.3.6) (2026-11-19)
 
