@@ -1689,8 +1689,10 @@ def head_provenance(
 
     The write path clones the default branch tip, renders the update and pushes it as exactly one
     commit on that tip; the legacy-answers drop is a second commit, but merge-ready already skips
-    any repository that still has the legacy answers file. So only that one shape is accepted, and
-    the head tree must equal a fresh render of the same release on the same base. The commit author
+    any repository that still has the legacy answers file. So only that one shape is accepted: one
+    commit whose only parent is its merge base with the default branch, which may have moved on
+    since. The head tree must equal a fresh render of the same release on that parent; whether the
+    update still merges onto the moved branch is left to the mergeability gate. The commit author
     is reported, never trusted: anyone who can push to the branch can set it.
     """
     base = repository.default_branch
@@ -1702,8 +1704,6 @@ def head_provenance(
     ahead, behind = (comparison.get("ahead_by"), comparison.get("behind_by")) if isinstance(comparison, dict) else (None, None)
     if not isinstance(commits, list) or not isinstance(ahead, int) or not isinstance(behind, int):
         return f"could not compare the head with {base}: comparison is unreadable"
-    if behind:
-        return f"{base} moved {behind} commits since the update was pushed; the next write run refreshes the branch"
     head = commits[-1] if commits and isinstance(commits[-1], dict) else {}
     author = ((head.get("commit") or {}).get("author") or {}).get("name")
     by = f" (commit author: {sanitize_text(author)})" if isinstance(author, str) and author else ""
@@ -1719,7 +1719,11 @@ def head_provenance(
         try:
             clone_repository(repository, destination, env=env)
             if git_head(destination) != base_sha:
-                return f"{base} moved while the head was verified; the next pass retries"
+                # The default branch moved since the update was pushed: render on the update's own parent.
+                run([*authenticated_git(), "fetch", "-q", "--depth=1", "origin", base_sha], cwd=destination, env=env)
+                run(["git", "checkout", "-q", "--detach", "FETCH_HEAD"], cwd=destination)
+                if git_head(destination) != base_sha:
+                    raise FleetUpdateError(f"checked out {git_head(destination)} instead of {base_sha}")
             render_update(destination, template_ref, template_repository=normalize_template_source(expected_template) or expected_template, env=env)
             run(["git", "add", "--all"], cwd=destination)
             rendered_tree = run(["git", "write-tree"], cwd=destination).stdout.strip()

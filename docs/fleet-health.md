@@ -187,31 +187,38 @@ The head is the updater's own commit only when both hold:
 
 1. **Shape.** The write path clones the default branch tip and pushes the
    update as exactly one commit on it. So the head must be exactly one
-   single-parent commit whose parent is the current default branch tip (GitHub
-   compare `<default>...<head>`: ahead 1, behind 0). The empty-legacy-answers
-   drop is a second commit, but merge-ready already skips any repository
-   whose default branch still has `.copier-answers.yml`, so no other shape is
-   accepted.
+   single-parent commit ahead of its merge base with the default branch, and
+   that parent must be the merge base (GitHub compare `<default>...<head>`:
+   ahead 1). The default branch may have moved on since (behind N is
+   allowed). The empty-legacy-answers drop is a second commit, but merge-ready
+   already skips any repository whose default branch still has
+   `.copier-answers.yml`, so no other shape is accepted.
 2. **Content.** The head tree equals a fresh render of the target release on
-   that same tip: merge-ready clones the default branch, runs the same render
-   as the write path (`ci-kit update` plus the project-owned toolkit reference
-   bump), and compares `git write-tree` with the head's tree. This costs one
-   shallow clone and one render per open update PR, after the cheaper checks
-   pass.
+   that parent: merge-ready clones the default branch, fetches and checks out
+   the parent commit when the branch has moved, runs the same render as the
+   write path (`ci-kit update` plus the project-owned toolkit reference bump),
+   and compares `git write-tree` with the head's tree. This costs one shallow
+   clone and one render per open update PR, after the cheaper checks pass.
+
+Whether a verified update still applies to a moved default branch is decided
+by the existing gates: GitHub's mergeability (`CONFLICTING` is skipped) and the
+checks on the PR head. Squash-merging it applies only the updater's own diff
+against its parent, the same merge GitHub would perform for a maintainer.
 
 The commit author is shown in the reason but never trusted, because anyone who
 can push to the branch can set it. Otherwise the PR is `skipped`, and auto-merge
 armed on it is disabled:
 
-- `head not produced by updater: …` — extra commits, a different parent, or a
-  tree that differs from the render (for example an added file).
-- `<default> moved N commits since the update was pushed; …` — the base moved
-  after the write run pushed; the next write run (Monday) refreshes the branch,
-  and a later pass merges it. `… moved while the head was verified` is the same
-  race during the check.
+- `head not produced by updater: …`: extra commits, a parent that is not the
+  merge base, or a tree that differs from the render (for example an added
+  file).
 - `could not compare the head with <default>: …` or
-  `could not render <tag> to verify the head: …` — the check could not run;
-  merge-ready fails closed and never merges an unverified head.
+  `could not render <tag> to verify the head: …`: the check could not run,
+  including when the parent cannot be checked out; merge-ready fails closed and
+  never merges an unverified head.
+
+A head that changes while it is checked is not merged either: the merge is
+bound to the verified commit with `--match-head-commit`.
 
 Do not push fixes onto the automation branch. A maintainer who does so (for
 example to resolve a conflict) now owns that PR: the fleet stops merging it,
