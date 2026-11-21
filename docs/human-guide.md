@@ -118,7 +118,7 @@ Create a separate template repository only when the new project type has a genui
 
 ## 4. Roll out the template across existing organization repositories
 
-Existing managed repositories are updated by the fleet automation: `scripts/update_copier_fleet.py` runs `ci-kit update` for every public consumer and opens one reviewable pull request per repository, and `scripts/rollout_copier_fleet.py` gates a full rollout on its pilot repositories. See [usage](usage.md#applying-updates). Neither pushes to `main` or merges automatically unless `--auto-merge` is requested.
+Existing managed repositories are updated by the fleet automation: `scripts/update_copier_fleet.py` runs `ci-kit update` for every public consumer and opens one reviewable pull request per repository, and `scripts/rollout_copier_fleet.py` gates a full rollout on its pilot repositories. See [usage](usage.md#applying-updates). Neither pushes to `main` or merges automatically unless `--auto-merge` is requested; even then the fleet merges verified, green PRs itself and never arms GitHub auto-merge.
 
 A repository that has no ci-kit answers yet is adopted by hand with section 1.
 
