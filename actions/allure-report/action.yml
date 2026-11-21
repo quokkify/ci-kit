@@ -128,7 +128,7 @@ runs:
   using: composite
   steps:
     - name: Run standalone Allure report action
-      uses: quokkify/allure-report-action@6315a0127c701e87a16fbf0d3f93aff240f87d75 # v0.5.4
+      uses: quokkify/allure-report-action@fa9b64795cd865dab4e9e68d96379f2f9abf8164 # v0.5.5
       with:
         github-token: ${{ inputs.github-token }}
         results-directory: ${{ inputs.results-directory }}
