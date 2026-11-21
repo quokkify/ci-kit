@@ -36,11 +36,16 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
+      # From here on Python runs isolated (-I) and outside the checkout, so
+      # modules in the pull request (a root pip/, json.py, yaml.py) are never
+      # imported in place of the interpreter's or the toolkit's own.
       - name: Install ci-kit
-        run: python -m pip install ./.toolkit
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install "$GITHUB_WORKSPACE/.toolkit"
       - name: Plan modules
         id: plan
-        run: ci-kit plan --repo . --github-output "$GITHUB_OUTPUT"
+        working-directory: ${{ runner.temp }}
+        run: ci-kit plan --repo "$GITHUB_WORKSPACE" --github-output "$GITHUB_OUTPUT"
 
   core-checks:
     needs: plan
@@ -198,7 +203,8 @@ jobs:
         with:
           python-version: "3.15"
       - name: Install ci-kit
-        run: python -m pip install ./.toolkit
+        working-directory: ${{ runner.temp }}
+        run: python -I -m pip install "$GITHUB_WORKSPACE/.toolkit"
       - name: Fetch job results
         env:
           GH_TOKEN: ${{ github.token }}
