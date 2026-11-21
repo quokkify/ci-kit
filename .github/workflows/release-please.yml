@@ -211,8 +211,9 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # The enrichment script is repository code: it gets no Git credential in .git/config.
-      # `gh pr checkout` authenticates its own fetch, and only the push below gets one.
+      # No credential is persisted in .git/config. The enrichment script still runs with
+      # GH_TOKEN (this job's contents and pull-requests write token) for the GitHub API and
+      # `gh pr checkout`; only the push below gets a Git credential helper.
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

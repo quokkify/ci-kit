@@ -215,9 +215,10 @@ FLEET_LOCKS = {
     "requirements/fleet-build.lock": "requirements/fleet-build.in",
     "requirements/fleet.lock": "requirements/fleet.in",
 }
-FLEET_INSTALL_COMMAND = (
-    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock"
-    " && python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock"
+FLEET_INSTALL_RUN = (
+    "set -euo pipefail\n"
+    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock\n"
+    "python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock\n"
 )
 
 
@@ -236,7 +237,10 @@ def fleet_lock_errors(python_version: str) -> list[str]:
             f"--python-version={python_version} --output-file={lock} {source}"
         )
         if not header or header.group(1) != expected:
-            errors.append(f"{lock}: header must record exactly `{expected}` so Renovate can regenerate it")
+            errors.append(
+                f"{lock}: header must record exactly `{expected}` so Renovate can regenerate it; "
+                "after a Python bump, rerun that command"
+            )
         requirement: str | None = None
         hashed: set[str] = set()
         names: list[str] = []
@@ -295,12 +299,12 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
             step
             for step in steps
             if isinstance(step, dict)
-            and step.get("name") == "Set up Python and Copier"
+            and step.get("name") == "Set up Python"
             and step.get("uses") == "./actions/setup-python"
         ),
         None,
     )
-    require(setup_step is not None, "missing Set up Python and Copier step")
+    require(setup_step is not None, "missing Set up Python step")
     if not isinstance(setup_step, dict):
         return errors
 
@@ -309,11 +313,27 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
     if not isinstance(with_block, dict):
         return errors
 
-    install_command = with_block.get("install-command")
     require(
-        install_command == FLEET_INSTALL_COMMAND,
-        f"install-command must install only the hash-locked fleet requirements ({FLEET_INSTALL_COMMAND}); "
-        "the following steps hold FLEET_UPDATE_TOKEN",
+        with_block.get("install-dependencies") == "false"
+        and with_block.get("cache-dependencies") == "false"
+        and "install-command" not in with_block,
+        "setup step must set install-dependencies and cache-dependencies to \"false\": "
+        "the wrapper's bootstrap installs pip without a hash",
+    )
+    install_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Install hash-locked fleet requirements"
+        ),
+        None,
+    )
+    require(
+        isinstance(install_step, dict)
+        and install_step.get("run") == FLEET_INSTALL_RUN
+        and steps.index(setup_step) < steps.index(install_step),
+        "an `Install hash-locked fleet requirements` step after setup must run exactly "
+        f"{FLEET_INSTALL_RUN!r}; the following steps hold FLEET_UPDATE_TOKEN",
     )
     errors.extend(fleet_lock_errors(str(with_block.get("python-version", ""))))
 

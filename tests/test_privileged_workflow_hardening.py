@@ -27,10 +27,10 @@ FLEET_LOCKS = {
     "requirements/fleet-build.lock": "requirements/fleet-build.in",
     "requirements/fleet.lock": "requirements/fleet.in",
 }
-FLEET_INSTALL_COMMAND = (
-    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock"
-    " && python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock"
-)
+FLEET_INSTALL_COMMANDS = [
+    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock",
+    "python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock",
+]
 # Options Renovate's pip-compile manager can re-run from a uv header; anything else makes it skip the lock.
 RENOVATE_UV_OPTIONS = {"--universal", "--generate-hashes", "--python-version", "--output-file"}
 CHECKOUT = "actions/checkout@"
@@ -82,16 +82,37 @@ class FleetLockedInstallTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.workflow = load(FLEET_WORKFLOW)
-        self.setup = step_named(self.workflow["jobs"]["update"], "Set up Python and Copier")
+        self.setup = step_named(self.workflow["jobs"]["update"], "Set up Python")
+        self.install = step_named(self.workflow["jobs"]["update"], "Install hash-locked fleet requirements")
 
     def test_fleet_installs_only_from_hash_locked_requirements(self) -> None:
-        command = self.setup["with"]["install-command"]
-        self.assertEqual(command, FLEET_INSTALL_COMMAND)
-        for part in command.split(" && "):
-            self.assertIn("--require-hashes", part)
-            self.assertIn("--no-deps", part)
-        self.assertNotRegex(command, r"[A-Za-z0-9_.-]+==")
-        self.assertNotRegex(FLEET_WORKFLOW.read_text(encoding="utf-8"), r"(?i)\b(?:pyyaml|copier|jsonschema)==")
+        commands = [line.strip() for line in self.install["run"].splitlines() if line.strip().startswith("python ")]
+        self.assertEqual(commands, FLEET_INSTALL_COMMANDS)
+        self.assertNotRegex(self.install["run"], r"[A-Za-z0-9_.-]+==")
+        self.assertNotRegex(FLEET_WORKFLOW.read_text(encoding="utf-8"), r"(?i)\b(?:pyyaml|copier|jsonschema|pip)==")
+
+    def test_setup_python_wrapper_installs_nothing_unhashed(self) -> None:
+        """The wrapper's bootstrap runs `pip install pip==X` without a hash; the fleet job must skip it."""
+        self.assertEqual(self.setup["uses"], "./actions/setup-python")
+        self.assertEqual(self.setup["with"].get("install-dependencies"), "false")
+        self.assertEqual(self.setup["with"].get("cache-dependencies"), "false")
+        self.assertNotIn("install-command", self.setup["with"])
+        action = load(ROOT / "actions/setup-python/action.yml")
+        for step in action["runs"]["steps"]:
+            if "pip install" in str(step.get("run", "")):
+                with self.subTest(step=step["name"]):
+                    # Both inputs are "false" above, so a step gated only on them cannot run.
+                    gates = set(re.findall(r"inputs\.([a-z-]+) == 'true'", step["if"]))
+                    self.assertTrue(gates)
+                    self.assertLessEqual(gates, {"install-dependencies", "cache-dependencies"})
+                    self.assertNotRegex(step["if"], r"&&|!|false")
+
+    def test_pip_itself_comes_from_the_hash_lock_first(self) -> None:
+        build = locked_requirements((ROOT / "requirements/fleet-build.lock").read_text(encoding="utf-8"))
+        self.assertTrue(any(name.startswith("pip==") for name in build))
+        steps = self.workflow["jobs"]["update"]["steps"]
+        self.assertLess(steps.index(self.setup), steps.index(self.install))
+        self.assertLess(steps.index(self.install), steps.index(step_named(self.workflow["jobs"]["update"], "Update Copier fleet")))
 
     def test_every_locked_requirement_is_exact_and_hashed(self) -> None:
         for lock in FLEET_LOCKS:
@@ -145,16 +166,26 @@ class FleetLockedInstallTests(unittest.TestCase):
             self.assertTrue(any(regex(item).search(name) for item in group["matchPackageNames"]), name)
         self.assertTrue(group.get("groupName"))
 
-    def test_python_runtime_bumps_move_the_lock_target_too(self) -> None:
+    def test_only_pip_compile_owns_the_lock_files(self) -> None:
+        """A regex edit of a lock header would not regenerate the lock; pip-compile must own them alone."""
         config = json.loads(RENOVATE_CONFIG.read_text(encoding="utf-8"))
-        manager = next(item for item in config["customManagers"] if item.get("depNameTemplate") == "python")
-        patterns = [regex(item) for item in manager["managerFilePatterns"]]
-        matchers = [re.compile(item.replace("(?<", "(?P<")) for item in manager["matchStrings"]]
-        for lock in FLEET_LOCKS:
-            with self.subTest(lock=lock):
-                self.assertTrue(any(pattern.search(lock) for pattern in patterns))
-                text = (ROOT / lock).read_text(encoding="utf-8")
-                self.assertTrue(any(matcher.search(text) for matcher in matchers))
+        for manager in config["customManagers"]:
+            patterns = [regex(item) for item in manager["managerFilePatterns"]]
+            for lock in FLEET_LOCKS:
+                with self.subTest(manager=manager["description"], lock=lock):
+                    self.assertFalse(any(pattern.search(lock) for pattern in patterns))
+
+    def test_fleet_updates_never_automerge_and_wait_a_week(self) -> None:
+        config = json.loads(RENOVATE_CONFIG.read_text(encoding="utf-8"))
+        rules = config["packageRules"]
+        rule = next(item for item in rules if item.get("matchFileNames") == ["requirements/fleet*"])
+        self.assertEqual(set(rule) - {"description"}, {"matchFileNames", "automerge", "minimumReleaseAge"})
+        self.assertIs(rule["automerge"], False)
+        self.assertEqual(rule["minimumReleaseAge"], "7 days")
+        # Later rules win: nothing after this rule may turn automerge back on.
+        for later in rules[rules.index(rule) + 1 :]:
+            self.assertNotIn("automerge", later)
+            self.assertNotIn("minimumReleaseAge", later)
 
 
 class ReleaseFleetSecretTests(unittest.TestCase):
