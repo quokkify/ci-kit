@@ -88,7 +88,10 @@ def release_fleet_follow_up_errors(job: object, rel: Path) -> list[str]:
         job.get("with") == {"template-ref": "${{ needs.release.outputs.tag-name }}"},
         "must pass exactly the tag Release Please created as template-ref",
     )
-    require(job.get("secrets") == "inherit", "must inherit secrets for the write-mode token")
+    require(
+        job.get("secrets") == {"FLEET_UPDATE_TOKEN": "${{ secrets.FLEET_UPDATE_TOKEN }}"},
+        "must pass only FLEET_UPDATE_TOKEN, never secrets: inherit",
+    )
     return errors
 
 
@@ -208,6 +211,57 @@ def _version_tuple(value: str) -> tuple[int, int, int] | None:
     return (major, minor, patch)
 
 
+FLEET_LOCKS = {
+    "requirements/fleet-build.lock": "requirements/fleet-build.in",
+    "requirements/fleet.lock": "requirements/fleet.in",
+}
+FLEET_INSTALL_RUN = (
+    "set -euo pipefail\n"
+    "python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock\n"
+    "python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock\n"
+)
+
+
+def fleet_lock_errors(python_version: str) -> list[str]:
+    """Require each fleet lock to be fully hashed and regenerable by Renovate's pip-compile manager."""
+    errors: list[str] = []
+    for lock, source in FLEET_LOCKS.items():
+        try:
+            text = (ROOT / lock).read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"{lock}: cannot read the fleet lock: {exc}")
+            continue
+        header = re.match(r"(?:#.*\n)*?#    (uv pip compile .*)\n", text)
+        expected = (
+            "uv pip compile --universal --generate-hashes "
+            f"--python-version={python_version} --output-file={lock} {source}"
+        )
+        if not header or header.group(1) != expected:
+            errors.append(
+                f"{lock}: header must record exactly `{expected}` so Renovate can regenerate it; "
+                "after a Python bump, rerun that command"
+            )
+        requirement: str | None = None
+        hashed: set[str] = set()
+        names: list[str] = []
+        for line in text.splitlines():
+            if not line or line.lstrip().startswith("#"):
+                continue
+            if not line.startswith(" "):
+                requirement = line.split(" ", 1)[0]
+                names.append(requirement)
+                if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*==[^=\s]+", requirement):
+                    errors.append(f"{lock}: {requirement!r} is not an exact name==version pin")
+            elif requirement and line.strip().startswith("--hash=sha256:"):
+                hashed.add(requirement)
+        if not names:
+            errors.append(f"{lock}: lock has no requirements")
+        for name in names:
+            if name not in hashed:
+                errors.append(f"{lock}: {name} has no --hash")
+    return errors
+
+
 def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[str]:
     """Validate a Copier fleet workflow and its pin."""
 
@@ -245,12 +299,12 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
             step
             for step in steps
             if isinstance(step, dict)
-            and step.get("name") == "Set up Python and Copier"
+            and step.get("name") == "Set up Python"
             and step.get("uses") == "./actions/setup-python"
         ),
         None,
     )
-    require(setup_step is not None, "missing Set up Python and Copier step")
+    require(setup_step is not None, "missing Set up Python step")
     if not isinstance(setup_step, dict):
         return errors
 
@@ -259,20 +313,39 @@ def copier_fleet_workflow_errors(path: Path, job_name: str = "audit") -> list[st
     if not isinstance(with_block, dict):
         return errors
 
-    install_command = with_block.get("install-command")
-    require(isinstance(install_command, str), "setup step must pin Copier via install-command")
-    if not isinstance(install_command, str):
-        return errors
+    require(
+        with_block.get("install-dependencies") == "false"
+        and with_block.get("cache-dependencies") == "false"
+        and "install-command" not in with_block,
+        "setup step must set install-dependencies and cache-dependencies to \"false\": "
+        "the wrapper's bootstrap installs pip without a hash",
+    )
+    install_step = next(
+        (
+            step
+            for step in steps
+            if isinstance(step, dict) and step.get("name") == "Install hash-locked fleet requirements"
+        ),
+        None,
+    )
+    require(
+        isinstance(install_step, dict)
+        and install_step.get("run") == FLEET_INSTALL_RUN
+        and steps.index(setup_step) < steps.index(install_step),
+        "an `Install hash-locked fleet requirements` step after setup must run exactly "
+        f"{FLEET_INSTALL_RUN!r}; the following steps hold FLEET_UPDATE_TOKEN",
+    )
+    errors.extend(fleet_lock_errors(str(with_block.get("python-version", ""))))
 
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    expected_pins = " ".join(project["project"]["dependencies"])
+    fleet_in = (ROOT / "requirements/fleet.in").read_text().split()
     require(
-        install_command == f"python -m pip install {expected_pins}",
-        "install-command must pin exactly the ci_kit runtime dependencies from pyproject.toml "
-        f"(python -m pip install {expected_pins}); the fleet imports ci_kit",
+        sorted(fleet_in) == sorted(project["project"]["dependencies"]),
+        "requirements/fleet.in must pin exactly the ci_kit runtime dependencies from pyproject.toml; "
+        "the fleet imports ci_kit",
     )
-    match = re.search(r"(?:^|\s)copier==(\d+\.\d+\.\d+)(?:\s|$)", install_command)
-    require(bool(match), "install-command must pin copier==X.Y.Z")
+    match = re.search(r"(?:^|\s)copier==(\d+\.\d+\.\d+)(?:\s|$)", " ".join(fleet_in))
+    require(bool(match), "requirements/fleet.in must pin copier==X.Y.Z")
     if not match:
         return errors
 
@@ -315,6 +388,16 @@ def copier_fleet_auto_update_workflow_errors(path: Path) -> list[str]:
     require(
         permissions == {"contents": "read"},
         f"top-level permissions must be exactly contents: read, found {permissions!r}",
+    )
+    triggers = workflow.get("on", workflow.get(True))
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    call_secrets = call.get("secrets") if isinstance(call, dict) else None
+    require(
+        isinstance(call_secrets, dict)
+        and set(call_secrets) == {"FLEET_UPDATE_TOKEN"}
+        and isinstance(call_secrets["FLEET_UPDATE_TOKEN"], dict)
+        and call_secrets["FLEET_UPDATE_TOKEN"].get("required") is False,
+        "workflow_call must declare only the optional FLEET_UPDATE_TOKEN secret, so callers never inherit all secrets",
     )
     require(
         workflow.get("concurrency")
@@ -1486,9 +1569,28 @@ call = docker[on_key]["workflow_call"]
 check(call["inputs"]["push"]["default"] is False, "Docker push default must be false")
 release = yaml.safe_load((ROOT / ".github/workflows/release-please.yml").read_text())
 check(
-    release.get("permissions") == {"contents": "write", "pull-requests": "write"},
-    "Release workflow permissions must be exactly contents:write and pull-requests:write",
+    release.get("permissions") == {"contents": "read"},
+    "Reusable Release Please default permissions must be exactly contents:read; jobs declare their own",
 )
+RELEASE_PLEASE_JOB_PERMISSIONS = {
+    "validate": {"contents": "read"},
+    "single": {"contents": "write", "pull-requests": "write"},
+    "manifest": {"contents": "write", "pull-requests": "write"},
+    "sync-component-releases": {"contents": "write"},
+    "enrich": {"contents": "write", "pull-requests": "write"},
+}
+for job_name, job in (release.get("jobs") or {}).items():
+    check(
+        job.get("permissions") == RELEASE_PLEASE_JOB_PERMISSIONS.get(job_name),
+        f"Reusable Release Please job {job_name} must declare exactly "
+        f"{RELEASE_PLEASE_JOB_PERMISSIONS.get(job_name)!r} permissions",
+    )
+    for step in job.get("steps") or []:
+        if str(step.get("uses", "")).startswith("actions/checkout@"):
+            check(
+                (step.get("with") or {}).get("persist-credentials") is False,
+                f"Reusable Release Please job {job_name} must not persist checkout credentials",
+            )
 release_manifest = json.loads((ROOT / ".github/release-please/manifest.json").read_text())
 check(
     not release_manifest_errors(release_manifest),

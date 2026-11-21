@@ -25,6 +25,10 @@ on:
         type: boolean
         required: false
         default: false
+    secrets:
+      FLEET_UPDATE_TOKEN:
+        description: Write-mode credential installed on public quokkify repositories only; dry runs do not need it.
+        required: false
   workflow_dispatch:
     inputs:
       repository:
@@ -69,13 +73,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Python and Copier
+      # Both inputs off: the wrapper's package-manager bootstrap would install pip without a hash.
+      - name: Set up Python
         uses: ./actions/setup-python
         with:
           python-version: "3.15"
-          package-manager: pip
+          install-dependencies: "false"
           cache-dependencies: "false"
-          install-command: python -m pip install PyYAML==6.0.3 jsonschema==4.26.0 copier==9.19.1
+
+      # The next steps hold FLEET_UPDATE_TOKEN, so everything installed here is hash-locked: pip itself,
+      # the tools that build PyYAML's sdist (no wheel for this Python yet), then the runtime packages.
+      # Trust anchor: the pip bundled with the Python that the pinned actions/setup-python installs
+      # performs the first hashed install, which replaces it with the locked pip.
+      - name: Install hash-locked fleet requirements
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --no-deps --only-binary=:all: -r requirements/fleet-build.lock
+          python -m pip install --require-hashes --no-deps --no-build-isolation -r requirements/fleet.lock
 
       - name: Update Copier fleet
         id: update
