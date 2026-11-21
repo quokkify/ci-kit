@@ -1753,65 +1753,79 @@ def merge_ready_repository(
     if not isinstance(url, str) or not isinstance(head_oid, str) or not COMMIT_SHA_PATTERN.fullmatch(head_oid):
         raise FleetUpdateError("open pull request has no usable URL or head commit")
 
-    def skipped(reason: str) -> Result:
-        state = "skipped"
+    if "autoMergeRequest" not in pull:
+        return Result(name, "pull-request", url, auto_merge={"state": "failed", "reason": "auto-merge state of the pull request is unreadable"})
+    disarmed = False
+    if pull["autoMergeRequest"]:
+        # Auto-merge armed by an earlier run would merge whatever is pushed next, so it goes first:
+        # no later return or exception can leave it armed.
         number = pull_request_number(repository, url)
-        if pull.get("autoMergeRequest") and number is not None:
-            # Auto-merge armed by an earlier run would still merge whatever is pushed next.
-            error = disable_auto_merge(repository, number, env=env)
-            if error is None:
-                reason += "; existing auto-merge disabled"
-            else:
-                state, reason = "failed", f"{reason}; could not disable existing auto-merge: {error}"
-        return Result(name, "pull-request", url, auto_merge={"state": state, "reason": reason})
+        error = disable_auto_merge(repository, number, env=env) if number else "pull request URL does not belong to the repository"
+        if error is not None:
+            return Result(name, "pull-request", url, auto_merge={"state": "failed", "reason": f"could not disable existing auto-merge: {error}"})
+        disarmed = True
 
-    try:
-        base = answers_at(repository, repository.default_branch, env=env)
-        head = answers_at(repository, head_oid, env=env)
-    except UnsafeAnswersFileError as exc:
-        return Result(name, "unsafe-answers-file", str(exc))
-    differ = sorted(set(base) ^ set(head))
-    if differ:
-        return skipped(f"answers files differ: {', '.join(differ)}")
-    if ANSWERS_FILE in base:
-        return skipped(f"legacy {ANSWERS_FILE} is present")
-    if not base:
-        return skipped("no answers files")
-    for file in sorted(base):
-        if (
-            not trusted_answers_source(file, base[file], expected_template)
-            or not trusted_answers_source(file, head[file], expected_template)
-            or base[file].get("_src_path") != head[file].get("_src_path")
-        ):
-            return skipped(f"untrusted template source in {file}")
-    modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base)
-    primary = answers_file_name("core" if "core" in modules else modules[0])
-    target = answers_commit(head[primary])
-    rows: list[dict[str, str]] = []
-    for module in modules:
-        file = answers_file_name(module)
-        if file == primary:
-            continue
-        head_commit = answers_commit(head[file])
-        if head_commit != target:
-            return skipped(f"module {module} head {head_commit} does not match target {target}")
-        rows.append({"module": module, "from": answers_commit(base[file]) or ""})
-    if target != target_ref:
-        # The head chooses its answers; only the release this run resolved may be rendered and merged.
-        return skipped(f"target {target} is not the latest release {target_ref}")
-    merge = enable_auto_merge(
-        repository,
-        url,
-        branch=branch,
-        head=head_oid,
-        applied=answers_commit(base[primary]) or "",
-        target=target,
-        requested_template_ref=None,
-        env=env,
-        modules=rows,
-        verify_head=lambda sha: head_provenance(repository, sha, target_ref, expected_template=expected_template, env=env),
-    )
-    return Result(name, "pull-request", url, auto_merge=merge)
+    def skipped(reason: str) -> Result:
+        return Result(name, "pull-request", url, auto_merge={"state": "skipped", "reason": reason})
+
+    def evaluate() -> Result:
+        try:
+            base = answers_at(repository, repository.default_branch, env=env)
+            head = answers_at(repository, head_oid, env=env)
+        except UnsafeAnswersFileError as exc:
+            return Result(name, "unsafe-answers-file", str(exc))
+        differ = sorted(set(base) ^ set(head))
+        if differ:
+            return skipped(f"answers files differ: {', '.join(differ)}")
+        if ANSWERS_FILE in base:
+            return skipped(f"legacy {ANSWERS_FILE} is present")
+        if not base:
+            return skipped("no answers files")
+        for file in sorted(base):
+            if (
+                not trusted_answers_source(file, base[file], expected_template)
+                or not trusted_answers_source(file, head[file], expected_template)
+                or base[file].get("_src_path") != head[file].get("_src_path")
+            ):
+                return skipped(f"untrusted template source in {file}")
+        modules = sorted(ANSWERS_RE.fullmatch(file)[1] for file in base)
+        primary = answers_file_name("core" if "core" in modules else modules[0])
+        target = answers_commit(head[primary])
+        rows: list[dict[str, str]] = []
+        for module in modules:
+            file = answers_file_name(module)
+            if file == primary:
+                continue
+            head_commit = answers_commit(head[file])
+            if head_commit != target:
+                return skipped(f"module {module} head {head_commit} does not match target {target}")
+            rows.append({"module": module, "from": answers_commit(base[file]) or ""})
+        if target != target_ref:
+            # The head chooses its answers; only the release this run resolved may be rendered and merged.
+            return skipped(f"target {target} is not the latest release {target_ref}")
+        merge = enable_auto_merge(
+            repository,
+            url,
+            branch=branch,
+            head=head_oid,
+            applied=answers_commit(base[primary]) or "",
+            target=target,
+            requested_template_ref=None,
+            env=env,
+            modules=rows,
+            verify_head=lambda sha: head_provenance(repository, sha, target_ref, expected_template=expected_template, env=env),
+        )
+        return Result(name, "pull-request", url, auto_merge=merge)
+
+    result = evaluate()
+    if not disarmed:
+        return result
+    note = "existing auto-merge disabled"
+    if result.auto_merge is None:
+        return replace(result, auto_merge={"state": "skipped", "reason": note})
+    if note in result.auto_merge.get("reason", ""):
+        return result
+    return replace(result, auto_merge={**result.auto_merge, "reason": f"{result.auto_merge.get('reason', '')}; {note}"})
 
 
 def process_repository(
@@ -1914,17 +1928,18 @@ def process_repository(
             **({"modules": rows} if rows else {}),
             **({"auto_merge": True} if auto_merge else {}),
         )
-        if replaced:
-            # GitHub keeps auto-merge armed across pushes, so auto-merge armed by an earlier run must not survive a new head.
-            number = pull_request_number(repository, url)
-            error = None if number else "pull request URL does not belong to the repository"
-            try:
-                if number and gh_json(["pr", "view", number, "--repo", name, "--json", "autoMergeRequest"], env=env).get("autoMergeRequest"):
-                    error = disable_auto_merge(repository, number, env=env)
-            except Exception as exc:  # the PR exists; record instead of failing the repository
-                error = sanitize_text(str(exc) or type(exc).__name__)
-            if error:
-                return Result(name, "pull-request", url, inventory, auto_merge={"state": "failed", "reason": f"could not disable auto-merge after pushing a new head: {error}"})
+        # The fleet never arms auto-merge; one armed by an earlier run must not survive this run, with or
+        # without a new head (GitHub keeps it armed across pushes).
+        number = pull_request_number(repository, url)
+        error = None if number else "pull request URL does not belong to the repository"
+        try:
+            if number and gh_json(["pr", "view", number, "--repo", name, "--json", "autoMergeRequest"], env=env).get("autoMergeRequest"):
+                error = disable_auto_merge(repository, number, env=env)
+        except Exception as exc:  # the PR exists; record instead of failing the repository
+            error = sanitize_text(str(exc) or type(exc).__name__)
+        if error:
+            when = "after pushing a new head" if replaced else "on the existing pull request"
+            return Result(name, "pull-request", url, inventory, auto_merge={"state": "failed", "reason": f"could not disable auto-merge {when}: {error}"})
         if not auto_merge:
             return Result(name, "pull-request", url, inventory)
         merge = enable_auto_merge(

@@ -2275,20 +2275,28 @@ class AutoMergeTests(TestCase):
         return result, merge_mock, pr_mock, [call.args[0] for call in run_mock.call_args_list]
 
     def test_write_update_evaluates_the_pull_request_it_refreshed(self) -> None:
-        result, merge_mock, pr_mock, commands = self.write_update(auto_merge=True, requested_template_ref=None)
+        result, merge_mock, pr_mock, commands = self.write_update(auto_merge=True, requested_template_ref=None, armed=False)
         self.assertEqual(result.auto_merge, {"state": "enabled", "reason": "r"})
         self.assertTrue(pr_mock.call_args.kwargs["auto_merge"])
         self.assertEqual(merge_mock.call_args.args, (self.REPOSITORY, self.URL))
         self.assertEqual(merge_mock.call_args.kwargs, {"branch": fleet.DEFAULT_BRANCH, "head": self.HEAD, "applied": "v3.2.0",
                                                        "target": "v3.3.0", "requested_template_ref": None, "env": {}, "modules": []})
-        self.assertEqual((commands, self.reads), ([], []))
+        self.assertEqual(commands, [])
+        self.assertEqual(self.reads, [["pr", "view", "7", "--repo", "quokkify/example", "--json", "autoMergeRequest"]])
 
     def test_write_update_without_the_flag_never_enables_auto_merge(self) -> None:
-        result, merge_mock, pr_mock, commands = self.write_update()
+        result, merge_mock, pr_mock, commands = self.write_update(armed=False)
         self.assertIsNone(result.auto_merge)
         merge_mock.assert_not_called()
         self.assertNotIn("auto_merge", pr_mock.call_args.kwargs)
         self.assertEqual(commands, [])
+
+    def test_existing_armed_pull_request_is_disarmed_even_without_a_new_head(self) -> None:
+        # Regression guard: auto-merge armed by an earlier run never survives a write run, pushed or not.
+        result, merge_mock, _, commands = self.write_update()
+        self.assertEqual(commands, [self.DISABLE])
+        self.assertIsNone(result.auto_merge)
+        merge_mock.assert_not_called()
 
     def test_new_head_on_an_existing_pull_request_disarms_auto_merge_even_without_the_flag(self) -> None:
         result, merge_mock, _, commands = self.write_update(replace_head=True)
@@ -2548,7 +2556,7 @@ class MergeReadyTests(TestCase):
         return {file: {"_commit": commit, "_src_path": sources.get(file, self.TRUSTED)} for file, commit in versions.items()}
 
     def merge_ready(self, *, pulls=None, base=None, head=None, base_sources=None, head_sources=None, target_ref="v3.3.0"):
-        pulls = [{"url": self.URL, "headRefOid": self.HEAD}] if pulls is None else pulls
+        pulls = [{"url": self.URL, "headRefOid": self.HEAD, "autoMergeRequest": None}] if pulls is None else pulls
         parsed = {
             "main": self.answers(self.BASE if base is None else base, base_sources),
             self.HEAD: self.answers(self.UPDATED if head is None else head, head_sources),
@@ -2609,7 +2617,7 @@ class MergeReadyTests(TestCase):
 
         def fake_gh_json(arguments, **_):
             if arguments[:2] == ["pr", "list"]:
-                return [{"url": self.URL, "headRefOid": self.HEAD}]
+                return [{"url": self.URL, "headRefOid": self.HEAD, "autoMergeRequest": None}]
             if arguments[:2] == ["pr", "view"]:
                 return pull
             return {"allow_auto_merge": True, "allow_squash_merge": True}
@@ -2646,7 +2654,7 @@ class MergeReadyTests(TestCase):
 
         def fake_gh_json(arguments, **_):
             if arguments[:2] == ["pr", "list"]:
-                return [{"url": self.URL, "headRefOid": self.HEAD}]
+                return [{"url": self.URL, "headRefOid": self.HEAD, "autoMergeRequest": None}]
             if arguments[:2] == ["pr", "view"]:
                 return pull
             if arguments[0] == "api" and "/compare/" in arguments[1]:
@@ -2777,6 +2785,49 @@ class MergeReadyTests(TestCase):
         result = self.merge_ready(target_ref="v3.4.0")
         self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "target v3.3.0 is not the latest release v3.4.0"})
         self.merge_mock.assert_not_called()
+
+    ARMED_PULL = [{"url": "https://github.com/quokkify/example/pull/7", "headRefOid": "c" * 40, "autoMergeRequest": {"mergeMethod": "SQUASH"}}]
+    DISABLE = ["gh", "pr", "merge", "7", "--repo", "quokkify/example", "--disable-auto"]
+
+    def test_armed_pull_request_with_an_unsafe_answers_file_is_disarmed(self) -> None:
+        # Regression guard: an early return for an unsafe answers file must not leave auto-merge armed.
+        with mock.patch.object(fleet, "gh_json", return_value=self.ARMED_PULL), \
+             mock.patch.object(fleet, "answers_at", side_effect=fleet.UnsafeAnswersFileError(".copier-answers.core.yml")), \
+             mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run_mock:
+            result = fleet.merge_ready_repository(
+                self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY, target_ref="v3.3.0",
+            )
+        self.assertEqual(result.status, "unsafe-answers-file")
+        self.assertEqual(result.auto_merge, {"state": "skipped", "reason": "existing auto-merge disabled"})
+        self.assertEqual([call.args[0] for call in run_mock.call_args_list], [self.DISABLE])
+
+    def test_armed_pull_request_is_disarmed_before_an_unexpected_error_surfaces(self) -> None:
+        # Regression guard: disarming is the first action, so no later exception can leave auto-merge armed.
+        with mock.patch.object(fleet, "gh_json", return_value=self.ARMED_PULL), \
+             mock.patch.object(fleet, "answers_at", side_effect=fleet.FleetUpdateError("HTTP 502")), \
+             mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as run_mock, \
+             self.assertRaisesRegex(fleet.FleetUpdateError, "HTTP 502"):
+            fleet.merge_ready_repository(
+                self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY, target_ref="v3.3.0",
+            )
+        self.assertEqual([call.args[0] for call in run_mock.call_args_list], [self.DISABLE])
+
+    def test_failed_disarm_or_unreadable_auto_merge_state_is_failed_without_evaluation(self) -> None:
+        # Regression guard: when auto-merge cannot be confirmed off, nothing else runs and the result is failed.
+        unreadable = [{"url": self.URL, "headRefOid": self.HEAD}]
+        for pulls, disable, reason in ((self.ARMED_PULL, (1, "HTTP 403"), "could not disable existing auto-merge: HTTP 403"),
+                                       (unreadable, (0, ""), "auto-merge state of the pull request is unreadable")):
+            with self.subTest(reason=reason), \
+                 mock.patch.object(fleet, "gh_json", return_value=pulls), \
+                 mock.patch.object(fleet, "answers_at") as answers_mock, \
+                 mock.patch.object(fleet, "enable_auto_merge") as merge_mock, \
+                 mock.patch.object(fleet, "run", return_value=subprocess.CompletedProcess([], disable[0], "", disable[1])):
+                result = fleet.merge_ready_repository(
+                    self.REPOSITORY, branch=fleet.DEFAULT_BRANCH, env={}, expected_template=fleet.DEFAULT_TEMPLATE_REPOSITORY, target_ref="v3.3.0",
+                )
+            self.assertEqual((result.status, result.auto_merge), ("pull-request", {"state": "failed", "reason": reason}))
+            answers_mock.assert_not_called()
+            merge_mock.assert_not_called()
 
     def test_early_skip_disarms_auto_merge_armed_on_the_pull_request(self) -> None:
         # Regression guard: a skip before the merge evaluation still removes auto-merge armed by an earlier run.

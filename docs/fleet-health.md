@@ -166,10 +166,12 @@ the reason in `repositories[].auto_merge.reason`:
    head already shows the pushed commit (re-read up to three times).
 
 Auto-merge armed on a fleet PR by an earlier version of the updater is
-disabled (`--disable-auto`) before the PR is evaluated, and the reason ends with
-`existing auto-merge disabled`; a disable that fails makes the result
-`failed` and nothing is merged. The write path also disables it whenever it
-pushes a new head onto an existing PR.
+disabled (`--disable-auto`) as the first action for that repository in
+`--merge-ready`, before anything else can return or fail, and the reason ends
+with `existing auto-merge disabled`. A disable that fails, or an auto-merge
+state that cannot be read, makes the result `failed` and nothing else is
+evaluated. A write run disables it on the existing PR whether or not it pushed
+a new head.
 
 ### `--merge-ready`
 
