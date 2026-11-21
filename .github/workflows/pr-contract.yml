@@ -35,7 +35,7 @@ jobs:
           TITLE = re.compile(r"(?P<type>[a-z]+)\((?P<scope>[^()\s][^()]*)\)(?P<bang>!)?: (?P<subject>\S.*)")
           WAIVERS = {"release-notes: internal", "release-notes: title-only"}
           HEADINGS = {
-              "release note": "release note", "highlight": "release note", "usage example": "usage example",
+              "release note": "release note", "release notes": "release note", "highlight": "release note", "usage example": "usage example",
               "migration": "migration", "breaking change": "migration", "breaking changes": "migration",
           }
           FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
