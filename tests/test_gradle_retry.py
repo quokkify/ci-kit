@@ -7,20 +7,39 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "actions/gradle-retry/gradle-retry.sh"
+ACTION = ROOT / "actions/gradle-retry/action.yml"
 
 
 class GradleRetryTests(unittest.TestCase):
-    def run_case(self, mode: str, *, max_attempts: str = "3", persistent: bool = False, delay: str = "0") -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
+    def run_case(self, mode: str, *, max_attempts: str | None = "3", persistent: bool = False, delay: str | None = "0", runner_temp: Path | None = None) -> tuple[subprocess.CompletedProcess[str], int, list[Path]]:
+        """Run the script against a fake Gradle; ``None`` leaves an input unset so the script default applies.
+
+        A ``sleep`` shim on PATH records each requested delay in ``self.sleeps`` instead of waiting,
+        and ``self.calls_args`` holds the arguments of every fake Gradle invocation.
+        """
         with tempfile.TemporaryDirectory(prefix="gradle-retry-test-") as temporary:
             root = Path(temporary)
             fake = root / "fake-gradle"
             count = root / "count"
+            args_log = root / "args"
+            sleep_log = root / "sleeps"
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            sleep_shim = bin_dir / "sleep"
+            sleep_shim.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$1\" >> \"$SLEEP_FILE\"\n")
+            sleep_shim.chmod(sleep_shim.stat().st_mode | stat.S_IXUSR)
             fake.write_text(
                 "#!/usr/bin/env bash\n"
                 "n=0; [[ -f \"$COUNT_FILE\" ]] && n=$(<\"$COUNT_FILE\")\n"
                 "n=$((n + 1)); printf '%s' \"$n\" > \"$COUNT_FILE\"\n"
+                "printf '%s\\n' \"$*\" >> \"$ARGS_FILE\"\n"
+                "central_not_found() { echo '   > Could not find org.awaitility:awaitility:4.3.0.'; echo '     Searched in the following locations:'; echo '       - https://repo.maven.apache.org/maven2/org/awaitility/awaitility/4.3.0/awaitility-4.3.0.pom'; echo '     Required by:'; echo \"         project ':selenide'\"; }\n"
+                "portal_not_found() { echo '   > Could not find org.example:portal-plugin:1.0.'; echo '     Searched in the following locations:'; echo '       - https://plugins.gradle.org/m2/org/example/portal-plugin/1.0/portal-plugin-1.0.pom'; }\n"
+                "private_not_found() { echo '   > Could not find org.example:internal:1.0.'; echo '     Searched in the following locations:'; echo '       - https://maven.example.invalid/releases/org/example/internal/1.0/internal-1.0.pom'; }\n"
                 "plugin_unresolved() { echo \"Plugin [id: 'com.vanniktech.maven.publish', version: '0.37.0', apply: false] was not found in any of the following sources:\"; echo; echo \"- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)\"; echo '- Included Builds (No included builds contain this plugin)'; echo \"- Plugin Repositories (could not resolve plugin artifact 'com.vanniktech.maven.publish:com.vanniktech.maven.publish.gradle.plugin:0.37.0')\"; echo '  Searched in the following repositories:'; echo '    Gradle Central Plugin Repository'; }\n"
                 "case \"$MODE\" in\n"
                 "  ordinary) echo 'compilation failed'; exit 9;;\n"
@@ -38,25 +57,46 @@ class GradleRetryTests(unittest.TestCase):
                 "  plugin-unresolved) [[ $n -lt 2 ]] && { plugin_unresolved; exit 18; }; echo success; exit 0;;\n"
                 "  plugin-stacktrace) [[ $n -lt 2 ]] && { echo \"org.gradle.api.plugins.UnknownPluginException: Plugin [id: 'org.example.plugin', version: '1.0'] was not found in any of the following sources:\"; echo \"- Plugin Repositories (could not resolve plugin artifact 'org.example.plugin:org.example.plugin.gradle.plugin:1.0')\"; exit 22; }; echo success; exit 0;;\n"
                 "  persistent-plugin-unresolved) plugin_unresolved; exit $((30 + n));;\n"
-                "  not-found-then-plugin) if [[ $n -eq 1 ]]; then echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7; fi; [[ $n -eq 2 && \"$*\" == *--refresh-dependencies* ]] && { plugin_unresolved; exit 18; }; [[ \"$*\" == *--refresh-dependencies* ]] && { echo success; exit 0; }; exit 99;;\n"
+                "  not-found-then-plugin) if [[ $n -eq 1 ]]; then echo 'Could not find org.example:missing:1.0.'; echo 'Searched in the following locations:'; exit 7; fi; [[ $n -eq 2 && \"$*\" == *--refresh-dependencies* ]] && { plugin_unresolved; exit 18; }; [[ \"$*\" != *--refresh-dependencies* ]] && { echo success; exit 0; }; exit 99;;\n"
                 "  plugin-not-in-sources) echo \"Plugin [id: 'org.example.missing'] was not found in any of the following sources:\"; echo \"- Gradle Core Plugins (plugin is not in 'org.gradle' namespace)\"; echo '- Plugin Repositories (plugin dependency must include a version number for this source)'; exit 20;;\n"
                 "  detached-plugin-artifact) echo \"- Plugin Repositories (could not resolve plugin artifact 'org.example:org.example.gradle.plugin:1.0')\"; exit 21;;\n"
+                "  central-not-found) central_not_found; exit 7;;\n"
+                "  central-not-found-recovers) [[ $n -lt 3 ]] && { central_not_found; exit 7; }; echo success; exit 0;;\n"
+                "  central-not-found-refresh-plugin) [[ $n -eq 1 ]] && { central_not_found; exit 7; }; [[ \"$*\" == *--refresh-dependencies* ]] && { plugin_unresolved; exit 18; }; echo success; exit 0;;\n"
+                "  portal-not-found) [[ $n -lt 2 ]] && { portal_not_found; exit 7; }; echo success; exit 0;;\n"
+                "  private-not-found) private_not_found; exit 7;;\n"
+                "  central-url-without-not-found) echo 'compilation failed'; echo '       - https://repo.maven.apache.org/maven2/org/example/a/1.0/a-1.0.pom'; exit 9;;\n"
+                "  compile-error) echo \"/w/src/main/java/A.java:3: error: cannot find symbol\"; echo \"Execution failed for task ':compileJava'.\"; echo '> Compilation failed; see the compiler output below.'; exit 1;;\n"
+                "  test-failure) echo 'ATest > works() FAILED'; echo \"Execution failed for task ':test'.\"; echo '> There were failing tests. See the report at: file:///w/build/reports/tests/test/index.html'; exit 1;;\n"
+                "  test-failure-and-central-not-found) echo 'ATest > works() FAILED'; echo \"Execution failed for task ':test'.\"; echo '> There were failing tests. See the report at: file:///w/build/reports/tests/test/index.html'; central_not_found; exit 1;;\n"
+                "  compile-error-and-rate-limit) echo \"Execution failed for task ':compileJava'.\"; echo '> Compilation failed; see the compiler output below.'; echo \"            > Could not GET 'https://repo.maven.apache.org/maven2/org/example/a/1.0/a-1.0.pom'.\"; echo '               > Received status code 429 from server: Too Many Requests'; exit 1;;\n"
+                "  checkstyle-and-plugin-unresolved) echo \"Execution failed for task ':checkstyleMain'.\"; echo '> Checkstyle rule violations were found. See the report at: file:///w/build/reports/checkstyle/main.html'; plugin_unresolved; exit 1;;\n"
                 "  persistent-access-denied) echo \"Could not GET 'https://repo.example.invalid/missing'. Received status code 403 from server: Forbidden\"; exit 15;;\n"
                 "esac\n"
             )
             fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
             env = {
                 **os.environ,
+                "ARGS_FILE": str(args_log),
                 "COUNT_FILE": str(count),
                 "GRADLE_RETRY_COMMAND": f"{fake} --task test",
-                "GRADLE_RETRY_INITIAL_DELAY_SECONDS": delay,
-                "GRADLE_RETRY_MAX_ATTEMPTS": max_attempts,
                 "MODE": mode,
+                "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                "SLEEP_FILE": str(sleep_log),
             }
+            env["RUNNER_TEMP"] = str(runner_temp or root)
+            env.pop("GRADLE_RETRY_INITIAL_DELAY_SECONDS", None)
+            env.pop("GRADLE_RETRY_MAX_ATTEMPTS", None)
+            if delay is not None:
+                env["GRADLE_RETRY_INITIAL_DELAY_SECONDS"] = delay
+            if max_attempts is not None:
+                env["GRADLE_RETRY_MAX_ATTEMPTS"] = max_attempts
             if mode == "not-found" and persistent:
                 env["PERSISTENT"] = "1"
             result = subprocess.run(["bash", str(SCRIPT)], env=env, text=True, capture_output=True, check=False)
             leftovers = list(root.glob("gradle-retry.*"))
+            self.calls_args = args_log.read_text().splitlines() if args_log.exists() else []
+            self.sleeps = [int(value) for value in sleep_log.read_text().split()] if sleep_log.exists() else []
             return result, int(count.read_text()) if count.exists() else 0, leftovers
 
     def test_successful_run_does_not_refresh(self) -> None:
@@ -178,6 +218,7 @@ class GradleRetryTests(unittest.TestCase):
         result, calls, _ = self.run_case("not-found-then-plugin", max_attempts="2")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(calls, 3)
+        self.assertEqual([("--refresh-dependencies" in args) for args in self.calls_args], [False, True, False])
 
     def test_plugin_missing_without_artifact_resolution_is_not_retried(self) -> None:
         result, calls, _ = self.run_case("plugin-not-in-sources")
@@ -188,6 +229,114 @@ class GradleRetryTests(unittest.TestCase):
         result, calls, _ = self.run_case("detached-plugin-artifact")
         self.assertEqual(result.returncode, 21)
         self.assertEqual(calls, 1)
+
+    def test_refresh_dependencies_is_used_for_one_attempt_then_dropped(self) -> None:
+        """Regression guard (q4j #899): a sticky --refresh-dependencies re-fetched every plugin from a throttled Central on each retry."""
+        result, calls, _ = self.run_case("central-not-found-refresh-plugin", max_attempts="3")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 3)
+        self.assertEqual([("--refresh-dependencies" in args) for args in self.calls_args], [False, True, False])
+        self.assertEqual(self.calls_args[2], "--task test")
+
+    def test_persistent_central_not_found_refreshes_once_and_fails_with_gradle_error(self) -> None:
+        """Regression guard (q4j #902): Central throttling surfaces as "Could not find" for an artifact that exists."""
+        result, calls, _ = self.run_case("central-not-found", max_attempts="3")
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(calls, 3)
+        self.assertEqual([("--refresh-dependencies" in args) for args in self.calls_args], [False, True, False])
+        self.assertEqual(len(self.sleeps), 2)
+        self.assertIn("repository not-found", result.stdout)
+        self.assertIn("retry budget exhausted after 3/3 attempts", result.stdout)
+        final_attempt = result.stdout.split("(attempt 2/3)")[-1]
+        self.assertIn("Could not find org.awaitility:awaitility:4.3.0.", final_attempt)
+        self.assertIn("https://repo.maven.apache.org/maven2/org/awaitility/awaitility/4.3.0/awaitility-4.3.0.pom", final_attempt)
+
+    def test_central_not_found_recovers_on_later_attempt(self) -> None:
+        result, calls, _ = self.run_case("central-not-found-recovers", max_attempts="4")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 3)
+        self.assertEqual([("--refresh-dependencies" in args) for args in self.calls_args], [False, True, False])
+        self.assertEqual(len(self.sleeps), 2)
+
+    def test_plugin_portal_not_found_is_retried_with_backoff(self) -> None:
+        result, calls, _ = self.run_case("portal-not-found", max_attempts="2", delay="5")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls, 2)
+        self.assertEqual(len(self.sleeps), 1)
+        self.assertGreaterEqual(self.sleeps[0], 5)
+
+    def test_private_repository_not_found_keeps_single_immediate_refresh(self) -> None:
+        result, calls, _ = self.run_case("private-not-found", max_attempts="3", delay="5")
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(calls, 2)
+        self.assertEqual([("--refresh-dependencies" in args) for args in self.calls_args], [False, True])
+        self.assertEqual(self.sleeps, [])
+
+    def test_central_url_without_dependency_not_found_is_not_retried(self) -> None:
+        result, calls, _ = self.run_case("central-url-without-not-found")
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(calls, 1)
+
+    def test_build_failures_are_not_retried_with_default_budget(self) -> None:
+        for mode in ("compile-error", "test-failure"):
+            with self.subTest(mode=mode):
+                result, calls, _ = self.run_case(mode, max_attempts=None, delay=None)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(calls, 1)
+                self.assertEqual(self.sleeps, [])
+                self.assertNotIn("refresh-dependencies", result.stdout)
+
+    def test_genuine_task_failure_alongside_repository_failure_is_not_retried(self) -> None:
+        """With --continue, a real task failure next to a repository failure must not re-run the build and mask a flaky test."""
+        for mode in ("test-failure-and-central-not-found", "compile-error-and-rate-limit", "checkstyle-and-plugin-unresolved"):
+            with self.subTest(mode=mode):
+                result, calls, _ = self.run_case(mode, max_attempts=None, delay=None)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(calls, 1)
+                self.assertEqual(self.sleeps, [])
+                self.assertEqual(self.calls_args, ["--task test"])
+                self.assertIn("not retried", result.stdout)
+
+    def test_default_backoff_outlasts_a_four_minute_throttle_window(self) -> None:
+        """Regression guard (q4j #901): 429 windows lasted 3+ minutes, longer than the old 30s + 90s budget."""
+        result, calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None)
+        self.assertEqual(calls, 4)
+        self.assertEqual(result.returncode, 24)
+        self.assertEqual(len(self.sleeps), 3)
+        for sleep, base in zip(self.sleeps, (20, 60, 180)):
+            self.assertGreaterEqual(sleep, base)
+            self.assertLessEqual(sleep, base + base // 3)
+        self.assertGreaterEqual(sum(self.sleeps), 240)
+
+    def test_retry_steps_in_one_job_share_one_wait_budget(self) -> None:
+        """Lint, test and build retry steps share a job timeout, so their combined waits are capped at one step's schedule."""
+        with tempfile.TemporaryDirectory(prefix="gradle-retry-job-") as job_temp:
+            runner_temp = Path(job_temp)
+            first, first_calls, _ = self.run_case("rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            self.assertEqual(first_calls, 2)
+            first_sleep = sum(self.sleeps)
+            second, second_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(second_calls, 4)
+            self.assertEqual(second.returncode, 24)
+            self.assertLessEqual(first_sleep + sum(self.sleeps), 26 + 80 + 240)
+            third, third_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(third.returncode, 20 + third_calls)
+            self.assertIn("retry wait budget; not retrying", third.stdout)
+            self.assertIn("Received status code 429", third.stdout.split("::error::Gradle retry steps")[0])
+            self.assertEqual((runner_temp / "gradle-retry-waited-seconds").read_text(), "346")
+            fourth, fourth_calls, _ = self.run_case("persistent-rate-limit", max_attempts=None, delay=None, runner_temp=runner_temp)
+            self.assertEqual(fourth_calls, 1)
+            self.assertEqual(fourth.returncode, 21)
+            self.assertEqual(self.sleeps, [])
+
+    def test_action_defaults_match_script_defaults(self) -> None:
+        inputs = yaml.safe_load(ACTION.read_text())["inputs"]
+        self.assertEqual(inputs["max-attempts"]["default"], "4")
+        self.assertEqual(inputs["initial-delay-seconds"]["default"], "20")
+        script = SCRIPT.read_text()
+        self.assertIn('max_attempts="${GRADLE_RETRY_MAX_ATTEMPTS:-4}"', script)
+        self.assertIn('delay="${GRADLE_RETRY_INITIAL_DELAY_SECONDS:-20}"', script)
 
 
 if __name__ == "__main__":
