@@ -76,4 +76,5 @@ jobs:
     uses: ./.github/workflows/copier-fleet-auto-update.yml
     with:
       template-ref: ${{ needs.release.outputs.tag-name }}
-    secrets: inherit
+    secrets:
+      FLEET_UPDATE_TOKEN: ${{ secrets.FLEET_UPDATE_TOKEN }}

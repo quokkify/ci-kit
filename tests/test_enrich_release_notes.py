@@ -88,12 +88,28 @@ def render_sample(name: str) -> tuple[str, str, str]:
 class SectionTests(TestCase):
     def test_published_sections_and_aliases(self):
         sections = notes.extract_rich_sections(
-            "## Summary\nreview only\n## Release note\nYou can now X.\n## Release notes\nignored\n"
+            "## Summary\nreview only\n## Release note\nYou can now X.\n## Release notes\nAlso Z.\n"
             "## Breaking change\nRemove Y.\n## Usage example\n```yaml\na: 1\n```\n## Checklist\n- [ ] x\n"
         )
         self.assertEqual(
             sections,
-            {"release note": "You can now X.", "migration": "Remove Y.", "usage example": "```yaml\na: 1\n```"},
+            {"release note": "You can now X.\n\nAlso Z.", "migration": "Remove Y.", "usage example": "```yaml\na: 1\n```"},
+        )
+
+    def test_regression_legacy_plural_release_notes_heading_is_published(self):
+        # Regression guard for #567: PR templates from before v4.3.0 still ask for `## Release notes`.
+        self.assertEqual(
+            notes.extract_rich_sections("## Description\nreview only\n## Release notes\nYou can now X.\n"),
+            {"release note": "You can now X."},
+        )
+        self.assertEqual(
+            notes.extract_rich_sections("## Release notes\nLegacy.\n## Release note\nCurrent.\n"),
+            {"release note": "Legacy.\n\nCurrent."},
+        )
+        self.assertEqual(notes.extract_rich_sections("## Release notes\nfirst\n## Release notes\nduplicate\n"), {"release note": "first"})
+        self.assertEqual(
+            notes.extract_rich_sections("## Highlight\nBold.\n## Release notes\nPlural.\n"),
+            {"highlight": "Bold.", "release note": "Plural."},
         )
 
     def test_migration_and_breaking_change_headings_are_both_kept(self):

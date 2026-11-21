@@ -33,7 +33,11 @@ GitHub normally withholds repository secrets from workflows triggered by untrust
 Copier answers `gitleaks: true` (the safe default) and `codeql: true` generate the
 checksum-verified Gitleaks workflow and the SHA-pinned CodeQL workflow. Set either
 answer to `false` to omit that workflow; `codeql_languages` is an optional validated
-list, and otherwise languages are derived from `components`. Gitleaks publishes the
+list, and otherwise languages are derived from the installed language modules; on pull
+requests the base commit's modules are added, so deleting a module's files does not drop its
+language from analysis (see [CodeQL languages](usage.md#codeql-languages)). A pull request that
+edits `.github/workflows/codeql.yml` itself still runs its own version; review workflow changes
+as code. Gitleaks publishes the
 stable `gitleaks` check context. CodeQL's native code-scanning rule is preferred over
 requiring a matrix job name.
 
