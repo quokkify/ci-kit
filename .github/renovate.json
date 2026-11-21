@@ -2,7 +2,9 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>quokkify/ci-kit//renovate/default.json",
-    "github>quokkify/renovate-presets//presets/github-actions/default#v0.4.0"
+    "github>quokkify/renovate-presets//presets/github-actions/default#v0.4.0",
+    "github>quokkify/renovate-presets//presets/hardening/supply-chain#v0.6.0",
+    "github>quokkify/renovate-presets//presets/grouping/coupled-stacks#v0.6.0"
   ],
   "enabledManagers": ["github-actions", "custom.regex", "gradle", "gradle-wrapper", "pip-compile"],
   "semanticCommits": "enabled",
