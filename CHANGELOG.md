@@ -2,14 +2,24 @@
 
 ## [4.3.8](https://github.com/quokkify/ci-kit/compare/v4.3.7...v4.3.8) (2026-11-26)
 
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 6 internal
 
-### 📦 Dependencies
+<details><summary>Internal changes (6 PRs)</summary>
 
-* **github-actions:** update github/codeql-action digest to 915412f ([#620](https://github.com/quokkify/ci-kit/issues/620)) ([74385b5](https://github.com/quokkify/ci-kit/commit/74385b596367216a4cf319ef124e536e59ceb817))
-* **pip-compile:** refresh pip-compile outputs ([#618](https://github.com/quokkify/ci-kit/issues/618)) ([a54955c](https://github.com/quokkify/ci-kit/commit/a54955ccda1b4ced0ab58c17361a755d91993891))
-* **pip-compile:** update cython to v3.3.2 ([#621](https://github.com/quokkify/ci-kit/issues/621)) ([1883e08](https://github.com/quokkify/ci-kit/commit/1883e081aa7b5672cc2039d5b648f265b70c23ce))
-* **poetry:** update poetry to v2.5.2 ([#622](https://github.com/quokkify/ci-kit/issues/622)) ([5ad081f](https://github.com/quokkify/ci-kit/commit/5ad081fb2771f083bc2c6c97719b8aaafad4ec42))
-* **uv:** update uv to v0.13.10 ([#623](https://github.com/quokkify/ci-kit/issues/623)) ([481a41e](https://github.com/quokkify/ci-kit/commit/481a41e428f1e4f96ca1227f51be7ee06962d329))
+**Dependencies**
+
+- cython → v3.3.2 ([#621](https://github.com/quokkify/ci-kit/pull/621))
+- github/codeql-action 1bd86f2 → 915412f ([#620](https://github.com/quokkify/ci-kit/pull/620))
+- poetry 2.5.1 → 2.5.2 ([#622](https://github.com/quokkify/ci-kit/pull/622))
+- uv 0.13.9 → 0.13.10 ([#623](https://github.com/quokkify/ci-kit/pull/623))
+
+**Maintenance**
+
+- **pip-compile:** refresh pip-compile outputs ([#618](https://github.com/quokkify/ci-kit/pull/618))
+- update quokkify/ci-kit to v4.3.7 ([#616](https://github.com/quokkify/ci-kit/pull/616))
+
+</details>
 
 ## [4.3.7](https://github.com/quokkify/ci-kit/compare/v4.3.6...v4.3.7) (2026-11-21)
 
