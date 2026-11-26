@@ -25,7 +25,7 @@ inputs:
   poetry-version:
     description: Exact Poetry package version installed when Poetry is selected.
     required: false
-    default: "2.5.1"
+    default: "2.5.2"
   pip-version:
     description: Exact pip package version installed when pip is selected.
     required: false
