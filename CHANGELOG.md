@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.3.8](https://github.com/quokkify/ci-kit/compare/v4.3.7...v4.3.8) (2026-11-26)
+
+<!-- project-toolkit:release-notes v2 -->
+**At a glance:** 6 internal
+
+<details><summary>Internal changes (6 PRs)</summary>
+
+**Dependencies**
+
+- cython → v3.3.2 ([#621](https://github.com/quokkify/ci-kit/pull/621))
+- github/codeql-action 1bd86f2 → 915412f ([#620](https://github.com/quokkify/ci-kit/pull/620))
+- poetry 2.5.1 → 2.5.2 ([#622](https://github.com/quokkify/ci-kit/pull/622))
+- uv 0.13.9 → 0.13.10 ([#623](https://github.com/quokkify/ci-kit/pull/623))
+
+**Maintenance**
+
+- **pip-compile:** refresh pip-compile outputs ([#618](https://github.com/quokkify/ci-kit/pull/618))
+- update quokkify/ci-kit to v4.3.7 ([#616](https://github.com/quokkify/ci-kit/pull/616))
+
+</details>
+
 ## [4.3.7](https://github.com/quokkify/ci-kit/compare/v4.3.6...v4.3.7) (2026-11-21)
 
 <!-- project-toolkit:release-notes v2 -->
