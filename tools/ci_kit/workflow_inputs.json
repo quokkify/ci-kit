@@ -219,7 +219,7 @@
       "type": "string"
     },
     "poetry-version": {
-      "default": "2.5.1",
+      "default": "2.5.2",
       "type": "string"
     },
     "python-version": {

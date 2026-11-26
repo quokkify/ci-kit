@@ -22,7 +22,7 @@ on:
       poetry-version:
         description: Exact Poetry version used for dependency installation.
         type: string
-        default: "2.5.1"
+        default: "2.5.2"
       pip-version:
         description: Exact pip version used for pip-managed installs.
         type: string
